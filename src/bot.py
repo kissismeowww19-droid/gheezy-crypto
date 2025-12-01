@@ -7,6 +7,8 @@ Gheezy Crypto - Telegram Bot
 Заработай на крипто без потерь. Учимся, торгуем, растём вместе
 """
 
+from typing import Tuple
+
 from aiogram import Bot, Dispatcher, Router
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
@@ -388,7 +390,7 @@ async def cmd_alerts(message: Message) -> None:
 # ==================== СОЗДАНИЕ БОТА ====================
 
 
-def create_bot() -> tuple[Bot, Dispatcher]:
+def create_bot() -> Tuple[Bot, Dispatcher]:
     """
     Создание и настройка бота.
 

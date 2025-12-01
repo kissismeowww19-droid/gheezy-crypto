@@ -71,11 +71,12 @@ app = FastAPI(
 )
 
 # Настройка CORS
+# В production рекомендуется ограничить allow_origins конкретными доменами
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=["*"] if settings.debug else [],
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 

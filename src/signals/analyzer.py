@@ -6,7 +6,7 @@ AI-генерация торговых сигналов с объяснения�
 """
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import aiohttp
 import structlog
@@ -153,7 +153,7 @@ class SignalAnalyzer:
         rsi: Optional[RSI],
         macd: Optional[MACD],
         bb: Optional[BollingerBands],
-    ) -> tuple[str, float]:
+    ) -> Tuple[str, float]:
         """
         Расчёт итогового сигнала на основе индикаторов.
 
