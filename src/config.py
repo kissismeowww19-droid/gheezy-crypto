@@ -23,7 +23,7 @@ class Settings(BaseSettings):
 
     # Telegram Bot
     telegram_bot_token: str = Field(
-        ...,
+        default="",
         description="Токен Telegram бота от @BotFather",
     )
     telegram_admin_ids: List[int] = Field(
@@ -131,7 +131,7 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """
     Получение настроек приложения.
-    
+
     Кэшируется для повторного использования.
     """
     return Settings()

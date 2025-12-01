@@ -20,7 +20,7 @@ logger = structlog.get_logger()
 class TraderStats:
     """
     Статистика трейдера.
-    
+
     Attributes:
         total_trades: Общее количество сделок
         winning_trades: Количество прибыльных сделок
@@ -47,7 +47,7 @@ class TraderStats:
 class Trader:
     """
     Трейдер для копирования.
-    
+
     Attributes:
         trader_id: Уникальный ID трейдера
         name: Имя/никнейм трейдера
@@ -93,7 +93,7 @@ class Trader:
 class CopyTrade:
     """
     Скопированная сделка.
-    
+
     Attributes:
         trade_id: ID сделки
         trader_id: ID трейдера-источника
@@ -126,7 +126,7 @@ class CopyTrade:
 class CopyTradingSystem:
     """
     Система копи-трейдинга.
-    
+
     Позволяет пользователям копировать сделки успешных трейдеров
     и отслеживать их производительность.
     """
@@ -137,7 +137,7 @@ class CopyTradingSystem:
         self._traders: Dict[str, Trader] = {}
         self._user_subscriptions: Dict[int, List[str]] = {}
         self._active_trades: Dict[str, CopyTrade] = {}
-        
+
         # Инициализируем демо-трейдерами
         self._init_demo_traders()
 
@@ -236,11 +236,11 @@ class CopyTradingSystem:
     ) -> List[Trader]:
         """
         Получение топ трейдеров.
-        
+
         Args:
             sort_by: Сортировка (profit, win_rate, followers)
             limit: Максимальное количество
-        
+
         Returns:
             List[Trader]: Список трейдеров
         """
@@ -258,10 +258,10 @@ class CopyTradingSystem:
     async def get_trader(self, trader_id: str) -> Optional[Trader]:
         """
         Получение информации о трейдере.
-        
+
         Args:
             trader_id: ID трейдера
-        
+
         Returns:
             Trader: Информация о трейдере или None
         """
@@ -275,12 +275,12 @@ class CopyTradingSystem:
     ) -> bool:
         """
         Подписка на трейдера.
-        
+
         Args:
             user_id: ID пользователя
             trader_id: ID трейдера
             copy_amount: Сумма для копирования
-        
+
         Returns:
             bool: Успешность подписки
         """
@@ -318,11 +318,11 @@ class CopyTradingSystem:
     ) -> bool:
         """
         Отписка от трейдера.
-        
+
         Args:
             user_id: ID пользователя
             trader_id: ID трейдера
-        
+
         Returns:
             bool: Успешность отписки
         """
@@ -341,10 +341,10 @@ class CopyTradingSystem:
     async def get_user_subscriptions(self, user_id: int) -> List[Trader]:
         """
         Получение подписок пользователя.
-        
+
         Args:
             user_id: ID пользователя
-        
+
         Returns:
             List[Trader]: Список трейдеров
         """
@@ -362,7 +362,7 @@ class CopyTradingSystem:
     async def format_traders_message(self) -> str:
         """
         Форматирование сообщения с топ трейдерами для Telegram.
-        
+
         Returns:
             str: Форматированное сообщение
         """
@@ -373,10 +373,8 @@ class CopyTradingSystem:
 
         for i, trader in enumerate(traders, 1):
             verified = "✅" if trader.is_verified else ""
-            
-            message.append(
-                f"{i}. **{trader.name}** {verified} {trader.risk_emoji}"
-            )
+
+            message.append(f"{i}. **{trader.name}** {verified} {trader.risk_emoji}")
             message.append(f"   _{trader.description}_")
             message.append(
                 f"   📈 Прибыль: +{trader.stats.total_profit_percent:.1f}% | "
@@ -389,7 +387,9 @@ class CopyTradingSystem:
             message.append("")
 
         message.append("ℹ️ **Уровни риска:**")
-        message.append("🟢 Низкий | 🟡 Умеренный | 🟠 Средний | 🔴 Высокий | ⚫ Очень высокий")
+        message.append(
+            "🟢 Низкий | 🟡 Умеренный | 🟠 Средний | 🔴 Высокий | ⚫ Очень высокий"
+        )
         message.append(
             "\n⚠️ *Прошлые результаты не гарантируют будущей прибыли. "
             "Инвестируйте только то, что готовы потерять.*"
@@ -400,10 +400,10 @@ class CopyTradingSystem:
     async def format_trader_details(self, trader_id: str) -> str:
         """
         Форматирование детальной информации о трейдере.
-        
+
         Args:
             trader_id: ID трейдера
-        
+
         Returns:
             str: Форматированное сообщение
         """

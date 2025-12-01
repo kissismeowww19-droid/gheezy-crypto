@@ -36,12 +36,12 @@ async_session_factory = async_sessionmaker(
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     """
     Получение асинхронной сессии базы данных.
-    
+
     Используется как зависимость в FastAPI или вручную.
-    
+
     Yields:
         AsyncSession: Асинхронная сессия SQLAlchemy.
-    
+
     Example:
         async for session in get_session():
             result = await session.execute(select(User))
@@ -61,10 +61,10 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
 async def get_session_context() -> AsyncGenerator[AsyncSession, None]:
     """
     Контекстный менеджер для получения сессии.
-    
+
     Yields:
         AsyncSession: Асинхронная сессия SQLAlchemy.
-    
+
     Example:
         async with get_session_context() as session:
             result = await session.execute(select(User))
@@ -83,7 +83,7 @@ async def get_session_context() -> AsyncGenerator[AsyncSession, None]:
 async def init_db() -> None:
     """
     Инициализация базы данных.
-    
+
     Создаёт все таблицы, определённые в моделях.
     Вызывается при запуске приложения.
     """
@@ -96,7 +96,7 @@ async def init_db() -> None:
 async def close_db() -> None:
     """
     Закрытие подключения к базе данных.
-    
+
     Вызывается при остановке приложения.
     """
     await engine.dispose()

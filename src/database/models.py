@@ -54,7 +54,7 @@ class AlertType(str, Enum):
 class User(Base):
     """
     Модель пользователя.
-    
+
     Хранит информацию о пользователях Telegram бота.
     """
 
@@ -104,7 +104,7 @@ class User(Base):
 class Portfolio(Base):
     """
     Модель портфеля пользователя.
-    
+
     Хранит информацию о криптовалютных активах пользователя.
     """
 
@@ -145,7 +145,7 @@ class Portfolio(Base):
 class Trade(Base):
     """
     Модель торговой операции.
-    
+
     Хранит историю сделок пользователей.
     """
 
@@ -195,7 +195,7 @@ class Trade(Base):
 class Signal(Base):
     """
     Модель торгового сигнала.
-    
+
     Хранит AI-генерированные сигналы с объяснениями.
     """
 
@@ -223,7 +223,7 @@ class Signal(Base):
         Numeric(precision=20, scale=8),
         nullable=True,
     )
-    
+
     # Технические индикаторы
     rsi_value: Mapped[Optional[Decimal]] = mapped_column(
         Numeric(precision=5, scale=2),
@@ -234,10 +234,10 @@ class Signal(Base):
         nullable=True,
     )
     bb_position: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
-    
+
     # Объяснение сигнала
     explanation: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    
+
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -255,7 +255,7 @@ class Signal(Base):
 class WhaleTx(Base):
     """
     Модель транзакции кита.
-    
+
     Хранит информацию о крупных транзакциях.
     """
 
@@ -289,7 +289,7 @@ class WhaleTx(Base):
 class Alert(Base):
     """
     Модель уведомления пользователя.
-    
+
     Хранит настройки уведомлений для пользователей.
     """
 

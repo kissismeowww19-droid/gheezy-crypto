@@ -7,10 +7,10 @@ Gheezy Crypto - Telegram Bot
 Заработай на крипто без потерь. Учимся, торгуем, растём вместе
 """
 
-from aiogram import Bot, Dispatcher, Router, F
+from aiogram import Bot, Dispatcher, Router
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message
 from aiogram.client.default import DefaultBotProperties
 import aiohttp
 import structlog
@@ -65,7 +65,7 @@ def get_coingecko_id(symbol: str) -> str:
 async def cmd_start(message: Message) -> None:
     """
     Обработчик команды /start.
-    
+
     Приветствует пользователя и показывает главное меню.
     """
     welcome_text = f"""
@@ -106,7 +106,7 @@ _Заработай на крипто без потерь. Учимся, тор�
 async def cmd_help(message: Message) -> None:
     """
     Обработчик команды /help.
-    
+
     Показывает подробную справку по командам.
     """
     help_text = """
@@ -157,11 +157,11 @@ _Это не финансовый совет. Все решения об инв�
 async def cmd_price(message: Message) -> None:
     """
     Обработчик команды /price.
-    
+
     Показывает текущую цену криптовалюты.
     """
     args = message.text.split()
-    
+
     if len(args) < 2:
         await message.answer(
             "❌ Укажите символ криптовалюты\n"
@@ -244,7 +244,7 @@ async def cmd_price(message: Message) -> None:
 async def cmd_signal(message: Message) -> None:
     """
     Обработчик команды /signal.
-    
+
     Генерирует AI торговый сигнал с техническим анализом.
     """
     args = message.text.split()
@@ -279,7 +279,7 @@ async def cmd_signal(message: Message) -> None:
 async def cmd_defi(message: Message) -> None:
     """
     Обработчик команды /defi.
-    
+
     Показывает лучшие DeFi ставки.
     """
     loading_msg = await message.answer("⏳ Загружаю DeFi данные...")
@@ -300,7 +300,7 @@ async def cmd_defi(message: Message) -> None:
 async def cmd_whale(message: Message) -> None:
     """
     Обработчик команды /whale.
-    
+
     Показывает движения китов.
     """
     loading_msg = await message.answer("⏳ Отслеживаю китов...")
@@ -321,7 +321,7 @@ async def cmd_whale(message: Message) -> None:
 async def cmd_traders(message: Message) -> None:
     """
     Обработчик команды /traders.
-    
+
     Показывает топ трейдеров для копирования.
     """
     try:
@@ -340,7 +340,7 @@ async def cmd_traders(message: Message) -> None:
 async def cmd_portfolio(message: Message) -> None:
     """
     Обработчик команды /portfolio.
-    
+
     Показывает портфель пользователя (заглушка).
     """
     portfolio_text = """
@@ -366,7 +366,7 @@ async def cmd_portfolio(message: Message) -> None:
 async def cmd_alerts(message: Message) -> None:
     """
     Обработчик команды /alerts.
-    
+
     Настройка уведомлений (заглушка).
     """
     alerts_text = """
@@ -391,7 +391,7 @@ async def cmd_alerts(message: Message) -> None:
 def create_bot() -> tuple[Bot, Dispatcher]:
     """
     Создание и настройка бота.
-    
+
     Returns:
         tuple: (Bot, Dispatcher)
     """
@@ -405,7 +405,7 @@ def create_bot() -> tuple[Bot, Dispatcher]:
 
     # Создаём диспетчер
     dp = Dispatcher()
-    
+
     # Регистрируем роутер
     dp.include_router(router)
 
@@ -417,7 +417,7 @@ def create_bot() -> tuple[Bot, Dispatcher]:
 async def on_startup(bot: Bot) -> None:
     """Действия при запуске бота."""
     logger.info("Бот запущен")
-    
+
     # Можно отправить уведомление админам
     for admin_id in settings.telegram_admin_ids:
         try:
@@ -432,7 +432,7 @@ async def on_startup(bot: Bot) -> None:
 async def on_shutdown(bot: Bot) -> None:
     """Действия при остановке бота."""
     logger.info("Бот остановлен")
-    
+
     # Закрываем сессии
     await signal_analyzer.close()
     await defi_aggregator.close()

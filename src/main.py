@@ -30,7 +30,9 @@ structlog.configure(
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
         structlog.processors.UnicodeDecoder(),
-        structlog.dev.ConsoleRenderer() if settings.debug else structlog.processors.JSONRenderer(),
+        structlog.dev.ConsoleRenderer()
+        if settings.debug
+        else structlog.processors.JSONRenderer(),
     ],
     wrapper_class=structlog.stdlib.BoundLogger,
     context_class=dict,
@@ -46,15 +48,15 @@ async def lifespan(app: FastAPI):
     """Управление жизненным циклом приложения."""
     # Startup
     logger.info("Запуск приложения", app_name=settings.app_name)
-    
+
     try:
         await init_db()
         logger.info("База данных инициализирована")
     except Exception as e:
         logger.warning(f"Не удалось подключиться к БД: {e}")
-    
+
     yield
-    
+
     # Shutdown
     logger.info("Остановка приложения")
     await close_db()
@@ -98,12 +100,12 @@ async def health():
 async def get_price(symbol: str):
     """
     Получение цены криптовалюты.
-    
+
     Args:
         symbol: Символ криптовалюты (bitcoin, ethereum и т.д.)
     """
     from src.signals import SignalAnalyzer
-    
+
     analyzer = SignalAnalyzer()
     try:
         price = await analyzer.get_current_price(symbol)
@@ -118,12 +120,12 @@ async def get_price(symbol: str):
 async def get_signal(symbol: str):
     """
     Получение торгового сигнала.
-    
+
     Args:
         symbol: Символ криптовалюты
     """
     from src.signals import SignalAnalyzer
-    
+
     analyzer = SignalAnalyzer()
     try:
         signal = await analyzer.analyze(symbol)
@@ -145,13 +147,13 @@ async def get_signal(symbol: str):
 async def run_bot():
     """Запуск Telegram бота."""
     bot, dp = create_bot()
-    
+
     # Регистрируем хуки
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
-    
+
     logger.info("Запуск Telegram бота")
-    
+
     try:
         await dp.start_polling(bot)
     finally:
@@ -173,7 +175,7 @@ async def run_api():
 async def main():
     """
     Главная функция запуска.
-    
+
     Запускает одновременно Telegram бота и FastAPI сервер.
     """
     logger.info(
@@ -182,14 +184,17 @@ async def main():
         env=settings.app_env,
         debug=settings.debug,
     )
-    
+
     # Проверяем наличие токена бота
-    if not settings.telegram_bot_token or settings.telegram_bot_token == "your_bot_token_here":
+    if (
+        not settings.telegram_bot_token
+        or settings.telegram_bot_token == "your_bot_token_here"
+    ):
         logger.error("TELEGRAM_BOT_TOKEN не настроен!")
         logger.info("Запускаем только API сервер...")
         await run_api()
         return
-    
+
     # Запускаем бота и API параллельно
     try:
         await asyncio.gather(

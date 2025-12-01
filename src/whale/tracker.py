@@ -21,7 +21,7 @@ logger = structlog.get_logger()
 class WhaleTransaction:
     """
     Транзакция кита.
-    
+
     Attributes:
         tx_hash: Хэш транзакции
         blockchain: Название блокчейна
@@ -100,7 +100,7 @@ class WhaleTransaction:
 class WhaleTracker:
     """
     Трекер крупных транзакций китов.
-    
+
     Отслеживает большие переводы криптовалют
     и определяет их потенциальное влияние на рынок.
     """
@@ -138,10 +138,10 @@ class WhaleTracker:
     def _get_address_label(self, address: str) -> Optional[str]:
         """
         Получение метки для известного адреса.
-        
+
         Args:
             address: Адрес кошелька
-        
+
         Returns:
             str: Метка адреса или None
         """
@@ -154,11 +154,11 @@ class WhaleTracker:
     ) -> List[WhaleTransaction]:
         """
         Получение крупных ETH переводов через Etherscan.
-        
+
         Args:
             min_value_eth: Минимальное значение в ETH
             limit: Максимальное количество транзакций
-        
+
         Returns:
             List[WhaleTransaction]: Список транзакций
         """
@@ -189,7 +189,7 @@ class WhaleTracker:
                     return await self._get_demo_transactions()
 
                 data = await response.json()
-                
+
                 if data.get("status") != "1":
                     return await self._get_demo_transactions()
 
@@ -233,7 +233,7 @@ class WhaleTracker:
     async def _get_demo_transactions(self) -> List[WhaleTransaction]:
         """
         Получение демо-транзакций для отображения функционала.
-        
+
         Returns:
             List[WhaleTransaction]: Список демо-транзакций
         """
@@ -284,7 +284,7 @@ class WhaleTracker:
     async def analyze_whale_activity(self) -> dict:
         """
         Анализ активности китов.
-        
+
         Returns:
             dict: Статистика по активности китов
         """
@@ -305,7 +305,7 @@ class WhaleTracker:
     async def format_whale_message(self) -> str:
         """
         Форматирование сообщения о движениях китов для Telegram.
-        
+
         Returns:
             str: Форматированное сообщение
         """
@@ -325,7 +325,7 @@ class WhaleTracker:
         message.append(f"• Всего транзакций: {analysis['total_transactions']}")
         message.append(f"• Депозиты на биржи: {analysis['exchange_deposits']}")
         message.append(f"• Выводы с бирж: {analysis['exchange_withdrawals']}")
-        
+
         total_vol = analysis["total_volume_usd"]
         if total_vol >= 1_000_000:
             message.append(f"• Общий объём: ${total_vol / 1_000_000:.2f}M\n")

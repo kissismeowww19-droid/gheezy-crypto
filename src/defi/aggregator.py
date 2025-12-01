@@ -20,7 +20,7 @@ logger = structlog.get_logger()
 class DeFiPool:
     """
     Пул ликвидности DeFi.
-    
+
     Attributes:
         pool_id: Уникальный идентификатор пула
         chain: Блокчейн (Ethereum, BSC и т.д.)
@@ -64,7 +64,7 @@ class DeFiPool:
 class DeFiProtocol:
     """
     DeFi протокол.
-    
+
     Attributes:
         name: Название протокола
         symbol: Символ токена
@@ -98,7 +98,7 @@ class DeFiProtocol:
 class DeFiAggregator:
     """
     Агрегатор DeFi данных.
-    
+
     Собирает информацию о лучших APY ставках
     по различным DeFi протоколам через DefiLlama API.
     """
@@ -136,10 +136,10 @@ class DeFiAggregator:
     async def get_protocols(self, limit: int = 10) -> List[DeFiProtocol]:
         """
         Получение топ DeFi протоколов по TVL.
-        
+
         Args:
             limit: Максимальное количество протоколов
-        
+
         Returns:
             List[DeFiProtocol]: Список протоколов
         """
@@ -183,13 +183,13 @@ class DeFiAggregator:
     ) -> List[DeFiPool]:
         """
         Получение пулов с лучшими APY.
-        
+
         Args:
             min_tvl: Минимальный TVL (USD)
             min_apy: Минимальная APY (%)
             stablecoins_only: Только стейблкоин пулы
             limit: Максимальное количество пулов
-        
+
         Returns:
             List[DeFiPool]: Список пулов, отсортированных по APY
         """
@@ -245,10 +245,10 @@ class DeFiAggregator:
     async def get_best_stablecoin_yields(self, limit: int = 10) -> List[DeFiPool]:
         """
         Получение лучших ставок для стейблкоинов.
-        
+
         Args:
             limit: Максимальное количество пулов
-        
+
         Returns:
             List[DeFiPool]: Список пулов со стейблкоинами
         """
@@ -266,20 +266,18 @@ class DeFiAggregator:
     ) -> List[DeFiPool]:
         """
         Получение пулов конкретного протокола.
-        
+
         Args:
             protocol: Название протокола
             limit: Максимальное количество пулов
-        
+
         Returns:
             List[DeFiPool]: Список пулов протокола
         """
         all_pools = await self.get_pools(min_tvl=100_000, min_apy=0.1, limit=1000)
 
         protocol_pools = [
-            pool
-            for pool in all_pools
-            if pool.project.lower() == protocol.lower()
+            pool for pool in all_pools if pool.project.lower() == protocol.lower()
         ]
 
         return protocol_pools[:limit]
@@ -287,7 +285,7 @@ class DeFiAggregator:
     async def format_defi_message(self) -> str:
         """
         Форматирование сообщения с DeFi данными для Telegram.
-        
+
         Returns:
             str: Форматированное сообщение
         """
@@ -324,7 +322,7 @@ class DeFiAggregator:
     async def format_protocols_message(self) -> str:
         """
         Форматирование сообщения с топ протоколами.
-        
+
         Returns:
             str: Форматированное сообщение
         """
