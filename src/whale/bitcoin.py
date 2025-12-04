@@ -1,8 +1,8 @@
 """
 Gheezy Crypto - Bitcoin Whale Tracker
 
-Отслеживание крупных транзакций на Bitcoin через Blockchair API.
-Работает в России без VPN и без API ключа (30 запросов/мин).
+Отслеживание крупных транзакций на Bitcoin через mempool.space API.
+Работает в России без VPN и без API ключа.
 """
 
 from dataclasses import dataclass
@@ -17,8 +17,8 @@ from src.whale.known_wallets import get_bitcoin_wallet_label
 
 logger = structlog.get_logger()
 
-# Blockchair API URL (работает без ключа, 30 req/min)
-BLOCKCHAIR_API_URL = "https://api.blockchair.com/bitcoin"
+# Mempool.space API URL (free, no API key required)
+MEMPOOL_API_URL = "https://mempool.space/api"
 
 
 @dataclass
@@ -77,8 +77,8 @@ class BitcoinTracker:
     """
     Трекер крупных транзакций на Bitcoin.
 
-    Использует Blockchair API для мониторинга.
-    Работает без API ключа (лимит 30 запросов в минуту).
+    Использует mempool.space API для мониторинга.
+    Работает без API ключа.
     """
 
     def __init__(self):
@@ -120,7 +120,7 @@ class BitcoinTracker:
         limit: int = 20,
     ) -> list[BitcoinTransaction]:
         """
-        Получение крупных BTC транзакций через Blockchair.
+        Получение крупных BTC транзакций через mempool.space.
 
         Args:
             limit: Максимальное количество транзакций
@@ -132,15 +132,17 @@ class BitcoinTracker:
 
         min_value_btc = self.min_value_usd / self._btc_price
 
-        return await self._get_from_blockchair(min_value_btc, limit)
+        return await self._get_from_mempool(min_value_btc, limit)
 
-    async def _get_from_blockchair(
+    async def _get_from_mempool(
         self,
         min_value_btc: float,
         limit: int,
     ) -> list[BitcoinTransaction]:
         """
-        Получение транзакций через Blockchair API.
+        Получение транзакций через mempool.space API.
+
+        Получает последние блоки и анализирует их транзакции.
 
         Args:
             min_value_btc: Минимальная сумма в BTC
@@ -152,68 +154,93 @@ class BitcoinTracker:
         try:
             session = await self._get_session()
 
-            # Конвертируем BTC в сатоши для запроса
-            min_value_satoshi = int(min_value_btc * 100_000_000)
-
-            # Запрос крупных транзакций
-            url = f"{BLOCKCHAIR_API_URL}/transactions"
-            params = {
-                "q": f"output_total(>{min_value_satoshi})",
-                "s": "time(desc)",
-                "limit": limit * 2,  # Запрашиваем больше на случай фильтрации
-            }
+            # Получаем последние блоки для анализа подтверждённых транзакций
+            blocks_url = f"{MEMPOOL_API_URL}/blocks"
 
             async with session.get(
-                url, params=params, timeout=aiohttp.ClientTimeout(total=20)
+                blocks_url, timeout=aiohttp.ClientTimeout(total=20)
             ) as response:
                 if response.status != 200:
-                    logger.error(f"Blockchair error: {response.status}")
+                    logger.error(f"Mempool.space blocks error: {response.status}")
                     return []
 
-                data = await response.json()
+                blocks = await response.json()
 
-                if "data" not in data or not data["data"]:
-                    logger.warning("No data from Blockchair")
+                if not blocks:
+                    logger.warning("No blocks from mempool.space")
                     return []
 
-                transactions = []
-                for tx_data in data["data"]:
-                    # Blockchair возвращает сумму в сатоши
-                    output_total = tx_data.get("output_total", 0)
-                    value_btc = output_total / 100_000_000
-                    value_usd = value_btc * self._btc_price
+            transactions = []
+            # Анализируем последние несколько блоков
+            for block in blocks[:3]:
+                block_hash = block.get("id")
+                if not block_hash:
+                    continue
 
-                    if value_btc < min_value_btc:
+                # Получаем транзакции блока
+                txs_url = f"{MEMPOOL_API_URL}/block/{block_hash}/txs"
+
+                async with session.get(
+                    txs_url, timeout=aiohttp.ClientTimeout(total=20)
+                ) as response:
+                    if response.status != 200:
                         continue
 
-                    # Парсим временную метку
-                    timestamp = None
-                    time_str = tx_data.get("time")
-                    if time_str:
-                        try:
-                            timestamp = datetime.fromisoformat(time_str.replace("Z", "+00:00"))
-                        except (ValueError, AttributeError):
-                            pass
+                    block_txs = await response.json()
 
-                    transactions.append(
-                        BitcoinTransaction(
-                            tx_hash=tx_data.get("hash", ""),
-                            from_addresses=[],  # Blockchair не даёт детали в списке
-                            to_addresses=[],
-                            value_btc=value_btc,
-                            value_usd=value_usd,
-                            timestamp=timestamp,
-                            block_height=tx_data.get("block_id"),
+                    for tx_data in block_txs:
+                        # Суммируем все выходы транзакции
+                        outputs = tx_data.get("vout", [])
+                        output_total = sum(out.get("value", 0) for out in outputs)
+                        value_btc = output_total / 100_000_000
+                        value_usd = value_btc * self._btc_price
+
+                        if value_btc < min_value_btc:
+                            continue
+
+                        # Получаем адреса входов и выходов
+                        inputs = tx_data.get("vin", [])
+
+                        from_addresses = list(dict.fromkeys(
+                            inp.get("prevout", {}).get("scriptpubkey_address", "")
+                            for inp in inputs
+                            if inp.get("prevout", {}).get("scriptpubkey_address")
+                        ))
+                        to_addresses = list(dict.fromkeys(
+                            out.get("scriptpubkey_address", "")
+                            for out in outputs
+                            if out.get("scriptpubkey_address")
+                        ))
+
+                        # Время подтверждения
+                        timestamp = None
+                        status = tx_data.get("status", {})
+                        block_time = status.get("block_time")
+                        if block_time:
+                            timestamp = datetime.fromtimestamp(block_time)
+
+                        transactions.append(
+                            BitcoinTransaction(
+                                tx_hash=tx_data.get("txid", ""),
+                                from_addresses=from_addresses,
+                                to_addresses=to_addresses,
+                                value_btc=value_btc,
+                                value_usd=value_usd,
+                                timestamp=timestamp,
+                                block_height=status.get("block_height"),
+                            )
                         )
-                    )
 
-                    if len(transactions) >= limit:
-                        break
+                        if len(transactions) >= limit:
+                            break
 
-                return transactions
+                if len(transactions) >= limit:
+                    break
+
+            return transactions[:limit]
 
         except Exception as e:
-            logger.error(f"Blockchair error: {e}")
+            logger.error(f"Mempool.space error: {e}")
             return []
 
     async def get_transaction_details(self, tx_hash: str) -> Optional[BitcoinTransaction]:
@@ -229,7 +256,7 @@ class BitcoinTracker:
         try:
             session = await self._get_session()
 
-            url = f"{BLOCKCHAIR_API_URL}/dashboards/transaction/{tx_hash}"
+            url = f"{MEMPOOL_API_URL}/tx/{tx_hash}"
 
             async with session.get(
                 url, timeout=aiohttp.ClientTimeout(total=15)
@@ -237,37 +264,35 @@ class BitcoinTracker:
                 if response.status != 200:
                     return None
 
-                data = await response.json()
+                tx_data = await response.json()
 
-                if "data" not in data or tx_hash not in data["data"]:
-                    return None
-
-                tx_info = data["data"][tx_hash]
-                tx_data = tx_info.get("transaction", {})
-
-                # Получаем адреса входов и выходов
-                inputs = tx_info.get("inputs", [])
-                outputs = tx_info.get("outputs", [])
+                # Получаем адреса входов и выходов из mempool.space формата
+                inputs = tx_data.get("vin", [])
+                outputs = tx_data.get("vout", [])
 
                 # Use dict.fromkeys to preserve order while removing duplicates
                 from_addresses = list(dict.fromkeys(
-                    inp.get("recipient", "") for inp in inputs if inp.get("recipient")
+                    inp.get("prevout", {}).get("scriptpubkey_address", "")
+                    for inp in inputs
+                    if inp.get("prevout", {}).get("scriptpubkey_address")
                 ))
                 to_addresses = list(dict.fromkeys(
-                    out.get("recipient", "") for out in outputs if out.get("recipient")
+                    out.get("scriptpubkey_address", "")
+                    for out in outputs
+                    if out.get("scriptpubkey_address")
                 ))
 
-                output_total = tx_data.get("output_total", 0)
+                # Сумма выходов в сатоши
+                output_total = sum(out.get("value", 0) for out in outputs)
                 value_btc = output_total / 100_000_000
                 value_usd = value_btc * self._btc_price
 
+                # Время подтверждения
                 timestamp = None
-                time_str = tx_data.get("time")
-                if time_str:
-                    try:
-                        timestamp = datetime.fromisoformat(time_str.replace("Z", "+00:00"))
-                    except (ValueError, AttributeError):
-                        pass
+                status = tx_data.get("status", {})
+                block_time = status.get("block_time")
+                if block_time:
+                    timestamp = datetime.fromtimestamp(block_time)
 
                 return BitcoinTransaction(
                     tx_hash=tx_hash,
@@ -276,7 +301,7 @@ class BitcoinTracker:
                     value_btc=value_btc,
                     value_usd=value_usd,
                     timestamp=timestamp,
-                    block_height=tx_data.get("block_id"),
+                    block_height=status.get("block_height"),
                 )
 
         except Exception as e:
@@ -301,29 +326,62 @@ class BitcoinTracker:
         try:
             session = await self._get_session()
 
-            url = f"{BLOCKCHAIR_API_URL}/dashboards/address/{address}"
-            params = {"limit": limit, "offset": 0}
+            url = f"{MEMPOOL_API_URL}/address/{address}/txs"
 
             async with session.get(
-                url, params=params, timeout=aiohttp.ClientTimeout(total=15)
+                url, timeout=aiohttp.ClientTimeout(total=15)
             ) as response:
                 if response.status != 200:
                     return []
 
                 data = await response.json()
 
-                if "data" not in data or address not in data["data"]:
+                if not data:
                     return []
 
-                addr_data = data["data"][address]
-                tx_hashes = addr_data.get("transactions", [])[:limit]
-
-                # Получаем детали для каждой транзакции
                 transactions = []
-                for tx_hash in tx_hashes:
-                    tx = await self.get_transaction_details(tx_hash)
-                    if tx and tx.value_usd >= self.min_value_usd:
-                        transactions.append(tx)
+                for tx_data in data[:limit]:
+                    # Получаем адреса входов и выходов
+                    inputs = tx_data.get("vin", [])
+                    outputs = tx_data.get("vout", [])
+
+                    from_addresses = list(dict.fromkeys(
+                        inp.get("prevout", {}).get("scriptpubkey_address", "")
+                        for inp in inputs
+                        if inp.get("prevout", {}).get("scriptpubkey_address")
+                    ))
+                    to_addresses = list(dict.fromkeys(
+                        out.get("scriptpubkey_address", "")
+                        for out in outputs
+                        if out.get("scriptpubkey_address")
+                    ))
+
+                    # Сумма выходов в сатоши
+                    output_total = sum(out.get("value", 0) for out in outputs)
+                    value_btc = output_total / 100_000_000
+                    value_usd = value_btc * self._btc_price
+
+                    if value_usd < self.min_value_usd:
+                        continue
+
+                    # Время подтверждения
+                    timestamp = None
+                    status = tx_data.get("status", {})
+                    block_time = status.get("block_time")
+                    if block_time:
+                        timestamp = datetime.fromtimestamp(block_time)
+
+                    transactions.append(
+                        BitcoinTransaction(
+                            tx_hash=tx_data.get("txid", ""),
+                            from_addresses=from_addresses,
+                            to_addresses=to_addresses,
+                            value_btc=value_btc,
+                            value_usd=value_usd,
+                            timestamp=timestamp,
+                            block_height=status.get("block_height"),
+                        )
+                    )
 
                 return transactions
 
