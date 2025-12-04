@@ -18,8 +18,8 @@ from src.whale.known_wallets import get_bsc_wallet_label
 
 logger = structlog.get_logger()
 
-# Etherscan API V2 URL with chainid=56 for BSC
-BSCSCAN_API_URL = "https://api.etherscan.io/v2/api?chainid=56"
+# BscScan API URL (free tier works without upgrade)
+BSCSCAN_API_URL = "https://api.bscscan.com/api"
 
 
 @dataclass

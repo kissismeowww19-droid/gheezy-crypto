@@ -188,10 +188,16 @@ class BitcoinTracker:
 
                     block_txs = await response.json()
 
+                    if not block_txs:
+                        continue
+
                     for tx_data in block_txs:
+                        if tx_data is None:
+                            continue
+
                         # Суммируем все выходы транзакции
-                        outputs = tx_data.get("vout", [])
-                        output_total = sum(out.get("value", 0) for out in outputs)
+                        outputs = tx_data.get("vout", []) or []
+                        output_total = sum((out.get("value", 0) or 0) for out in outputs if out)
                         value_btc = output_total / 100_000_000
                         value_usd = value_btc * self._btc_price
 
@@ -199,22 +205,22 @@ class BitcoinTracker:
                             continue
 
                         # Получаем адреса входов и выходов
-                        inputs = tx_data.get("vin", [])
+                        inputs = tx_data.get("vin", []) or []
 
                         from_addresses = list(dict.fromkeys(
-                            inp.get("prevout", {}).get("scriptpubkey_address", "")
+                            (inp.get("prevout") or {}).get("scriptpubkey_address", "")
                             for inp in inputs
-                            if inp.get("prevout", {}).get("scriptpubkey_address")
+                            if inp and (inp.get("prevout") or {}).get("scriptpubkey_address")
                         ))
                         to_addresses = list(dict.fromkeys(
                             out.get("scriptpubkey_address", "")
                             for out in outputs
-                            if out.get("scriptpubkey_address")
+                            if out and out.get("scriptpubkey_address")
                         ))
 
                         # Время подтверждения
                         timestamp = None
-                        status = tx_data.get("status", {})
+                        status = tx_data.get("status", {}) or {}
                         block_time = status.get("block_time")
                         if block_time:
                             timestamp = datetime.fromtimestamp(block_time)
@@ -267,29 +273,29 @@ class BitcoinTracker:
                 tx_data = await response.json()
 
                 # Получаем адреса входов и выходов из mempool.space формата
-                inputs = tx_data.get("vin", [])
-                outputs = tx_data.get("vout", [])
+                inputs = tx_data.get("vin", []) or []
+                outputs = tx_data.get("vout", []) or []
 
                 # Use dict.fromkeys to preserve order while removing duplicates
                 from_addresses = list(dict.fromkeys(
-                    inp.get("prevout", {}).get("scriptpubkey_address", "")
+                    (inp.get("prevout") or {}).get("scriptpubkey_address", "")
                     for inp in inputs
-                    if inp.get("prevout", {}).get("scriptpubkey_address")
+                    if inp and (inp.get("prevout") or {}).get("scriptpubkey_address")
                 ))
                 to_addresses = list(dict.fromkeys(
                     out.get("scriptpubkey_address", "")
                     for out in outputs
-                    if out.get("scriptpubkey_address")
+                    if out and out.get("scriptpubkey_address")
                 ))
 
                 # Сумма выходов в сатоши
-                output_total = sum(out.get("value", 0) for out in outputs)
+                output_total = sum((out.get("value", 0) or 0) for out in outputs if out)
                 value_btc = output_total / 100_000_000
                 value_usd = value_btc * self._btc_price
 
                 # Время подтверждения
                 timestamp = None
-                status = tx_data.get("status", {})
+                status = tx_data.get("status", {}) or {}
                 block_time = status.get("block_time")
                 if block_time:
                     timestamp = datetime.fromtimestamp(block_time)
@@ -341,23 +347,26 @@ class BitcoinTracker:
 
                 transactions = []
                 for tx_data in data[:limit]:
+                    if tx_data is None:
+                        continue
+
                     # Получаем адреса входов и выходов
-                    inputs = tx_data.get("vin", [])
-                    outputs = tx_data.get("vout", [])
+                    inputs = tx_data.get("vin", []) or []
+                    outputs = tx_data.get("vout", []) or []
 
                     from_addresses = list(dict.fromkeys(
-                        inp.get("prevout", {}).get("scriptpubkey_address", "")
+                        (inp.get("prevout") or {}).get("scriptpubkey_address", "")
                         for inp in inputs
-                        if inp.get("prevout", {}).get("scriptpubkey_address")
+                        if inp and (inp.get("prevout") or {}).get("scriptpubkey_address")
                     ))
                     to_addresses = list(dict.fromkeys(
                         out.get("scriptpubkey_address", "")
                         for out in outputs
-                        if out.get("scriptpubkey_address")
+                        if out and out.get("scriptpubkey_address")
                     ))
 
                     # Сумма выходов в сатоши
-                    output_total = sum(out.get("value", 0) for out in outputs)
+                    output_total = sum((out.get("value", 0) or 0) for out in outputs if out)
                     value_btc = output_total / 100_000_000
                     value_usd = value_btc * self._btc_price
 
@@ -366,7 +375,7 @@ class BitcoinTracker:
 
                     # Время подтверждения
                     timestamp = None
-                    status = tx_data.get("status", {})
+                    status = tx_data.get("status", {}) or {}
                     block_time = status.get("block_time")
                     if block_time:
                         timestamp = datetime.fromtimestamp(block_time)
