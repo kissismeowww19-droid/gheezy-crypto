@@ -18,8 +18,8 @@ from src.whale.known_wallets import get_ethereum_wallet_label
 
 logger = structlog.get_logger()
 
-# Etherscan API URL
-ETHERSCAN_API_URL = "https://api.etherscan.io/api"
+# Etherscan API V2 URL with chainid=1 for Ethereum
+ETHERSCAN_API_URL = "https://api.etherscan.io/v2/api?chainid=1"
 
 # Публичные RPC URL для Ethereum (резервные)
 PUBLIC_RPC_URLS = [
