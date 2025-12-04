@@ -70,6 +70,10 @@ class Settings(BaseSettings):
         default="",
         description="API ключ Etherscan",
     )
+    bscscan_api_key: str = Field(
+        default="",
+        description="API ключ BscScan",
+    )
 
     # Настройки приложения
     app_name: str = Field(
@@ -103,6 +107,10 @@ class Settings(BaseSettings):
     whale_min_transaction: int = Field(
         default=100000,
         description="Минимальная сумма транзакции для отслеживания (USD)",
+    )
+    whale_check_interval: int = Field(
+        default=60,
+        description="Интервал проверки транзакций китов (секунды)",
     )
 
     # Сигналы

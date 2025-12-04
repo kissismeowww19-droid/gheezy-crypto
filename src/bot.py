@@ -3,7 +3,6 @@ Gheezy Crypto Telegram Bot - Minimalist Design
 С подключением Multi-API Manager (CoinGecko + Binance + Kraken)
 """
 
-import asyncio
 import logging
 from typing import Tuple
 from datetime import datetime
@@ -17,12 +16,16 @@ from aiogram.enums import ParseMode
 
 from config import settings
 from api_manager import get_coin_price as get_price_multi_api, get_api_stats
+from whale.tracker import WhaleTracker as RealWhaleTracker
 
 logging.basicConfig(level=logging.INFO)
-logger = logging. getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 router = Router()
 user_messages = {}
+
+# Хранение подписок пользователей на whale alerts
+whale_subscriptions: set[int] = set()
 
 
 class SignalAnalyzer:
@@ -33,13 +36,9 @@ class DeFiAggregator:
     async def close(self):
         pass
 
-class WhaleTracker:
-    async def close(self):
-        pass
-
 signal_analyzer = SignalAnalyzer()
 defi_aggregator = DeFiAggregator()
-whale_tracker = WhaleTracker()
+whale_tracker = RealWhaleTracker()
 
 
 COINS = {
@@ -319,6 +318,14 @@ async def cmd_help(message: Message):
     text = text + "/market — обзор рынка\n"
     text = text + "/prices — все 10 монет\n"
     text = text + "/help — справка\n\n"
+    text = text + "*Команды Whale Tracker:*\n\n"
+    text = text + "/whale — все крупные транзакции\n"
+    text = text + "/whale eth — только Ethereum\n"
+    text = text + "/whale bsc — только BSC\n"
+    text = text + "/whale btc — только Bitcoin\n"
+    text = text + "/whale on — включить оповещения\n"
+    text = text + "/whale off — выключить оповещения\n"
+    text = text + "/whale stats — статистика за день\n\n"
     text = text + "📡 _3 API: CoinGecko + Binance + Kraken_"
     await clean_send(message, text, get_back_keyboard())
 
@@ -488,6 +495,243 @@ async def cmd_link(message: Message):
 @router.message(Command("uni"))
 async def cmd_uni(message: Message):
     await send_quick_price(message, "uni")
+
+
+# ============================================
+# Whale Tracker Commands
+# ============================================
+
+def get_whale_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура для whale tracker."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="⟠ ETH", callback_data="whale_eth"),
+            InlineKeyboardButton(text="🔶 BSC", callback_data="whale_bsc"),
+            InlineKeyboardButton(text="₿ BTC", callback_data="whale_btc"),
+        ],
+        [
+            InlineKeyboardButton(text="📊 Статистика", callback_data="whale_stats"),
+            InlineKeyboardButton(text="🔄 Обновить", callback_data="whale_all"),
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Назад", callback_data="menu_back"),
+        ],
+    ])
+
+
+@router.message(Command("whale"))
+async def cmd_whale(message: Message):
+    """Обработка команды /whale с аргументами."""
+    chat_id = message.chat.id
+    try:
+        await message.delete()
+    except Exception:
+        pass
+    await delete_user_message(message.bot, chat_id)
+
+    # Парсим аргументы команды
+    text_parts = message.text.split() if message.text else []
+    subcommand = text_parts[1].lower() if len(text_parts) > 1 else None
+
+    if subcommand == "on":
+        # Включить оповещения
+        whale_subscriptions.add(chat_id)
+        text = (
+            "🐋 *Whale Tracker*\n\n"
+            "✅ *Оповещения включены!*\n\n"
+            "Вы будете получать уведомления о крупных\n"
+            "транзакциях на Ethereum, BSC и Bitcoin.\n\n"
+            "Минимальная сумма: $100,000+"
+        )
+        new_msg = await message.answer(text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+        user_messages[chat_id] = new_msg.message_id
+        return
+
+    if subcommand == "off":
+        # Выключить оповещения
+        whale_subscriptions.discard(chat_id)
+        text = (
+            "🐋 *Whale Tracker*\n\n"
+            "❌ *Оповещения выключены!*\n\n"
+            "Вы больше не будете получать уведомления\n"
+            "о транзакциях китов."
+        )
+        new_msg = await message.answer(text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+        user_messages[chat_id] = new_msg.message_id
+        return
+
+    if subcommand == "stats":
+        # Статистика за день
+        loading_msg = await message.answer("⏳ *Загружаю статистику...*", parse_mode=ParseMode.MARKDOWN)
+        user_messages[chat_id] = loading_msg.message_id
+
+        try:
+            stats_text = await whale_tracker.format_stats_message()
+            await loading_msg.edit_text(stats_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+        except Exception as e:
+            logger.error(f"Whale stats error: {e}")
+            await loading_msg.edit_text(
+                "🐋 *Whale Tracker*\n\n❌ Ошибка загрузки статистики",
+                reply_markup=get_whale_keyboard(),
+                parse_mode=ParseMode.MARKDOWN
+            )
+        return
+
+    if subcommand in ("eth", "ethereum"):
+        # Только Ethereum
+        loading_msg = await message.answer("⏳ *Загружаю ETH транзакции...*", parse_mode=ParseMode.MARKDOWN)
+        user_messages[chat_id] = loading_msg.message_id
+
+        try:
+            whale_text = await whale_tracker.format_whale_message(blockchain="eth")
+            await loading_msg.edit_text(whale_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+        except Exception as e:
+            logger.error(f"Whale ETH error: {e}")
+            await loading_msg.edit_text(
+                "🐋 *Whale Tracker - Ethereum*\n\n❌ Ошибка загрузки данных",
+                reply_markup=get_whale_keyboard(),
+                parse_mode=ParseMode.MARKDOWN
+            )
+        return
+
+    if subcommand in ("bsc", "bnb", "binance"):
+        # Только BSC
+        loading_msg = await message.answer("⏳ *Загружаю BSC транзакции...*", parse_mode=ParseMode.MARKDOWN)
+        user_messages[chat_id] = loading_msg.message_id
+
+        try:
+            whale_text = await whale_tracker.format_whale_message(blockchain="bsc")
+            await loading_msg.edit_text(whale_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+        except Exception as e:
+            logger.error(f"Whale BSC error: {e}")
+            await loading_msg.edit_text(
+                "🐋 *Whale Tracker - BSC*\n\n❌ Ошибка загрузки данных",
+                reply_markup=get_whale_keyboard(),
+                parse_mode=ParseMode.MARKDOWN
+            )
+        return
+
+    if subcommand in ("btc", "bitcoin"):
+        # Только Bitcoin
+        loading_msg = await message.answer("⏳ *Загружаю BTC транзакции...*", parse_mode=ParseMode.MARKDOWN)
+        user_messages[chat_id] = loading_msg.message_id
+
+        try:
+            whale_text = await whale_tracker.format_whale_message(blockchain="btc")
+            await loading_msg.edit_text(whale_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+        except Exception as e:
+            logger.error(f"Whale BTC error: {e}")
+            await loading_msg.edit_text(
+                "🐋 *Whale Tracker - Bitcoin*\n\n❌ Ошибка загрузки данных",
+                reply_markup=get_whale_keyboard(),
+                parse_mode=ParseMode.MARKDOWN
+            )
+        return
+
+    # Все транзакции (по умолчанию)
+    loading_msg = await message.answer("⏳ *Загружаю транзакции китов...*", parse_mode=ParseMode.MARKDOWN)
+    user_messages[chat_id] = loading_msg.message_id
+
+    try:
+        whale_text = await whale_tracker.format_whale_message()
+        await loading_msg.edit_text(whale_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        logger.error(f"Whale all error: {e}")
+        await loading_msg.edit_text(
+            "🐋 *Whale Tracker*\n\n❌ Ошибка загрузки данных",
+            reply_markup=get_whale_keyboard(),
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+
+@router.callback_query(lambda c: c.data == "whale_all")
+async def callback_whale_all(callback: CallbackQuery):
+    """Обновить все транзакции китов."""
+    await callback.answer("⏳ Загружаю...")
+    await callback.message.edit_text("⏳ *Загружаю транзакции китов...*", parse_mode=ParseMode.MARKDOWN)
+
+    try:
+        whale_text = await whale_tracker.format_whale_message()
+        await callback.message.edit_text(whale_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        logger.error(f"Whale callback error: {e}")
+        await callback.message.edit_text(
+            "🐋 *Whale Tracker*\n\n❌ Ошибка загрузки данных",
+            reply_markup=get_whale_keyboard(),
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+
+@router.callback_query(lambda c: c.data == "whale_eth")
+async def callback_whale_eth(callback: CallbackQuery):
+    """Транзакции Ethereum."""
+    await callback.answer("⏳ Загружаю ETH...")
+    await callback.message.edit_text("⏳ *Загружаю ETH транзакции...*", parse_mode=ParseMode.MARKDOWN)
+
+    try:
+        whale_text = await whale_tracker.format_whale_message(blockchain="eth")
+        await callback.message.edit_text(whale_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        logger.error(f"Whale ETH callback error: {e}")
+        await callback.message.edit_text(
+            "🐋 *Whale Tracker - Ethereum*\n\n❌ Ошибка загрузки данных",
+            reply_markup=get_whale_keyboard(),
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+
+@router.callback_query(lambda c: c.data == "whale_bsc")
+async def callback_whale_bsc(callback: CallbackQuery):
+    """Транзакции BSC."""
+    await callback.answer("⏳ Загружаю BSC...")
+    await callback.message.edit_text("⏳ *Загружаю BSC транзакции...*", parse_mode=ParseMode.MARKDOWN)
+
+    try:
+        whale_text = await whale_tracker.format_whale_message(blockchain="bsc")
+        await callback.message.edit_text(whale_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        logger.error(f"Whale BSC callback error: {e}")
+        await callback.message.edit_text(
+            "🐋 *Whale Tracker - BSC*\n\n❌ Ошибка загрузки данных",
+            reply_markup=get_whale_keyboard(),
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+
+@router.callback_query(lambda c: c.data == "whale_btc")
+async def callback_whale_btc(callback: CallbackQuery):
+    """Транзакции Bitcoin."""
+    await callback.answer("⏳ Загружаю BTC...")
+    await callback.message.edit_text("⏳ *Загружаю BTC транзакции...*", parse_mode=ParseMode.MARKDOWN)
+
+    try:
+        whale_text = await whale_tracker.format_whale_message(blockchain="btc")
+        await callback.message.edit_text(whale_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        logger.error(f"Whale BTC callback error: {e}")
+        await callback.message.edit_text(
+            "🐋 *Whale Tracker - Bitcoin*\n\n❌ Ошибка загрузки данных",
+            reply_markup=get_whale_keyboard(),
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+
+@router.callback_query(lambda c: c.data == "whale_stats")
+async def callback_whale_stats(callback: CallbackQuery):
+    """Статистика whale tracker."""
+    await callback.answer("⏳ Загружаю статистику...")
+    await callback.message.edit_text("⏳ *Загружаю статистику...*", parse_mode=ParseMode.MARKDOWN)
+
+    try:
+        stats_text = await whale_tracker.format_stats_message()
+        await callback.message.edit_text(stats_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        logger.error(f"Whale stats callback error: {e}")
+        await callback.message.edit_text(
+            "🐋 *Whale Tracker*\n\n❌ Ошибка загрузки статистики",
+            reply_markup=get_whale_keyboard(),
+            parse_mode=ParseMode.MARKDOWN
+        )
 
 
 @router.callback_query(lambda c: c.data == "menu_prices")
@@ -663,19 +907,20 @@ async def callback_defi(callback: CallbackQuery):
 
 @router.callback_query(lambda c: c. data == "menu_whale")
 async def callback_whale(callback: CallbackQuery):
-    text = "🐋 *Whale Tracker*\n\n"
-    text = text + "📊 *Последние движения:*\n\n"
-    text = text + "🟢 *2 мин назад*\n"
-    text = text + "Кит купил 1,500 BTC ($142.5M)\n\n"
-    text = text + "🔴 *8 мин назад*\n"
-    text = text + "Кит продал 25,000 ETH ($90M)\n\n"
-    text = text + "🟢 *15 мин назад*\n"
-    text = text + "Кит купил 850 BTC ($80.7M)\n\n"
-    text = text + "📈 *Тренд 24ч:*\n"
-    text = text + "BTC: Киты накапливают 🟢\n"
-    text = text + "ETH: Киты продают 🔴"
-    await callback. message.edit_text(text, reply_markup=get_back_keyboard(), parse_mode=ParseMode. MARKDOWN)
-    await callback.answer()
+    """Обработка callback для меню Whale Tracker."""
+    await callback.answer("⏳ Загружаю...")
+    await callback.message.edit_text("⏳ *Загружаю транзакции китов...*", parse_mode=ParseMode.MARKDOWN)
+
+    try:
+        whale_text = await whale_tracker.format_whale_message()
+        await callback.message.edit_text(whale_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        logger.error(f"Whale menu error: {e}")
+        await callback.message.edit_text(
+            "🐋 *Whale Tracker*\n\n❌ Ошибка загрузки данных.\n\nПопробуйте позже.",
+            reply_markup=get_whale_keyboard(),
+            parse_mode=ParseMode.MARKDOWN
+        )
 
 
 @router.callback_query(lambda c: c.data == "menu_traders")
