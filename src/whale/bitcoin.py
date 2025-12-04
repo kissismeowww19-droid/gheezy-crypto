@@ -249,8 +249,13 @@ class BitcoinTracker:
                 inputs = tx_info.get("inputs", [])
                 outputs = tx_info.get("outputs", [])
 
-                from_addresses = list(set(inp.get("recipient", "") for inp in inputs if inp.get("recipient")))
-                to_addresses = list(set(out.get("recipient", "") for out in outputs if out.get("recipient")))
+                # Use dict.fromkeys to preserve order while removing duplicates
+                from_addresses = list(dict.fromkeys(
+                    inp.get("recipient", "") for inp in inputs if inp.get("recipient")
+                ))
+                to_addresses = list(dict.fromkeys(
+                    out.get("recipient", "") for out in outputs if out.get("recipient")
+                ))
 
                 output_total = tx_data.get("output_total", 0)
                 value_btc = output_total / 100_000_000

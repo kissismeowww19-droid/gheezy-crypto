@@ -493,9 +493,12 @@ class WhaleTracker:
         Returns:
             list[WhaleTransaction]: Список демо-транзакций
         """
+        # Ethereum/BSC tx hashes are 64 hex chars (66 with 0x prefix)
+        # Bitcoin tx hashes are 64 hex chars
+        # Demo hashes use padding to match realistic lengths
         demo_data = [
             WhaleTransaction(
-                tx_hash="0xdemo1" + "a" * 58,
+                tx_hash="0xdemo1" + "a" * 58,  # 64 chars total (ETH format)
                 blockchain="Ethereum",
                 token_symbol="ETH",
                 amount=5000,
@@ -508,7 +511,7 @@ class WhaleTracker:
                 tx_type="deposit",
             ),
             WhaleTransaction(
-                tx_hash="0xdemo2" + "b" * 58,
+                tx_hash="0xdemo2" + "b" * 58,  # 64 chars total (BSC format)
                 blockchain="BSC",
                 token_symbol="BNB",
                 amount=30000,
@@ -521,7 +524,7 @@ class WhaleTracker:
                 tx_type="withdrawal",
             ),
             WhaleTransaction(
-                tx_hash="demo3" + "c" * 59,
+                tx_hash="demo3" + "c" * 59,  # 64 chars total (BTC format)
                 blockchain="Bitcoin",
                 token_symbol="BTC",
                 amount=500,
