@@ -243,31 +243,69 @@ def get_main_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def get_prices_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="₿ BTC", callback_data="price_btc"),
-            InlineKeyboardButton(text="⟠ ETH", callback_data="price_eth"),
-            InlineKeyboardButton(text="💎 TON", callback_data="price_ton"),
-        ],
-        [
-            InlineKeyboardButton(text="🟣 SOL", callback_data="price_sol"),
-            InlineKeyboardButton(text="💧 XRP", callback_data="price_xrp"),
-            InlineKeyboardButton(text="🐕 DOGE", callback_data="price_doge"),
-        ],
-        [
-            InlineKeyboardButton(text="🟪 MATIC", callback_data="price_matic"),
-            InlineKeyboardButton(text="🪙 LTC", callback_data="price_ltc"),
-            InlineKeyboardButton(text="🐕 SHIB", callback_data="price_shib"),
-        ],
-        [
-            InlineKeyboardButton(text="🔺 AVAX", callback_data="price_avax"),
-            InlineKeyboardButton(text="📊 API", callback_data="menu_api_stats"),
-        ],
-        [
-            InlineKeyboardButton(text="🔙 Назад", callback_data="menu_back"),
-        ],
-    ])
+# Порядок монет для пагинации (все 34 монеты)
+COINS_ORDER = [
+    # Страница 1 (основные)
+    "btc", "eth", "ton", "sol", "xrp", "doge", "matic", "ltc",
+    # Страница 2 (продолжение основных)
+    "shib", "avax", "bnb", "ada", "dot", "link", "uni", "atom",
+    # Страница 3 (мем-коины и L1)
+    "trx", "not", "pepe", "wif", "bonk", "sui", "apt", "sei",
+    # Страница 4 (L1, L2 и DeFi)
+    "near", "ftm", "arb", "op", "inj", "xlm", "vet", "algo",
+    # Страница 5 (оставшиеся)
+    "fil", "rune",
+]
+
+COINS_PER_PAGE = 8
+
+
+def get_prices_keyboard(page: int = 1) -> InlineKeyboardMarkup:
+    """Клавиатура с ценами монет с пагинацией."""
+    total_pages = (len(COINS_ORDER) + COINS_PER_PAGE - 1) // COINS_PER_PAGE
+    
+    # Ограничиваем страницу
+    if page < 1:
+        page = 1
+    if page > total_pages:
+        page = total_pages
+    
+    # Вычисляем индексы для текущей страницы
+    start_idx = (page - 1) * COINS_PER_PAGE
+    end_idx = min(start_idx + COINS_PER_PAGE, len(COINS_ORDER))
+    page_coins = COINS_ORDER[start_idx:end_idx]
+    
+    keyboard = []
+    
+    # Создаем кнопки для монет (по 3 в ряд)
+    row = []
+    for coin in page_coins:
+        coin_info = COINS.get(coin, {})
+        emoji = coin_info.get("emoji", "💰")
+        symbol = coin_info.get("symbol", coin.upper())
+        row.append(InlineKeyboardButton(text=emoji + " " + symbol, callback_data="price_" + coin))
+        if len(row) == 3:
+            keyboard.append(row)
+            row = []
+    
+    # Добавляем оставшиеся кнопки
+    if row:
+        keyboard.append(row)
+    
+    # Кнопки навигации
+    nav_row = []
+    if page > 1:
+        nav_row.append(InlineKeyboardButton(text="◀️ " + str(page - 1), callback_data="prices_page_" + str(page - 1)))
+    nav_row.append(InlineKeyboardButton(text=str(page) + "/" + str(total_pages), callback_data="prices_page_current"))
+    if page < total_pages:
+        nav_row.append(InlineKeyboardButton(text=str(page + 1) + " ▶️", callback_data="prices_page_" + str(page + 1)))
+    keyboard.append(nav_row)
+    
+    # Дополнительные кнопки
+    keyboard.append([InlineKeyboardButton(text="📊 API статистика", callback_data="menu_api_stats")])
+    keyboard.append([InlineKeyboardButton(text="🔙 Назад", callback_data="menu_back")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
 def get_price_keyboard(symbol: str) -> InlineKeyboardMarkup:
@@ -336,14 +374,21 @@ async def cmd_start(message: Message):
 @router.message(Command("help"))
 async def cmd_help(message: Message):
     text = "📚 *Справка*\n\n"
-    text = text + "*Быстрые команды:*\n\n"
-    text = text + "/btc /eth /ton /sol /xrp\n"
+    text = text + "*Быстрые команды (34 монеты):*\n\n"
+    text = text + "Основные: /btc /eth /ton /sol /xrp\n"
     text = text + "/doge /matic /ltc /shib /avax\n"
-    text = text + "/not /pepe /sui /arb /near\n\n"
+    text = text + "/bnb /ada /dot /link /uni /atom /trx\n\n"
+    text = text + "Мем-коины: /not /pepe /wif /bonk\n\n"
+    text = text + "L1: /sui /apt /sei /near /ftm\n\n"
+    text = text + "L2: /arb /op\n\n"
+    text = text + "DeFi: /inj /xlm /vet /algo /fil /rune\n\n"
+    text = text + "*Текстовые команды:*\n\n"
+    text = text + "Напиши символ монеты (BTC, NOT, SUI...)\n"
+    text = text + "и получи её цену!\n\n"
     text = text + "*Основные команды:*\n\n"
     text = text + "/start — главное меню\n"
     text = text + "/market — обзор рынка\n"
-    text = text + "/prices — все монеты\n"
+    text = text + "/prices — все монеты (с пагинацией)\n"
     text = text + "/help — справка\n\n"
     text = text + "*Команды Whale Tracker:*\n\n"
     text = text + "/whale — все крупные транзакции\n"
@@ -400,23 +445,24 @@ async def cmd_prices(message: Message):
     await delete_user_message(message.bot, chat_id)
     
     loading_msg = await message.answer("⏳ *Загружаю все цены...*", parse_mode=ParseMode.MARKDOWN)
-    user_messages[chat_id] = loading_msg. message_id
+    user_messages[chat_id] = loading_msg.message_id
     
-    coins_list = ["BTC", "ETH", "TON", "SOL", "XRP", "DOGE", "MATIC", "LTC", "SHIB", "AVAX"]
+    # Показываем первую страницу монет
+    coins_list = COINS_ORDER[:COINS_PER_PAGE]
     
     text = "💰 *Цены криптовалют*\n\n"
     
     for symbol in coins_list:
-        data = await get_coin_price(symbol)
+        data = await get_coin_price(symbol.upper())
         coin_info = COINS.get(symbol.lower(), {})
-        emoji = coin_info. get("emoji", "💰")
+        emoji = coin_info.get("emoji", "💰")
         
-        if data. get("success"):
+        if data.get("success"):
             price = data["price_usd"]
             change = data["change_24h"]
             
             if price >= 1:
-                price_text = "${:,.2f}". format(price)
+                price_text = "${:,.2f}".format(price)
             elif price >= 0.01:
                 price_text = "${:,.4f}".format(price)
             else:
@@ -429,14 +475,14 @@ async def cmd_prices(message: Message):
                 change_text = "{:.1f}%".format(change)
                 trend = "🔴"
             
-            text = text + emoji + " *" + symbol + "*: " + price_text + " " + trend + " " + change_text + "\n"
+            text = text + emoji + " *" + symbol.upper() + "*: " + price_text + " " + trend + " " + change_text + "\n"
         else:
-            text = text + emoji + " *" + symbol + "*: ❌ ошибка\n"
+            text = text + emoji + " *" + symbol.upper() + "*: ❌ ошибка\n"
     
-    now = datetime.now(). strftime("%H:%M:%S")
+    now = datetime.now().strftime("%H:%M:%S")
     text = text + "\n⏰ _" + now + "_"
     
-    await loading_msg.edit_text(text, reply_markup=get_prices_keyboard(), parse_mode=ParseMode. MARKDOWN)
+    await loading_msg.edit_text(text, reply_markup=get_prices_keyboard(1), parse_mode=ParseMode.MARKDOWN)
 
 
 async def send_quick_price(message: Message, symbol: str):
@@ -522,6 +568,86 @@ async def cmd_link(message: Message):
 @router.message(Command("uni"))
 async def cmd_uni(message: Message):
     await send_quick_price(message, "uni")
+
+@router.message(Command("atom"))
+async def cmd_atom(message: Message):
+    await send_quick_price(message, "atom")
+
+@router.message(Command("trx"))
+async def cmd_trx(message: Message):
+    await send_quick_price(message, "trx")
+
+# Мем-коины
+@router.message(Command("not"))
+async def cmd_not(message: Message):
+    await send_quick_price(message, "not")
+
+@router.message(Command("pepe"))
+async def cmd_pepe(message: Message):
+    await send_quick_price(message, "pepe")
+
+@router.message(Command("wif"))
+async def cmd_wif(message: Message):
+    await send_quick_price(message, "wif")
+
+@router.message(Command("bonk"))
+async def cmd_bonk(message: Message):
+    await send_quick_price(message, "bonk")
+
+# Новые L1 блокчейны
+@router.message(Command("sui"))
+async def cmd_sui(message: Message):
+    await send_quick_price(message, "sui")
+
+@router.message(Command("apt"))
+async def cmd_apt(message: Message):
+    await send_quick_price(message, "apt")
+
+@router.message(Command("sei"))
+async def cmd_sei(message: Message):
+    await send_quick_price(message, "sei")
+
+@router.message(Command("near"))
+async def cmd_near(message: Message):
+    await send_quick_price(message, "near")
+
+@router.message(Command("ftm"))
+async def cmd_ftm(message: Message):
+    await send_quick_price(message, "ftm")
+
+# L2 Ethereum
+@router.message(Command("arb"))
+async def cmd_arb(message: Message):
+    await send_quick_price(message, "arb")
+
+@router.message(Command("op"))
+async def cmd_op(message: Message):
+    await send_quick_price(message, "op")
+
+# DeFi и другие
+@router.message(Command("inj"))
+async def cmd_inj(message: Message):
+    await send_quick_price(message, "inj")
+
+@router.message(Command("xlm"))
+async def cmd_xlm(message: Message):
+    await send_quick_price(message, "xlm")
+
+@router.message(Command("vet"))
+async def cmd_vet(message: Message):
+    await send_quick_price(message, "vet")
+
+@router.message(Command("algo"))
+async def cmd_algo(message: Message):
+    await send_quick_price(message, "algo")
+
+@router.message(Command("fil"))
+async def cmd_fil(message: Message):
+    await send_quick_price(message, "fil")
+
+@router.message(Command("rune"))
+async def cmd_rune(message: Message):
+    await send_quick_price(message, "rune")
 
 
 # ============================================
@@ -767,7 +893,31 @@ async def callback_prices(callback: CallbackQuery):
     text = text + "Выбери монету для просмотра\n"
     text = text + "актуальной цены 👇\n\n"
     text = text + "📡 _5 API: CoinGecko + CoinPaprika + MEXC + Kraken_"
-    await callback.message.edit_text(text, reply_markup=get_prices_keyboard(), parse_mode=ParseMode.MARKDOWN)
+    await callback.message.edit_text(text, reply_markup=get_prices_keyboard(1), parse_mode=ParseMode.MARKDOWN)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("prices_page_"))
+async def callback_prices_page(callback: CallbackQuery):
+    """Обработка пагинации страниц с ценами."""
+    page_str = callback.data.replace("prices_page_", "")
+    
+    # Если нажали на текущую страницу, ничего не делаем
+    if page_str == "current":
+        await callback.answer()
+        return
+    
+    try:
+        page = int(page_str)
+    except ValueError:
+        await callback.answer()
+        return
+    
+    text = "💰 *Цены криптовалют*\n\n"
+    text = text + "Выбери монету для просмотра\n"
+    text = text + "актуальной цены 👇\n\n"
+    text = text + "📡 _5 API: CoinGecko + CoinPaprika + MEXC + Kraken_"
+    await callback.message.edit_text(text, reply_markup=get_prices_keyboard(page), parse_mode=ParseMode.MARKDOWN)
     await callback.answer()
 
 
@@ -1000,14 +1150,21 @@ async def callback_settings(callback: CallbackQuery):
 @router.callback_query(lambda c: c.data == "menu_help")
 async def callback_help(callback: CallbackQuery):
     text = "📚 *Справка*\n\n"
-    text = text + "*Быстрые команды:*\n\n"
-    text = text + "/btc /eth /ton /sol /xrp\n"
+    text = text + "*Быстрые команды (34 монеты):*\n\n"
+    text = text + "Основные: /btc /eth /ton /sol /xrp\n"
     text = text + "/doge /matic /ltc /shib /avax\n"
-    text = text + "/not /pepe /sui /arb /near\n\n"
+    text = text + "/bnb /ada /dot /link /uni /atom /trx\n\n"
+    text = text + "Мем-коины: /not /pepe /wif /bonk\n\n"
+    text = text + "L1: /sui /apt /sei /near /ftm\n\n"
+    text = text + "L2: /arb /op\n\n"
+    text = text + "DeFi: /inj /xlm /vet /algo /fil /rune\n\n"
+    text = text + "*Текстовые команды:*\n\n"
+    text = text + "Напиши символ монеты (BTC, NOT, SUI...)\n"
+    text = text + "и получи её цену!\n\n"
     text = text + "*Основные команды:*\n\n"
     text = text + "/start — главное меню\n"
     text = text + "/market — обзор рынка\n"
-    text = text + "/prices — все монеты\n"
+    text = text + "/prices — все монеты (с пагинацией)\n"
     text = text + "/help — справка\n\n"
     text = text + "📡 _5 API: CoinGecko + CoinPaprika + MEXC + Kraken_"
     await callback.message.edit_text(text, reply_markup=get_back_keyboard(), parse_mode=ParseMode.MARKDOWN)
@@ -1025,6 +1182,29 @@ async def callback_back(callback: CallbackQuery):
 @router.callback_query()
 async def callback_unknown(callback: CallbackQuery):
     await callback.answer("🔜 Скоро!")
+
+
+# ============================================
+# Обработка текстовых сообщений с символами монет
+# ============================================
+
+@router.message()
+async def handle_text_coin(message: Message):
+    """Обработка текстовых сообщений с символами монет."""
+    if not message.text:
+        return
+    
+    text = message.text.strip()
+    
+    # Проверяем формат: только короткие сообщения (1-6 символов) без пробелов
+    # Это предотвращает обработку обычных сообщений
+    if len(text) > 6 or ' ' in text:
+        return
+    
+    # Проверяем, есть ли такой символ в COINS
+    coin_key = text.lower()
+    if coin_key in COINS:
+        await send_quick_price(message, coin_key)
 
 
 def create_bot() -> Tuple[Bot, Dispatcher]:
