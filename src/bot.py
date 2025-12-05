@@ -1,6 +1,6 @@
 """
 Gheezy Crypto Telegram Bot - Minimalist Design
-С подключением Multi-API Manager (CoinGecko + Binance + Kraken)
+С подключением Multi-API Manager (CoinGecko + CoinPaprika + MEXC + Kraken)
 """
 
 import logging
@@ -42,6 +42,7 @@ whale_tracker = RealWhaleTracker()
 
 
 COINS = {
+    # Основные монеты (17)
     "btc": {"id": "bitcoin", "symbol": "BTC", "name": "Bitcoin", "emoji": "₿"},
     "eth": {"id": "ethereum", "symbol": "ETH", "name": "Ethereum", "emoji": "⟠"},
     "ton": {"id": "the-open-network", "symbol": "TON", "name": "Toncoin", "emoji": "💎"},
@@ -59,6 +60,31 @@ COINS = {
     "uni": {"id": "uniswap", "symbol": "UNI", "name": "Uniswap", "emoji": "🦄"},
     "atom": {"id": "cosmos", "symbol": "ATOM", "name": "Cosmos", "emoji": "⚛️"},
     "trx": {"id": "tron", "symbol": "TRX", "name": "Tron", "emoji": "🔴"},
+    
+    # Мем-коины (4)
+    "not": {"id": "notcoin", "symbol": "NOT", "name": "Notcoin", "emoji": "⬛"},
+    "pepe": {"id": "pepe", "symbol": "PEPE", "name": "Pepe", "emoji": "🐸"},
+    "wif": {"id": "dogwifcoin", "symbol": "WIF", "name": "dogwifhat", "emoji": "🐕"},
+    "bonk": {"id": "bonk", "symbol": "BONK", "name": "Bonk", "emoji": "🦴"},
+    
+    # Новые L1 блокчейны (5)
+    "sui": {"id": "sui", "symbol": "SUI", "name": "Sui", "emoji": "🌊"},
+    "apt": {"id": "aptos", "symbol": "APT", "name": "Aptos", "emoji": "🔷"},
+    "sei": {"id": "sei-network", "symbol": "SEI", "name": "Sei", "emoji": "🌀"},
+    "near": {"id": "near", "symbol": "NEAR", "name": "NEAR Protocol", "emoji": "🌐"},
+    "ftm": {"id": "fantom", "symbol": "FTM", "name": "Fantom", "emoji": "👻"},
+    
+    # L2 Ethereum (2)
+    "arb": {"id": "arbitrum", "symbol": "ARB", "name": "Arbitrum", "emoji": "🔵"},
+    "op": {"id": "optimism", "symbol": "OP", "name": "Optimism", "emoji": "🔴"},
+    
+    # DeFi и другие (6)
+    "inj": {"id": "injective-protocol", "symbol": "INJ", "name": "Injective", "emoji": "💉"},
+    "xlm": {"id": "stellar", "symbol": "XLM", "name": "Stellar", "emoji": "⭐"},
+    "vet": {"id": "vechain", "symbol": "VET", "name": "VeChain", "emoji": "✔️"},
+    "algo": {"id": "algorand", "symbol": "ALGO", "name": "Algorand", "emoji": "⬡"},
+    "fil": {"id": "filecoin", "symbol": "FIL", "name": "Filecoin", "emoji": "📁"},
+    "rune": {"id": "thorchain", "symbol": "RUNE", "name": "THORChain", "emoji": "⚡"},
 }
 
 
@@ -82,9 +108,9 @@ async def clean_send(message: Message, text: str, keyboard: InlineKeyboardMarkup
 
 
 async def get_coin_price(symbol: str) -> dict:
-    """Получить цену через Multi-API Manager (CoinGecko + Binance + Kraken)"""
+    """Получить цену через Multi-API Manager (CoinGecko + CoinPaprika + MEXC + Kraken)"""
     try:
-        data = await get_price_multi_api(symbol. upper())
+        data = await get_price_multi_api(symbol.upper())
         
         if data.get("success"):
             return {
@@ -307,16 +333,17 @@ async def cmd_start(message: Message):
     await clean_send(message, get_welcome_text(name), get_main_keyboard())
 
 
-@router. message(Command("help"))
+@router.message(Command("help"))
 async def cmd_help(message: Message):
     text = "📚 *Справка*\n\n"
     text = text + "*Быстрые команды:*\n\n"
     text = text + "/btc /eth /ton /sol /xrp\n"
-    text = text + "/doge /matic /ltc /shib /avax\n\n"
+    text = text + "/doge /matic /ltc /shib /avax\n"
+    text = text + "/not /pepe /sui /arb /near\n\n"
     text = text + "*Основные команды:*\n\n"
     text = text + "/start — главное меню\n"
     text = text + "/market — обзор рынка\n"
-    text = text + "/prices — все 10 монет\n"
+    text = text + "/prices — все монеты\n"
     text = text + "/help — справка\n\n"
     text = text + "*Команды Whale Tracker:*\n\n"
     text = text + "/whale — все крупные транзакции\n"
@@ -326,7 +353,7 @@ async def cmd_help(message: Message):
     text = text + "/whale on — включить оповещения\n"
     text = text + "/whale off — выключить оповещения\n"
     text = text + "/whale stats — статистика за день\n\n"
-    text = text + "📡 _3 API: CoinGecko + Binance + Kraken_"
+    text = text + "📡 _5 API: CoinGecko + CoinPaprika + MEXC + Kraken_"
     await clean_send(message, text, get_back_keyboard())
 
 
@@ -739,8 +766,8 @@ async def callback_prices(callback: CallbackQuery):
     text = "💰 *Цены криптовалют*\n\n"
     text = text + "Выбери монету для просмотра\n"
     text = text + "актуальной цены 👇\n\n"
-    text = text + "📡 _3 API: CoinGecko + Binance + Kraken_"
-    await callback.message.edit_text(text, reply_markup=get_prices_keyboard(), parse_mode=ParseMode. MARKDOWN)
+    text = text + "📡 _5 API: CoinGecko + CoinPaprika + MEXC + Kraken_"
+    await callback.message.edit_text(text, reply_markup=get_prices_keyboard(), parse_mode=ParseMode.MARKDOWN)
     await callback.answer()
 
 
@@ -970,19 +997,20 @@ async def callback_settings(callback: CallbackQuery):
     await callback.answer()
 
 
-@router. callback_query(lambda c: c.data == "menu_help")
+@router.callback_query(lambda c: c.data == "menu_help")
 async def callback_help(callback: CallbackQuery):
     text = "📚 *Справка*\n\n"
     text = text + "*Быстрые команды:*\n\n"
     text = text + "/btc /eth /ton /sol /xrp\n"
-    text = text + "/doge /matic /ltc /shib /avax\n\n"
+    text = text + "/doge /matic /ltc /shib /avax\n"
+    text = text + "/not /pepe /sui /arb /near\n\n"
     text = text + "*Основные команды:*\n\n"
     text = text + "/start — главное меню\n"
     text = text + "/market — обзор рынка\n"
-    text = text + "/prices — все 10 монет\n"
+    text = text + "/prices — все монеты\n"
     text = text + "/help — справка\n\n"
-    text = text + "📡 _3 API: CoinGecko + Binance + Kraken_"
-    await callback.message. edit_text(text, reply_markup=get_back_keyboard(), parse_mode=ParseMode.MARKDOWN)
+    text = text + "📡 _5 API: CoinGecko + CoinPaprika + MEXC + Kraken_"
+    await callback.message.edit_text(text, reply_markup=get_back_keyboard(), parse_mode=ParseMode.MARKDOWN)
     await callback.answer()
 
 
@@ -1011,12 +1039,12 @@ def create_bot() -> Tuple[Bot, Dispatcher]:
 
 
 async def on_startup(bot: Bot):
-    logger.info("Gheezy Crypto Bot запущен с 3 API")
-    for admin_id in settings. telegram_admin_ids:
+    logger.info("Gheezy Crypto Bot запущен с 5 API")
+    for admin_id in settings.telegram_admin_ids:
         try:
             text = "🚀 *Gheezy Crypto* запущен!\n\n"
-            text = text + "📡 API: CoinGecko + Binance + Kraken\n"
-            text = text + "🪙 Монеты: 10 популярных в России"
+            text = text + "📡 API: CoinGecko + CoinPaprika + MEXC + Kraken\n"
+            text = text + "🪙 Монеты: 34 популярных в России"
             await bot.send_message(admin_id, text, parse_mode=ParseMode.MARKDOWN)
         except:
             pass
