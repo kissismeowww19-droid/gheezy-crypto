@@ -297,6 +297,15 @@ class BaseTracker:
 
                 data = await self._make_api_request(ETHERSCAN_V2_URL, params=params)
                 if not data or data.get("status") != "1":
+                    # Log detailed error for debugging
+                    if data:
+                        logger.warning(
+                            "Base: Etherscan V2 error response",
+                            status=data.get("status"),
+                            message=data.get("message"),
+                            result=str(data.get("result", ""))[:200],
+                            address=address[:10] + "..." if len(address) > 10 else address,
+                        )
                     continue
 
                 for tx in data.get("result", []):
