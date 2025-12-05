@@ -19,6 +19,7 @@ Gheezy Crypto - Трекер китов
 """
 
 import asyncio
+import time as time_module
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -689,8 +690,6 @@ class WhaleTracker:
         Returns:
             WhaleStats: Объединённая статистика по всем сетям
         """
-        import time as time_module
-
         # Проверяем кэш (1 минута)
         current_time = time_module.time()
         if (
