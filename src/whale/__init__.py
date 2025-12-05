@@ -16,7 +16,7 @@ from whale.bsc import BSCTracker, BSCTransaction
 from whale.bitcoin import BitcoinTracker, BitcoinTransaction
 from whale.solana import SolanaTracker, SolanaTransaction
 from whale.ton import TONTracker, TONTransaction
-from whale.stats import WhaleStats, NetworkStats
+from whale.stats import WhaleStats, NetworkStats, format_db_stats_message
 from whale.alerts import (
     WhaleAlert,
     format_whale_alert_message,
@@ -53,6 +53,7 @@ __all__ = [
     # Stats
     "WhaleStats",
     "NetworkStats",
+    "format_db_stats_message",
     # Alerts
     "WhaleAlert",
     "format_whale_alert_message",
