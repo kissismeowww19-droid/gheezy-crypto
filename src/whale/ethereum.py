@@ -432,6 +432,15 @@ class EthereumTracker:
 
         data = await self._make_api_request(ETHERSCAN_API_URL, params=params)
         if not data or data.get("status") != "1" or not data.get("result"):
+            # Log detailed error for debugging
+            if data and data.get("status") != "1":
+                logger.warning(
+                    "ETH: Etherscan V2 error response",
+                    status=data.get("status"),
+                    message=data.get("message"),
+                    result=str(data.get("result", ""))[:200],
+                    address=address[:10] + "..." if len(address) > 10 else address,
+                )
             return []
 
         transactions = []
