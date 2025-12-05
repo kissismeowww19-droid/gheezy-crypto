@@ -390,13 +390,18 @@ async def cmd_help(message: Message):
     text = text + "/market — обзор рынка\n"
     text = text + "/prices — все монеты (с пагинацией)\n"
     text = text + "/help — справка\n\n"
-    text = text + "*Команды Whale Tracker:*\n\n"
+    text = text + "*Команды Whale Tracker (9 сетей):*\n\n"
     text = text + "/whale — все крупные транзакции\n"
     text = text + "/whale btc — только Bitcoin\n"
     text = text + "/whale eth — только Ethereum\n"
     text = text + "/whale bsc — только BSC\n"
     text = text + "/whale sol — только Solana\n"
     text = text + "/whale ton — только TON\n"
+    text = text + "/whale arb — только Arbitrum\n"
+    text = text + "/whale polygon — только Polygon\n"
+    text = text + "/whale avax — только Avalanche\n"
+    text = text + "/whale base — только Base\n"
+    text = text + "/whale defi — DeFi операции\n"
     text = text + "/whale on — включить оповещения\n"
     text = text + "/whale off — выключить оповещения\n"
     text = text + "/whale stats — статистика за день\n"
@@ -658,7 +663,7 @@ async def cmd_rune(message: Message):
 # ============================================
 
 def get_whale_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура для whale tracker."""
+    """Клавиатура для whale tracker с 9 сетями и DeFi."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="🟠 BTC", callback_data="whale_btc"),
@@ -670,10 +675,19 @@ def get_whale_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="💎 TON", callback_data="whale_ton"),
         ],
         [
-            InlineKeyboardButton(text="📊 Статистика", callback_data="whale_stats"),
-            InlineKeyboardButton(text="🔄 Обновить", callback_data="whale_all"),
+            InlineKeyboardButton(text="🔵 Arbitrum", callback_data="whale_arb"),
+            InlineKeyboardButton(text="🟣 Polygon", callback_data="whale_polygon"),
         ],
         [
+            InlineKeyboardButton(text="🔺 Avalanche", callback_data="whale_avax"),
+            InlineKeyboardButton(text="🔵 Base", callback_data="whale_base"),
+        ],
+        [
+            InlineKeyboardButton(text="🏦 DeFi", callback_data="whale_defi"),
+            InlineKeyboardButton(text="📊 Статистика", callback_data="whale_stats"),
+        ],
+        [
+            InlineKeyboardButton(text="🔄 Обновить", callback_data="whale_all"),
             InlineKeyboardButton(text="🔙 Назад", callback_data="menu_back"),
         ],
     ])
@@ -817,6 +831,91 @@ async def cmd_whale(message: Message):
             logger.error(f"Whale TON error: {e}")
             await loading_msg.edit_text(
                 "🐋 *Whale Tracker - TON*\n\n❌ Ошибка загрузки данных",
+                reply_markup=get_whale_keyboard(),
+                parse_mode=ParseMode.MARKDOWN
+            )
+        return
+
+    if subcommand == "arb" or subcommand == "arbitrum":
+        # Только Arbitrum
+        loading_msg = await message.answer("⏳ *Загружаю Arbitrum транзакции...*", parse_mode=ParseMode.MARKDOWN)
+        user_messages[chat_id] = loading_msg.message_id
+
+        try:
+            whale_text = await whale_tracker.format_whale_message(blockchain="arb")
+            await loading_msg.edit_text(whale_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+        except Exception as e:
+            logger.error(f"Whale Arbitrum error: {e}")
+            await loading_msg.edit_text(
+                "🐋 *Whale Tracker - Arbitrum*\n\n❌ Ошибка загрузки данных",
+                reply_markup=get_whale_keyboard(),
+                parse_mode=ParseMode.MARKDOWN
+            )
+        return
+
+    if subcommand == "polygon" or subcommand == "matic":
+        # Только Polygon
+        loading_msg = await message.answer("⏳ *Загружаю Polygon транзакции...*", parse_mode=ParseMode.MARKDOWN)
+        user_messages[chat_id] = loading_msg.message_id
+
+        try:
+            whale_text = await whale_tracker.format_whale_message(blockchain="polygon")
+            await loading_msg.edit_text(whale_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+        except Exception as e:
+            logger.error(f"Whale Polygon error: {e}")
+            await loading_msg.edit_text(
+                "🐋 *Whale Tracker - Polygon*\n\n❌ Ошибка загрузки данных",
+                reply_markup=get_whale_keyboard(),
+                parse_mode=ParseMode.MARKDOWN
+            )
+        return
+
+    if subcommand == "avax" or subcommand == "avalanche":
+        # Только Avalanche
+        loading_msg = await message.answer("⏳ *Загружаю Avalanche транзакции...*", parse_mode=ParseMode.MARKDOWN)
+        user_messages[chat_id] = loading_msg.message_id
+
+        try:
+            whale_text = await whale_tracker.format_whale_message(blockchain="avax")
+            await loading_msg.edit_text(whale_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+        except Exception as e:
+            logger.error(f"Whale Avalanche error: {e}")
+            await loading_msg.edit_text(
+                "🐋 *Whale Tracker - Avalanche*\n\n❌ Ошибка загрузки данных",
+                reply_markup=get_whale_keyboard(),
+                parse_mode=ParseMode.MARKDOWN
+            )
+        return
+
+    if subcommand == "base":
+        # Только Base
+        loading_msg = await message.answer("⏳ *Загружаю Base транзакции...*", parse_mode=ParseMode.MARKDOWN)
+        user_messages[chat_id] = loading_msg.message_id
+
+        try:
+            whale_text = await whale_tracker.format_whale_message(blockchain="base")
+            await loading_msg.edit_text(whale_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+        except Exception as e:
+            logger.error(f"Whale Base error: {e}")
+            await loading_msg.edit_text(
+                "🐋 *Whale Tracker - Base*\n\n❌ Ошибка загрузки данных",
+                reply_markup=get_whale_keyboard(),
+                parse_mode=ParseMode.MARKDOWN
+            )
+        return
+
+    if subcommand == "defi":
+        # DeFi операции
+        loading_msg = await message.answer("⏳ *Загружаю DeFi операции...*", parse_mode=ParseMode.MARKDOWN)
+        user_messages[chat_id] = loading_msg.message_id
+
+        try:
+            defi_text = await whale_tracker.format_defi_message()
+            await loading_msg.edit_text(defi_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+        except Exception as e:
+            logger.error(f"DeFi error: {e}")
+            await loading_msg.edit_text(
+                "🏦 *DeFi Tracker*\n\n❌ Ошибка загрузки данных",
                 reply_markup=get_whale_keyboard(),
                 parse_mode=ParseMode.MARKDOWN
             )
@@ -966,6 +1065,96 @@ async def callback_whale_ton(callback: CallbackQuery):
         logger.error(f"Whale TON callback error: {e}")
         await callback.message.edit_text(
             "🐋 *Whale Tracker - TON*\n\n❌ Ошибка загрузки данных",
+            reply_markup=get_whale_keyboard(),
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+
+@router.callback_query(lambda c: c.data == "whale_arb")
+async def callback_whale_arb(callback: CallbackQuery):
+    """Транзакции Arbitrum."""
+    await callback.answer("⏳ Загружаю Arbitrum...")
+    await callback.message.edit_text("⏳ *Загружаю Arbitrum транзакции...*", parse_mode=ParseMode.MARKDOWN)
+
+    try:
+        whale_text = await whale_tracker.format_whale_message(blockchain="arb")
+        await callback.message.edit_text(whale_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        logger.error(f"Whale Arbitrum callback error: {e}")
+        await callback.message.edit_text(
+            "🐋 *Whale Tracker - Arbitrum*\n\n❌ Ошибка загрузки данных",
+            reply_markup=get_whale_keyboard(),
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+
+@router.callback_query(lambda c: c.data == "whale_polygon")
+async def callback_whale_polygon(callback: CallbackQuery):
+    """Транзакции Polygon."""
+    await callback.answer("⏳ Загружаю Polygon...")
+    await callback.message.edit_text("⏳ *Загружаю Polygon транзакции...*", parse_mode=ParseMode.MARKDOWN)
+
+    try:
+        whale_text = await whale_tracker.format_whale_message(blockchain="polygon")
+        await callback.message.edit_text(whale_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        logger.error(f"Whale Polygon callback error: {e}")
+        await callback.message.edit_text(
+            "🐋 *Whale Tracker - Polygon*\n\n❌ Ошибка загрузки данных",
+            reply_markup=get_whale_keyboard(),
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+
+@router.callback_query(lambda c: c.data == "whale_avax")
+async def callback_whale_avax(callback: CallbackQuery):
+    """Транзакции Avalanche."""
+    await callback.answer("⏳ Загружаю Avalanche...")
+    await callback.message.edit_text("⏳ *Загружаю Avalanche транзакции...*", parse_mode=ParseMode.MARKDOWN)
+
+    try:
+        whale_text = await whale_tracker.format_whale_message(blockchain="avax")
+        await callback.message.edit_text(whale_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        logger.error(f"Whale Avalanche callback error: {e}")
+        await callback.message.edit_text(
+            "🐋 *Whale Tracker - Avalanche*\n\n❌ Ошибка загрузки данных",
+            reply_markup=get_whale_keyboard(),
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+
+@router.callback_query(lambda c: c.data == "whale_base")
+async def callback_whale_base(callback: CallbackQuery):
+    """Транзакции Base."""
+    await callback.answer("⏳ Загружаю Base...")
+    await callback.message.edit_text("⏳ *Загружаю Base транзакции...*", parse_mode=ParseMode.MARKDOWN)
+
+    try:
+        whale_text = await whale_tracker.format_whale_message(blockchain="base")
+        await callback.message.edit_text(whale_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        logger.error(f"Whale Base callback error: {e}")
+        await callback.message.edit_text(
+            "🐋 *Whale Tracker - Base*\n\n❌ Ошибка загрузки данных",
+            reply_markup=get_whale_keyboard(),
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+
+@router.callback_query(lambda c: c.data == "whale_defi")
+async def callback_whale_defi(callback: CallbackQuery):
+    """DeFi операции."""
+    await callback.answer("⏳ Загружаю DeFi...")
+    await callback.message.edit_text("⏳ *Загружаю DeFi операции...*", parse_mode=ParseMode.MARKDOWN)
+
+    try:
+        defi_text = await whale_tracker.format_defi_message()
+        await callback.message.edit_text(defi_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        logger.error(f"DeFi callback error: {e}")
+        await callback.message.edit_text(
+            "🏦 *DeFi Tracker*\n\n❌ Ошибка загрузки данных",
             reply_markup=get_whale_keyboard(),
             parse_mode=ParseMode.MARKDOWN
         )

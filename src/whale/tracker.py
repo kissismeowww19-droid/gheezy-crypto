@@ -1,9 +1,12 @@
 """
 Gheezy Crypto - Трекер китов
 
-Отслеживание крупных транзакций китов на Ethereum, BSC, Bitcoin, Solana и TON.
+Отслеживание крупных транзакций китов на 9 блокчейнах:
+- Ethereum, BSC, Bitcoin, Solana, TON (основные)
+- Arbitrum, Polygon, Avalanche, Base (новые L2/сети)
+
 Использует несколько источников данных с приоритетом:
-- Etherscan/BscScan API (если есть ключи)
+- Etherscan/BscScan/Arbiscan/Polygonscan/Snowtrace/Basescan API
 - Blockscout API (бесплатный)
 - Публичные RPC ноды
 - mempool.space / blockstream.info для Bitcoin
@@ -15,6 +18,7 @@ Gheezy Crypto - Трекер китов
 - Retry логика с exponential backoff
 - Параллельные запросы ко всем сетям
 - Единая статистика по всем сетям
+- DeFi трекинг (Uniswap, Aave, Lido)
 - Fallback на демо-данные (опционально, с предупреждением)
 - SQLite база данных для сохранения транзакций
 """
@@ -35,6 +39,13 @@ from whale.bsc import BSCTracker
 from whale.bitcoin import BitcoinTracker
 from whale.solana import SolanaTracker
 from whale.ton import TONTracker
+# New chain trackers
+from whale.arbitrum import ArbitrumTracker
+from whale.polygon import PolygonTracker
+from whale.avalanche import AvalancheTracker
+from whale.base_chain import BaseTracker
+# DeFi tracker
+from whale.defi import DeFiTracker
 from whale.known_wallets import (
     is_exchange_address,
     get_short_address,
@@ -188,6 +199,10 @@ class WhaleTracker:
     - Bitcoin: mempool.space → blockstream.info
     - Solana: Solscan API
     - TON: TON Center API → TON API
+    - Arbitrum: Arbiscan API
+    - Polygon: Polygonscan API
+    - Avalanche: Snowtrace API
+    - Base: Basescan API
 
     Все источники работают в России без VPN.
 
@@ -206,12 +221,21 @@ class WhaleTracker:
         # Инициализация SQLite базы данных для транзакций
         init_whale_db()
 
-        # Инициализация трекеров для каждого блокчейна
+        # Инициализация трекеров для основных блокчейнов
         self._eth_tracker = EthereumTracker()
         self._bsc_tracker = BSCTracker()
         self._btc_tracker = BitcoinTracker()
         self._sol_tracker = SolanaTracker()
         self._ton_tracker = TONTracker()
+
+        # Инициализация трекеров для новых сетей (L2)
+        self._arb_tracker = ArbitrumTracker()
+        self._polygon_tracker = PolygonTracker()
+        self._avax_tracker = AvalancheTracker()
+        self._base_tracker = BaseTracker()
+
+        # DeFi трекер
+        self._defi_tracker = DeFiTracker()
 
         # Кэш последних транзакций
         self._last_transactions: list[WhaleTransaction] = []
@@ -227,8 +251,9 @@ class WhaleTracker:
             use_demo_data=self.use_demo_data,
             etherscan_key="настроен" if settings.etherscan_api_key else "не настроен",
             bscscan_key="настроен" if settings.bscscan_api_key else "не настроен",
-            networks=["ETH", "BSC", "BTC", "SOL", "TON"],
+            networks=["ETH", "BSC", "BTC", "SOL", "TON", "ARB", "POLYGON", "AVAX", "BASE"],
             database="SQLite",
+            defi_tracking="enabled",
         )
 
     async def close(self) -> None:
@@ -241,11 +266,21 @@ class WhaleTracker:
             except asyncio.CancelledError:
                 pass
 
+        # Закрываем основные трекеры
         await self._eth_tracker.close()
         await self._bsc_tracker.close()
         await self._btc_tracker.close()
         await self._sol_tracker.close()
         await self._ton_tracker.close()
+
+        # Закрываем новые трекеры
+        await self._arb_tracker.close()
+        await self._polygon_tracker.close()
+        await self._avax_tracker.close()
+        await self._base_tracker.close()
+
+        # Закрываем DeFi трекер
+        await self._defi_tracker.close()
 
     async def start(self) -> None:
         """Запуск периодического мониторинга."""
@@ -293,6 +328,10 @@ class WhaleTracker:
             "Bitcoin": "BTC",
             "Solana": "SOL",
             "TON": "TON",
+            "Arbitrum": "ARB",
+            "Polygon": "POLYGON",
+            "Avalanche": "AVAX",
+            "Base": "BASE",
         }
         chain = chain_map.get(tx.blockchain, tx.blockchain)
 
@@ -345,6 +384,10 @@ class WhaleTracker:
                     btc=len([t for t in transactions if t.blockchain == "Bitcoin"]),
                     sol=len([t for t in transactions if t.blockchain == "Solana"]),
                     ton=len([t for t in transactions if t.blockchain == "TON"]),
+                    arb=len([t for t in transactions if t.blockchain == "Arbitrum"]),
+                    polygon=len([t for t in transactions if t.blockchain == "Polygon"]),
+                    avax=len([t for t in transactions if t.blockchain == "Avalanche"]),
+                    base=len([t for t in transactions if t.blockchain == "Base"]),
                 )
             except Exception as e:
                 logger.error(
@@ -584,12 +627,219 @@ class WhaleTracker:
             )
             return []
 
+    # ===== Новые сети (Arbitrum, Polygon, Avalanche, Base) =====
+
+    async def get_arbitrum_transactions(
+        self,
+        limit: int = 20,
+    ) -> list[WhaleTransaction]:
+        """
+        Получение крупных ETH транзакций на Arbitrum.
+
+        Args:
+            limit: Максимальное количество транзакций
+
+        Returns:
+            list[WhaleTransaction]: Список транзакций
+        """
+        try:
+            arb_txs = await self._arb_tracker.get_large_transactions(limit=limit)
+
+            transactions = []
+            for tx in arb_txs:
+                transactions.append(
+                    WhaleTransaction(
+                        tx_hash=tx.tx_hash,
+                        blockchain="Arbitrum",
+                        token_symbol="ETH",
+                        amount=tx.value_eth,
+                        amount_usd=tx.value_usd,
+                        from_address=tx.from_address,
+                        to_address=tx.to_address,
+                        from_label=tx.from_label,
+                        to_label=tx.to_label,
+                        timestamp=tx.timestamp,
+                    )
+                )
+
+            logger.debug(
+                "Получены Arbitrum транзакции",
+                count=len(transactions),
+            )
+            return transactions
+
+        except Exception as e:
+            logger.error(
+                "Ошибка Arbitrum трекера",
+                error=str(e),
+            )
+            return []
+
+    async def get_polygon_transactions(
+        self,
+        limit: int = 20,
+    ) -> list[WhaleTransaction]:
+        """
+        Получение крупных MATIC транзакций на Polygon.
+
+        Args:
+            limit: Максимальное количество транзакций
+
+        Returns:
+            list[WhaleTransaction]: Список транзакций
+        """
+        try:
+            polygon_txs = await self._polygon_tracker.get_large_transactions(limit=limit)
+
+            transactions = []
+            for tx in polygon_txs:
+                transactions.append(
+                    WhaleTransaction(
+                        tx_hash=tx.tx_hash,
+                        blockchain="Polygon",
+                        token_symbol="MATIC",
+                        amount=tx.value_matic,
+                        amount_usd=tx.value_usd,
+                        from_address=tx.from_address,
+                        to_address=tx.to_address,
+                        from_label=tx.from_label,
+                        to_label=tx.to_label,
+                        timestamp=tx.timestamp,
+                    )
+                )
+
+            logger.debug(
+                "Получены Polygon транзакции",
+                count=len(transactions),
+            )
+            return transactions
+
+        except Exception as e:
+            logger.error(
+                "Ошибка Polygon трекера",
+                error=str(e),
+            )
+            return []
+
+    async def get_avalanche_transactions(
+        self,
+        limit: int = 20,
+    ) -> list[WhaleTransaction]:
+        """
+        Получение крупных AVAX транзакций на Avalanche.
+
+        Args:
+            limit: Максимальное количество транзакций
+
+        Returns:
+            list[WhaleTransaction]: Список транзакций
+        """
+        try:
+            avax_txs = await self._avax_tracker.get_large_transactions(limit=limit)
+
+            transactions = []
+            for tx in avax_txs:
+                transactions.append(
+                    WhaleTransaction(
+                        tx_hash=tx.tx_hash,
+                        blockchain="Avalanche",
+                        token_symbol="AVAX",
+                        amount=tx.value_avax,
+                        amount_usd=tx.value_usd,
+                        from_address=tx.from_address,
+                        to_address=tx.to_address,
+                        from_label=tx.from_label,
+                        to_label=tx.to_label,
+                        timestamp=tx.timestamp,
+                    )
+                )
+
+            logger.debug(
+                "Получены Avalanche транзакции",
+                count=len(transactions),
+            )
+            return transactions
+
+        except Exception as e:
+            logger.error(
+                "Ошибка Avalanche трекера",
+                error=str(e),
+            )
+            return []
+
+    async def get_base_transactions(
+        self,
+        limit: int = 20,
+    ) -> list[WhaleTransaction]:
+        """
+        Получение крупных ETH транзакций на Base.
+
+        Args:
+            limit: Максимальное количество транзакций
+
+        Returns:
+            list[WhaleTransaction]: Список транзакций
+        """
+        try:
+            base_txs = await self._base_tracker.get_large_transactions(limit=limit)
+
+            transactions = []
+            for tx in base_txs:
+                transactions.append(
+                    WhaleTransaction(
+                        tx_hash=tx.tx_hash,
+                        blockchain="Base",
+                        token_symbol="ETH",
+                        amount=tx.value_eth,
+                        amount_usd=tx.value_usd,
+                        from_address=tx.from_address,
+                        to_address=tx.to_address,
+                        from_label=tx.from_label,
+                        to_label=tx.to_label,
+                        timestamp=tx.timestamp,
+                    )
+                )
+
+            logger.debug(
+                "Получены Base транзакции",
+                count=len(transactions),
+            )
+            return transactions
+
+        except Exception as e:
+            logger.error(
+                "Ошибка Base трекера",
+                error=str(e),
+            )
+            return []
+
+    async def get_defi_events(self, limit: int = 20) -> list:
+        """
+        Получение DeFi событий.
+
+        Args:
+            limit: Максимальное количество событий
+
+        Returns:
+            list: Список DeFi событий
+        """
+        return await self._defi_tracker.get_all_defi_events(limit=limit)
+
+    async def format_defi_message(self) -> str:
+        """
+        Форматирование сообщения о DeFi событиях.
+
+        Returns:
+            str: Форматированное сообщение
+        """
+        return await self._defi_tracker.format_defi_message()
+
     async def get_all_transactions(
         self,
         limit: int = 20,
     ) -> list[WhaleTransaction]:
         """
-        Получение транзакций со всех блокчейнов.
+        Получение транзакций со всех блокчейнов (9 сетей).
 
         Если реальные данные недоступны и включен режим демо-данных,
         возвращает демо-транзакции с предупреждением.
@@ -600,15 +850,22 @@ class WhaleTracker:
         Returns:
             list[WhaleTransaction]: Список всех транзакций
         """
-        # Запускаем все запросы параллельно
+        # Запускаем все запросы параллельно (основные сети)
         eth_task = self.get_ethereum_transactions(limit=limit)
         bsc_task = self.get_bsc_transactions(limit=limit)
         btc_task = self.get_bitcoin_transactions(limit=limit)
         sol_task = self.get_solana_transactions(limit=limit)
         ton_task = self.get_ton_transactions(limit=limit)
 
+        # Новые сети (L2)
+        arb_task = self.get_arbitrum_transactions(limit=limit)
+        polygon_task = self.get_polygon_transactions(limit=limit)
+        avax_task = self.get_avalanche_transactions(limit=limit)
+        base_task = self.get_base_transactions(limit=limit)
+
         results = await asyncio.gather(
             eth_task, bsc_task, btc_task, sol_task, ton_task,
+            arb_task, polygon_task, avax_task, base_task,
             return_exceptions=True
         )
 
@@ -648,7 +905,7 @@ class WhaleTracker:
         Получение транзакций для конкретного блокчейна.
 
         Args:
-            blockchain: Название блокчейна (eth, bsc, btc, sol, ton)
+            blockchain: Название блокчейна (eth, bsc, btc, sol, ton, arb, polygon, avax, base)
             limit: Максимальное количество транзакций
 
         Returns:
@@ -666,6 +923,14 @@ class WhaleTracker:
             return await self.get_solana_transactions(limit=limit)
         elif blockchain_lower == "ton":
             return await self.get_ton_transactions(limit=limit)
+        elif blockchain_lower in ("arb", "arbitrum"):
+            return await self.get_arbitrum_transactions(limit=limit)
+        elif blockchain_lower in ("polygon", "matic"):
+            return await self.get_polygon_transactions(limit=limit)
+        elif blockchain_lower in ("avax", "avalanche"):
+            return await self.get_avalanche_transactions(limit=limit)
+        elif blockchain_lower == "base":
+            return await self.get_base_transactions(limit=limit)
         else:
             logger.warning(f"Unknown blockchain: {blockchain}")
             return []
@@ -697,6 +962,10 @@ class WhaleTracker:
         btc_count = len([tx for tx in transactions if tx.blockchain == "Bitcoin"])
         sol_count = len([tx for tx in transactions if tx.blockchain == "Solana"])
         ton_count = len([tx for tx in transactions if tx.blockchain == "TON"])
+        arb_count = len([tx for tx in transactions if tx.blockchain == "Arbitrum"])
+        polygon_count = len([tx for tx in transactions if tx.blockchain == "Polygon"])
+        avax_count = len([tx for tx in transactions if tx.blockchain == "Avalanche"])
+        base_count = len([tx for tx in transactions if tx.blockchain == "Base"])
 
         return {
             "total_transactions": len(transactions),
@@ -708,6 +977,10 @@ class WhaleTracker:
             "btc_transactions": btc_count,
             "sol_transactions": sol_count,
             "ton_transactions": ton_count,
+            "arb_transactions": arb_count,
+            "polygon_transactions": polygon_count,
+            "avax_transactions": avax_count,
+            "base_transactions": base_count,
             "sentiment": "bearish" if deposits > withdrawals else "bullish",
         }
 
@@ -782,6 +1055,10 @@ class WhaleTracker:
             "Bitcoin": "BTC",
             "Solana": "SOL",
             "TON": "TON",
+            "Arbitrum": "ARB",
+            "Polygon": "POLYGON",
+            "Avalanche": "AVAX",
+            "Base": "BASE",
         }
 
         for network_name, network_key in network_map.items():
