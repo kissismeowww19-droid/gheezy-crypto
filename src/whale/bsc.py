@@ -1,12 +1,12 @@
 """
 Gheezy Crypto - BSC Whale Tracker
 
-Отслеживание крупных транзакций на Binance Smart Chain через BscScan API.
+Отслеживание крупных транзакций на Binance Smart Chain через Etherscan API V2.
 Поддерживает резервные источники данных через публичные RPC ноды.
 Работает в России без VPN.
 
 Возможности:
-- BscScan API (требуется API ключ для высокой скорости)
+- Etherscan API V2 с chainid=56 для BSC (требуется API ключ)
 - Публичные RPC ноды для работы без ключа
 - Кэширование цен криптовалют
 - Retry логика с exponential backoff
@@ -32,8 +32,9 @@ from whale.known_wallets import get_bsc_wallet_label
 
 logger = structlog.get_logger()
 
-# BscScan API URL (free tier works without upgrade)
-BSCSCAN_API_URL = "https://api.bscscan.com/api"
+# Etherscan API V2 URL (used for BSC with chainid parameter)
+BSCSCAN_API_URL = "https://api.etherscan.io/v2/api"
+BSC_CHAIN_ID = 56  # BSC Mainnet
 
 # ===== Публичные RPC URL для BSC (резервные) =====
 PUBLIC_BSC_RPC_URLS = [
@@ -125,7 +126,7 @@ class BSCTracker:
     Трекер крупных транзакций на BSC.
 
     Использует несколько источников данных:
-    1. BscScan API (если есть ключ)
+    1. Etherscan API V2 с chainid=56 (если есть ключ)
     2. Публичные RPC ноды для работы без ключа
 
     Особенности:
@@ -139,7 +140,7 @@ class BSCTracker:
         Инициализация трекера.
 
         Args:
-            api_key: API ключ BscScan (опционально)
+            api_key: API ключ Etherscan (опционально)
         """
         self.api_key = api_key or getattr(settings, "bscscan_api_key", "")
         self.min_value_usd = settings.whale_min_transaction
@@ -304,7 +305,7 @@ class BSCTracker:
         limit: int,
     ) -> list[BSCTransaction]:
         """
-        Получение транзакций через BscScan API.
+        Получение транзакций через Etherscan API V2 (chainid=56 для BSC).
 
         Args:
             min_value_bnb: Минимальная сумма в BNB
@@ -319,6 +320,7 @@ class BSCTracker:
         try:
             # Получаем последний блок
             params_block = {
+                "chainid": BSC_CHAIN_ID,
                 "module": "proxy",
                 "action": "eth_blockNumber",
                 "apikey": self.api_key,
@@ -392,6 +394,7 @@ class BSCTracker:
             list[BSCTransaction]: Список транзакций
         """
         params = {
+            "chainid": BSC_CHAIN_ID,
             "module": "account",
             "action": "txlist",
             "address": address,
@@ -610,6 +613,7 @@ class BSCTracker:
 
         try:
             params = {
+                "chainid": BSC_CHAIN_ID,
                 "module": "account",
                 "action": "tokentx",
                 "contractaddress": token_contract,
