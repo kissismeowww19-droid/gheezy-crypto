@@ -16,6 +16,10 @@ Solana, TON, Arbitrum, Polygon, Avalanche и Base.
 - DAO Treasuries (50+): Optimism, Arbitrum, Uniswap, Compound, Aave, ENS
 - ETF провайдеры: BlackRock, Fidelity, Grayscale
 - Майнеры: Marathon, Riot, CleanSpark
+
+Note: Some addresses may be synthetic placeholders for entities that haven't
+disclosed their primary wallet addresses publicly. Real addresses should be
+added as they become known.
 """
 
 from typing import Optional

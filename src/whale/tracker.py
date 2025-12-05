@@ -1026,6 +1026,12 @@ class WhaleTracker:
             eth_transactions=analysis["eth_transactions"],
             bsc_transactions=analysis["bsc_transactions"],
             btc_transactions=analysis["btc_transactions"],
+            sol_transactions=analysis["sol_transactions"],
+            ton_transactions=analysis["ton_transactions"],
+            arb_transactions=analysis["arb_transactions"],
+            polygon_transactions=analysis["polygon_transactions"],
+            avax_transactions=analysis["avax_transactions"],
+            base_transactions=analysis["base_transactions"],
         )
 
     async def get_all_networks_stats(self) -> WhaleStats:

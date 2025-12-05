@@ -352,6 +352,7 @@ class AvalancheTracker:
         latest_block = int(data["result"], 16)
         transactions = []
 
+        # Avalanche has ~2s block time, 5 blocks = ~10 seconds of data
         for block_num in range(latest_block, max(latest_block - 5, 0), -1):
             block_request = {
                 "jsonrpc": "2.0",

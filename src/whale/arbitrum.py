@@ -351,6 +351,7 @@ class ArbitrumTracker:
         latest_block = int(data["result"], 16)
         transactions = []
 
+        # Arbitrum has ~0.25s block time, 5 blocks = ~1.25 seconds of data
         for block_num in range(latest_block, max(latest_block - 5, 0), -1):
             block_request = {
                 "jsonrpc": "2.0",
