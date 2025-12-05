@@ -77,7 +77,10 @@ def is_valid_ton_address(address: str) -> bool:
         if len(parts) == 2:
             try:
                 int(parts[0])  # workchain should be integer
-                if len(parts[1]) == 64:  # 32 bytes = 64 hex chars
+                hex_part = parts[1]
+                if len(hex_part) == 64:  # 32 bytes = 64 hex chars
+                    # Validate that hex_part contains only valid hex characters
+                    int(hex_part, 16)
                     return True
             except ValueError:
                 pass
