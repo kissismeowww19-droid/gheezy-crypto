@@ -235,16 +235,15 @@ class PolygonTracker:
         """
         await self._update_matic_price()
 
-        # Пробуем Polygonscan API если есть ключ
-        if self.api_key:
-            logger.debug("Polygon: Пробуем получить данные через Polygonscan API")
-            transactions = await self._get_from_polygonscan(limit)
-            if transactions:
-                logger.info(
-                    "Polygon: Данные получены через Polygonscan",
-                    count=len(transactions),
-                )
-                return transactions
+        # Пробуем Polygonscan API (работает и без ключа с rate limit)
+        logger.debug("Polygon: Пробуем получить данные через Polygonscan API")
+        transactions = await self._get_from_polygonscan(limit)
+        if transactions:
+            logger.info(
+                "Polygon: Данные получены через Polygonscan",
+                count=len(transactions),
+            )
+            return transactions
 
         # Пробуем публичные RPC
         logger.debug("Polygon: Пробуем получить данные через RPC")
@@ -263,26 +262,31 @@ class PolygonTracker:
         self,
         limit: int,
     ) -> list[PolygonTransaction]:
-        """Получение транзакций через Polygonscan API."""
-        if not self.api_key:
-            return []
-
+        """Получение транзакций через Polygonscan API (работает без ключа с rate limit)."""
         try:
             transactions = []
+            # Limit addresses when no API key to avoid rate limiting
+            num_addresses = 10 if self.api_key else 3
 
-            for address in TRACKED_POLYGON_ADDRESSES[:10]:
+            for address in TRACKED_POLYGON_ADDRESSES[:num_addresses]:
                 params = {
                     "module": "account",
                     "action": "txlist",
                     "address": address,
+                    "startblock": 0,
+                    "endblock": 99999999,
                     "page": 1,
                     "offset": 50,
                     "sort": "desc",
-                    "apikey": self.api_key,
                 }
+                if self.api_key:
+                    params["apikey"] = self.api_key
 
                 data = await self._make_api_request(POLYGONSCAN_API_URL, params=params)
                 if not data or data.get("status") != "1":
+                    # Rate limit delay without API key
+                    if not self.api_key:
+                        await asyncio.sleep(0.5)
                     continue
 
                 for tx in data.get("result", []):
@@ -312,7 +316,8 @@ class PolygonTracker:
                         )
                     )
 
-                await asyncio.sleep(0.2)
+                # Rate limit delay - longer without API key
+                await asyncio.sleep(0.5 if not self.api_key else 0.2)
 
             return self._deduplicate_and_sort(transactions, limit)
 

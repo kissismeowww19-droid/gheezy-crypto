@@ -230,16 +230,15 @@ class ArbitrumTracker:
         """
         await self._update_eth_price()
 
-        # Пробуем Arbiscan API если есть ключ
-        if self.api_key:
-            logger.debug("Arbitrum: Пробуем получить данные через Arbiscan API")
-            transactions = await self._get_from_arbiscan(limit)
-            if transactions:
-                logger.info(
-                    "Arbitrum: Данные получены через Arbiscan",
-                    count=len(transactions),
-                )
-                return transactions
+        # Пробуем Arbiscan API (работает и без ключа с rate limit)
+        logger.debug("Arbitrum: Пробуем получить данные через Arbiscan API")
+        transactions = await self._get_from_arbiscan(limit)
+        if transactions:
+            logger.info(
+                "Arbitrum: Данные получены через Arbiscan",
+                count=len(transactions),
+            )
+            return transactions
 
         # Пробуем публичные RPC
         logger.debug("Arbitrum: Пробуем получить данные через RPC")
@@ -258,26 +257,31 @@ class ArbitrumTracker:
         self,
         limit: int,
     ) -> list[ArbitrumTransaction]:
-        """Получение транзакций через Arbiscan API."""
-        if not self.api_key:
-            return []
-
+        """Получение транзакций через Arbiscan API (работает без ключа с rate limit)."""
         try:
             transactions = []
+            # Limit addresses when no API key to avoid rate limiting
+            num_addresses = 10 if self.api_key else 3
 
-            for address in TRACKED_ARBITRUM_ADDRESSES[:10]:
+            for address in TRACKED_ARBITRUM_ADDRESSES[:num_addresses]:
                 params = {
                     "module": "account",
                     "action": "txlist",
                     "address": address,
+                    "startblock": 0,
+                    "endblock": 99999999,
                     "page": 1,
                     "offset": 50,
                     "sort": "desc",
-                    "apikey": self.api_key,
                 }
+                if self.api_key:
+                    params["apikey"] = self.api_key
 
                 data = await self._make_api_request(ARBISCAN_API_URL, params=params)
                 if not data or data.get("status") != "1":
+                    # Rate limit delay without API key
+                    if not self.api_key:
+                        await asyncio.sleep(0.5)
                     continue
 
                 for tx in data.get("result", []):
@@ -307,7 +311,8 @@ class ArbitrumTracker:
                         )
                     )
 
-                await asyncio.sleep(0.2)
+                # Rate limit delay - longer without API key
+                await asyncio.sleep(0.5 if not self.api_key else 0.2)
 
             return self._deduplicate_and_sort(transactions, limit)
 
