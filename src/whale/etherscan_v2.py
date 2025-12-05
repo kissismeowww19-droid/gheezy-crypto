@@ -44,6 +44,8 @@ def _init_key_rotation() -> None:
     _etherscan_keys = [k for k in keys if k]
     if _etherscan_keys:
         _key_cycle = itertools.cycle(_etherscan_keys)
+    else:
+        _key_cycle = None
 
 
 def get_etherscan_key() -> Optional[str]:
@@ -63,10 +65,7 @@ def get_etherscan_key() -> Optional[str]:
         _init_key_rotation()
     if _key_cycle is None:
         return None
-    try:
-        return next(_key_cycle)
-    except StopIteration:
-        return None
+    return next(_key_cycle)
 
 
 def get_etherscan_v2_url(chain: str) -> Optional[str]:

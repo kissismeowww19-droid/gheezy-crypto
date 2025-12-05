@@ -368,7 +368,7 @@ class EthereumTracker:
             )
 
             # Sequential requests with delay to avoid rate limits (3 req/sec)
-            # Ограничиваем до 10 адресов для соблюдения rate limits Etherscan API
+            # Reduced from 15 to 10 addresses to minimize API calls while still covering major exchanges
             # Адреса отсортированы по важности (крупнейшие биржи первые)
             transactions = []
             for address in TRACKED_EXCHANGE_ADDRESSES[:10]:

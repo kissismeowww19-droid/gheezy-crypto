@@ -804,8 +804,9 @@ class WhaleTracker:
         elif blockchain_lower in ("avax", "avalanche"):
             return await self.get_avalanche_transactions(limit=limit)
         elif blockchain_lower == "base":
-            # Base requires paid API - return unavailable message
-            return await self.get_base_transactions(limit=limit)
+            # Base disabled - requires paid Etherscan plan
+            logger.debug("Base трекер отключен - требуется платный API")
+            return []
         else:
             logger.warning(f"Unknown blockchain: {blockchain}")
             return []
