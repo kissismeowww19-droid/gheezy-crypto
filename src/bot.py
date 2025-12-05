@@ -1194,7 +1194,12 @@ async def handle_text_coin(message: Message):
     if not message.text:
         return
     
-    text = message.text.upper().strip()
+    text = message.text.strip()
+    
+    # Проверяем формат: только короткие сообщения (1-6 символов) без пробелов
+    # Это предотвращает обработку обычных сообщений
+    if len(text) > 6 or ' ' in text:
+        return
     
     # Проверяем, есть ли такой символ в COINS
     coin_key = text.lower()
