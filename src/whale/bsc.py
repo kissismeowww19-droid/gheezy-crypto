@@ -1,12 +1,13 @@
 """
 Gheezy Crypto - BSC Whale Tracker
 
-Отслеживание крупных транзакций на Binance Smart Chain через Etherscan API V2.
+Отслеживание крупных транзакций на Binance Smart Chain через Ankr RPC и BscScan API.
 Поддерживает резервные источники данных через публичные RPC ноды.
 Работает в России без VPN.
 
 Возможности:
-- Etherscan API V2 с chainid=56 для BSC (требуется API ключ)
+- Ankr RPC (основной, бесплатный, без регистрации)
+- BscScan API (резервный, требуется API ключ)
 - Публичные RPC ноды для работы без ключа
 - Кэширование цен криптовалют
 - Retry логика с exponential backoff
@@ -32,7 +33,10 @@ from whale.known_wallets import get_bsc_wallet_label
 
 logger = structlog.get_logger()
 
-# BscScan API V2 URL with chainid=56 for BSC
+# ===== Ankr RPC (основной, бесплатный) =====
+ANKR_BSC_RPC = "https://rpc.ankr.com/bsc"
+
+# BscScan API V2 URL with chainid=56 for BSC (резервный)
 # Using Etherscan API V2 format: https://docs.etherscan.io/v2-migration
 BSCSCAN_API_URL = "https://api.etherscan.io/v2/api?chainid=56"
 
@@ -43,16 +47,16 @@ BSCSCAN_DIRECT_API_URL = "https://api.bscscan.com/api"
 # Note: Using the correct endpoint format
 BLOCKSCOUT_BSC_API_URL = "https://api.bscscan.com"
 
-# ===== Публичные RPC URL для BSC (резервные) =====
+# ===== Публичные RPC URL для BSC (с приоритетом Ankr) =====
 PUBLIC_BSC_RPC_URLS = [
+    ANKR_BSC_RPC,  # Ankr - основной, самый надежный
+    "https://bsc.publicnode.com",
+    "https://bsc-mainnet.public.blastapi.io",
     "https://bsc-dataseed.binance.org",
     "https://bsc-dataseed1.binance.org",
     "https://bsc-dataseed2.binance.org",
     "https://bsc-dataseed3.binance.org",
     "https://bsc-dataseed4.binance.org",
-    "https://rpc.ankr.com/bsc",
-    "https://bsc.publicnode.com",
-    "https://bsc-mainnet.public.blastapi.io",
 ]
 
 # ===== Расширенный список адресов бирж для отслеживания на BSC =====
@@ -270,8 +274,8 @@ class BSCTracker:
         Получение крупных BNB транзакций.
 
         Использует несколько источников данных:
-        1. BscScan API (api.bscscan.com) если есть ключ
-        2. Blockscout BSC (бесплатный)
+        1. Ankr RPC (основной, бесплатный, без регистрации)
+        2. BscScan API (api.bscscan.com) если есть ключ
         3. Публичные RPC ноды
 
         Args:
@@ -283,7 +287,17 @@ class BSCTracker:
         await self._update_bnb_price()
         min_value_bnb = self.min_value_usd / self._bnb_price
 
-        # Пробуем BscScan API если есть ключ
+        # 1. Пробуем Ankr RPC (основной метод, бесплатный)
+        logger.debug("Пробуем получить данные через Ankr RPC")
+        transactions = await self._get_from_ankr_rpc(min_value_bnb, limit)
+        if transactions:
+            logger.info(
+                "Данные получены через Ankr RPC",
+                count=len(transactions),
+            )
+            return transactions
+
+        # 2. Пробуем BscScan API если есть ключ
         if self.api_key:
             logger.debug("Пробуем получить данные через BscScan API")
             transactions = await self._get_from_bscscan(min_value_bnb, limit)
@@ -294,17 +308,7 @@ class BSCTracker:
                 )
                 return transactions
 
-        # Пробуем Blockscout BSC (бесплатный)
-        logger.debug("Пробуем получить данные через Blockscout BSC")
-        transactions = await self._get_from_blockscout(min_value_bnb, limit)
-        if transactions:
-            logger.info(
-                "Данные получены через Blockscout BSC",
-                count=len(transactions),
-            )
-            return transactions
-
-        # Резервный вариант через RPC
+        # 3. Резервный вариант через другие публичные RPC
         logger.debug("Пробуем получить данные через публичные RPC")
         transactions = await self._get_from_rpc(min_value_bnb, limit)
         if transactions:
@@ -316,6 +320,120 @@ class BSCTracker:
 
         logger.warning("BSC данные временно недоступны")
         return []
+
+    async def _get_from_ankr_rpc(
+        self,
+        min_value_bnb: float,
+        limit: int,
+    ) -> list[BSCTransaction]:
+        """
+        Получение транзакций через Ankr RPC (основной метод).
+
+        Ankr RPC - бесплатный, надежный, не требует регистрации.
+        Получает последние блоки и фильтрует крупные транзакции.
+
+        Args:
+            min_value_bnb: Минимальная сумма в BNB
+            limit: Максимальное количество транзакций
+
+        Returns:
+            list[BSCTransaction]: Список транзакций
+        """
+        try:
+            # Получаем номер последнего блока
+            block_request = {
+                "jsonrpc": "2.0",
+                "method": "eth_blockNumber",
+                "params": [],
+                "id": 1,
+            }
+
+            data = await self._make_api_request(ANKR_BSC_RPC, json_data=block_request)
+            if not data or "result" not in data:
+                logger.debug("Ankr RPC: не удалось получить номер блока")
+                return []
+
+            latest_block = int(data["result"], 16)
+            transactions = []
+
+            # BSC создает блоки каждые ~3 секунды
+            # Анализируем последние 20 блоков для захвата большего количества транзакций
+            blocks_to_scan = min(20, self.blocks_to_analyze // 10)
+
+            logger.debug(
+                "Ankr RPC: анализируем блоки",
+                start=latest_block - blocks_to_scan + 1,
+                end=latest_block,
+                blocks_count=blocks_to_scan,
+            )
+
+            for block_num in range(latest_block, max(latest_block - blocks_to_scan, 0), -1):
+                block_request = {
+                    "jsonrpc": "2.0",
+                    "method": "eth_getBlockByNumber",
+                    "params": [hex(block_num), True],  # True = включить транзакции
+                    "id": 1,
+                }
+
+                block_data = await self._make_api_request(ANKR_BSC_RPC, json_data=block_request)
+                if not block_data or "result" not in block_data:
+                    continue
+
+                block = block_data["result"]
+                if not block or "transactions" not in block:
+                    continue
+
+                block_timestamp = int(block.get("timestamp", "0x0"), 16)
+
+                for tx in block["transactions"]:
+                    if isinstance(tx, str):  # Только хэш, а не полная транзакция
+                        continue
+
+                    value_hex = tx.get("value", "0x0")
+                    value_wei = int(value_hex, 16)
+                    value_bnb = value_wei / 10**18
+                    value_usd = value_bnb * self._bnb_price
+
+                    # Фильтруем транзакции по минимальной сумме
+                    if value_bnb < min_value_bnb:
+                        continue
+
+                    try:
+                        timestamp = datetime.fromtimestamp(block_timestamp, tz=timezone.utc)
+                    except (ValueError, OSError):
+                        timestamp = datetime.now(timezone.utc)
+
+                    transactions.append(
+                        BSCTransaction(
+                            tx_hash=tx.get("hash", ""),
+                            from_address=tx.get("from", ""),
+                            to_address=tx.get("to", "") or "",
+                            value_bnb=value_bnb,
+                            value_usd=value_usd,
+                            token_symbol="BNB",
+                            timestamp=timestamp,
+                            block_number=block_num,
+                        )
+                    )
+
+                # Прерываем если набрали достаточно транзакций
+                if len(transactions) >= limit * 2:
+                    break
+
+            if transactions:
+                logger.debug(
+                    "Ankr RPC: найдено транзакций",
+                    count=len(transactions),
+                )
+
+            return self._deduplicate_and_sort(transactions, limit)
+
+        except Exception as e:
+            logger.debug(
+                "Ошибка Ankr RPC",
+                error=str(e),
+            )
+            return []
 
     async def _get_from_bscscan(
         self,

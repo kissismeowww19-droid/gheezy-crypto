@@ -15,6 +15,7 @@ Gheezy Crypto - TON Whale Tracker
 """
 
 import asyncio
+import base64
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -46,6 +47,63 @@ TONAPI_URL = "https://tonapi.io/v2"
 
 # ORBS Network fallback (бесплатный)
 ORBS_TON_API_URL = "https://ton.access.orbs.network/44A1c"
+
+# GetBlock TON API (дополнительный fallback)
+GETBLOCK_TON_API_URL = "https://go.getblock.io/ton/mainnet"
+
+
+def user_friendly_to_raw(address: str) -> str:
+    """
+    Конвертирует user-friendly TON адрес в raw формат.
+
+    TON имеет 2 формата адресов:
+    - User-friendly (с _ и -): EQCjk1hh952vWaE9bRguaBGGjIh58TlDaxOqXkI_7D2-SJ6I
+    - Raw format (с : ): 0:a3935861f79daf59a13d6d182e6811868c8879f13943b613aa5e423fec3dbe48
+
+    Args:
+        address: Адрес в user-friendly формате
+
+    Returns:
+        str: Адрес в raw формате (workchain:hex)
+    """
+    if not address:
+        return address
+
+    # Если уже raw формат, возвращаем как есть
+    if ":" in address:
+        return address
+
+    try:
+        # Заменяем URL-safe символы на стандартные base64
+        address_b64 = address.replace("-", "+").replace("_", "/")
+
+        # Добавляем padding если нужно
+        padding = 4 - len(address_b64) % 4
+        if padding != 4:
+            address_b64 += "=" * padding
+
+        # Декодируем base64
+        decoded = base64.b64decode(address_b64)
+
+        if len(decoded) < 36:
+            logger.debug(f"Invalid TON address length: {len(decoded)}")
+            return address
+
+        # Первый байт - флаги (bounceable/testnet)
+        # Второй байт - workchain
+        workchain = decoded[1]
+        if workchain > 127:
+            workchain = workchain - 256
+
+        # Следующие 32 байта - адрес
+        address_bytes = decoded[2:34]
+        address_hex = address_bytes.hex()
+
+        return f"{workchain}:{address_hex}"
+
+    except Exception as e:
+        logger.debug(f"Error converting TON address: {e}")
+        return address
 
 
 class TransactionType(str, Enum):
@@ -452,8 +510,8 @@ class TONTracker:
             list[TONTransaction]: Список транзакций
         """
         try:
-            # Convert address to raw format (remove underscores if present)
-            raw_address = address.replace("_", "/").replace("-", "+")
+            # Конвертируем адрес в raw формат для API
+            raw_address = user_friendly_to_raw(address)
 
             url = f"{TONCENTER_API_V3_URL}/transactions"
             params = {
@@ -572,11 +630,14 @@ class TONTracker:
             list[TONTransaction]: Список транзакций
         """
         try:
+            # Конвертируем адрес в raw формат для API
+            raw_address = user_friendly_to_raw(address)
+
             url = f"{TONCENTER_API_URL}/getTransactions"
             # Исправленные параметры для TON Center API
-            # Используем правильный формат адреса и параметров
+            # Используем raw формат адреса
             params = {
-                "address": address,
+                "address": raw_address,
                 "limit": 10,  # Уменьшаем лимит для снижения нагрузки
                 "archival": "false",
             }
@@ -692,7 +753,10 @@ class TONTracker:
             list[TONTransaction]: Список транзакций
         """
         try:
-            url = f"{TONAPI_URL}/blockchain/accounts/{address}/transactions"
+            # Конвертируем адрес в raw формат для API
+            raw_address = user_friendly_to_raw(address)
+
+            url = f"{TONAPI_URL}/blockchain/accounts/{raw_address}/transactions"
             params = {"limit": 10}  # Уменьшаем лимит
 
             data = await self._make_api_request(url, params=params)
@@ -802,10 +866,13 @@ class TONTracker:
             list[TONTransaction]: Список транзакций
         """
         try:
+            # Конвертируем адрес в raw формат для API
+            raw_address = user_friendly_to_raw(address)
+
             # ORBS Network uses JSON-RPC format similar to TON Center
             url = f"{ORBS_TON_API_URL}/1/getTransactions"
             params = {
-                "address": address,
+                "address": raw_address,
                 "limit": 10,
             }
 
