@@ -8,17 +8,17 @@ Gheezy Crypto - Модуль отслеживания китов
 - Blockchair API для Bitcoin
 """
 
-from src.whale.tracker import WhaleTracker, WhaleTransaction
-from src.whale.ethereum import EthereumTracker, EthereumTransaction
-from src.whale.bsc import BSCTracker, BSCTransaction
-from src.whale.bitcoin import BitcoinTracker, BitcoinTransaction
-from src.whale.alerts import (
+from whale.tracker import WhaleTracker, WhaleTransaction
+from whale.ethereum import EthereumTracker, EthereumTransaction
+from whale.bsc import BSCTracker, BSCTransaction
+from whale.bitcoin import BitcoinTracker, BitcoinTransaction
+from whale.alerts import (
     WhaleAlert,
     format_whale_alert_message,
     format_whale_summary,
     format_stats_message,
 )
-from src.whale.known_wallets import (
+from whale.known_wallets import (
     get_wallet_label,
     get_ethereum_wallet_label,
     get_bsc_wallet_label,

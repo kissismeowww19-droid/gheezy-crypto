@@ -27,8 +27,8 @@ from tenacity import (
     retry_if_exception_type,
 )
 
-from src.config import settings
-from src.whale.known_wallets import get_bsc_wallet_label
+from config import settings
+from whale.known_wallets import get_bsc_wallet_label
 
 logger = structlog.get_logger()
 

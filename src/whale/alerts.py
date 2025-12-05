@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
-from src.whale.known_wallets import (
+from whale.known_wallets import (
     get_wallet_label,
     is_exchange_address,
     get_short_address,

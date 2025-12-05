@@ -4,8 +4,8 @@ Gheezy Crypto - Модуль сигналов
 AI-генерация торговых сигналов с техническим анализом.
 """
 
-from src.signals.analyzer import SignalAnalyzer
-from src.signals.indicators import (
+from signals.analyzer import SignalAnalyzer
+from signals.indicators import (
     BollingerBands,
     MACD,
     RSI,

@@ -11,7 +11,7 @@ from typing import List, Optional
 import aiohttp
 import structlog
 
-from src.config import settings
+from config import settings
 
 logger = structlog.get_logger()
 

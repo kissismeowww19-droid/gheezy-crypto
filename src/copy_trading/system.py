@@ -11,7 +11,7 @@ from typing import Dict, List, Optional
 
 import structlog
 
-from src.database.models import SignalType
+from database.models import SignalType
 
 logger = structlog.get_logger()
 
