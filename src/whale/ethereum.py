@@ -30,12 +30,13 @@ from tenacity import (
 
 from config import settings
 from whale.known_wallets import get_ethereum_wallet_label
+from whale.etherscan_v2 import get_etherscan_key, get_etherscan_v2_url
 
 logger = structlog.get_logger()
 
 # ===== API URLs =====
 # Etherscan API V2 URL with chainid=1 for Ethereum
-ETHERSCAN_API_URL = "https://api.etherscan.io/v2/api?chainid=1"
+ETHERSCAN_API_URL = get_etherscan_v2_url("eth") or "https://api.etherscan.io/v2/api?chainid=1"
 
 # Blockscout API URL (бесплатный, без ключа)
 BLOCKSCOUT_API_URL = "https://eth.blockscout.com/api/v2"
@@ -152,7 +153,8 @@ class EthereumTracker:
 
     def __init__(self):
         """Инициализация трекера."""
-        self.api_key = settings.etherscan_api_key
+        # Use API key rotation for rate limits
+        self.api_key = get_etherscan_key() or settings.etherscan_api_key
         self.min_value_usd = settings.whale_min_transaction
         self.blocks_to_analyze = getattr(settings, "whale_blocks_to_analyze", 200)
         self.price_cache_ttl = getattr(settings, "whale_price_cache_ttl", 300)
@@ -292,7 +294,8 @@ class EthereumTracker:
             transactions = await self._get_from_etherscan(min_value_eth, limit)
             if transactions:
                 logger.info(
-                    "Данные получены через Etherscan",
+                    "Данные получены через Etherscan V2",
+                    chain="eth",
                     count=len(transactions),
                 )
                 return transactions

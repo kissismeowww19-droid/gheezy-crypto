@@ -722,7 +722,7 @@ def get_wallet_label(address: str, blockchain: str) -> Optional[str]:
 
     Args:
         address: Адрес кошелька
-        blockchain: Название блокчейна (ethereum, bsc, bitcoin, solana, ton)
+        blockchain: Название блокчейна (ethereum, bitcoin, etc)
 
     Returns:
         str: Метка адреса или None если адрес неизвестен
@@ -734,10 +734,11 @@ def get_wallet_label(address: str, blockchain: str) -> Optional[str]:
         return get_bsc_wallet_label(address)
     elif blockchain_lower in ("bitcoin", "btc"):
         return get_bitcoin_wallet_label(address)
+    # Solana, TON removed - APIs don't work
     elif blockchain_lower in ("solana", "sol"):
-        return get_solana_wallet_label(address)
+        return None  # Disabled
     elif blockchain_lower == "ton":
-        return get_ton_wallet_label(address)
+        return None  # Disabled
     return None
 
 
@@ -780,31 +781,30 @@ def get_short_address(address: str) -> str:
     return f"{address[:8]}...{address[-6:]}"
 
 
-# ===== Solana Wallets =====
-# Импортируем из отдельного модуля для избежания циклических импортов
+# ===== Solana Wallets (disabled) =====
 def get_solana_wallet_label(address: str) -> Optional[str]:
     """
-    Получить метку для Solana адреса.
+    Get label for Solana address.
+    Disabled - Solscan API returns 404.
 
     Args:
-        address: Адрес кошелька Solana
+        address: Solana wallet address
 
     Returns:
-        str: Метка адреса или None если адрес неизвестен
+        None: Solana tracking is disabled
     """
-    from whale.solana import get_solana_wallet_label as _get_solana_label
-    return _get_solana_label(address)
+    return None
 
 
 def get_ton_wallet_label(address: str) -> Optional[str]:
     """
-    Получить метку для TON адреса.
+    Get label for TON address.
+    Disabled - complex API.
 
     Args:
-        address: Адрес кошелька TON
+        address: TON wallet address
 
     Returns:
-        str: Метка адреса или None если адрес неизвестен
+        None: TON tracking is disabled
     """
-    from whale.ton import get_ton_wallet_label as _get_ton_label
-    return _get_ton_label(address)
+    return None
