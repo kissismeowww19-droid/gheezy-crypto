@@ -39,6 +39,9 @@ MEMPOOL_API_URL = "https://mempool.space/api"
 # Blockstream.info API URL (free, no API key required) - резервный
 BLOCKSTREAM_API_URL = "https://blockstream.info/api"
 
+# Blockchain.info API URL (free, no API key required) - дополнительный
+BLOCKCHAIN_INFO_API_URL = "https://blockchain.info"
+
 
 @dataclass
 class BitcoinTransaction:
@@ -53,6 +56,11 @@ class BitcoinTransaction:
         value_usd: Сумма в USD
         timestamp: Время транзакции
         block_height: Высота блока
+        fee_btc: Комиссия в BTC
+        fee_usd: Комиссия в USD
+        confirmations: Количество подтверждений
+        size_bytes: Размер транзакции в байтах
+        weight: Weight в виртуальных байтах (vbytes)
     """
 
     tx_hash: str
@@ -62,6 +70,11 @@ class BitcoinTransaction:
     value_usd: float
     timestamp: Optional[datetime] = None
     block_height: Optional[int] = None
+    fee_btc: float = 0.0
+    fee_usd: float = 0.0
+    confirmations: int = 0
+    size_bytes: int = 0
+    weight: int = 0
 
     @property
     def primary_from(self) -> str:
@@ -215,7 +228,8 @@ class BitcoinTracker:
 
         Использует несколько источников данных:
         1. mempool.space API (основной)
-        2. blockstream.info API (резервный)
+        2. blockchain.info API (резервный)
+        3. blockstream.info API (запасной)
 
         Args:
             limit: Максимальное количество транзакций
@@ -236,8 +250,18 @@ class BitcoinTracker:
             )
             return transactions
 
+        # Пробуем blockchain.info (резервный)
+        logger.debug("Пробуем получить данные через blockchain.info")
+        transactions = await self._get_from_blockchain_info(min_value_btc, limit)
+        if transactions:
+            logger.info(
+                "Данные получены через blockchain.info",
+                count=len(transactions),
+            )
+            return transactions
+
         # Резервный вариант через blockstream.info
-        logger.warning("mempool.space недоступен, пробуем blockstream.info")
+        logger.warning("mempool.space и blockchain.info недоступны, пробуем blockstream.info")
         transactions = await self._get_from_blockstream(min_value_btc, limit)
         if transactions:
             logger.info(
