@@ -51,6 +51,10 @@ ORBS_TON_API_URL = "https://ton.access.orbs.network/44A1c"
 # GetBlock TON API (дополнительный fallback)
 GETBLOCK_TON_API_URL = "https://go.getblock.io/ton/mainnet"
 
+# TON address constants
+# TON user-friendly address is 36 bytes: 1 byte flags + 1 byte workchain + 32 bytes address + 2 bytes CRC16
+TON_ADDRESS_MIN_BYTES = 36
+
 
 def user_friendly_to_raw(address: str) -> str:
     """
@@ -64,7 +68,11 @@ def user_friendly_to_raw(address: str) -> str:
         address: Адрес в user-friendly формате
 
     Returns:
-        str: Адрес в raw формате (workchain:hex)
+        str: Адрес в raw формате (workchain:hex).
+             Возвращает оригинальный адрес без изменений если:
+             - адрес пустой
+             - адрес уже в raw формате (содержит ':')
+             - возникла ошибка при конвертации
     """
     if not address:
         return address
@@ -85,7 +93,7 @@ def user_friendly_to_raw(address: str) -> str:
         # Декодируем base64
         decoded = base64.b64decode(address_b64)
 
-        if len(decoded) < 36:
+        if len(decoded) < TON_ADDRESS_MIN_BYTES:
             logger.debug(f"Invalid TON address length: {len(decoded)}")
             return address
 

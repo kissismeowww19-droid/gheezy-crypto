@@ -59,6 +59,15 @@ PUBLIC_BSC_RPC_URLS = [
     "https://bsc-dataseed4.binance.org",
 ]
 
+# ===== Block scanning constants =====
+# Maximum number of blocks to scan in Ankr RPC
+# BSC creates a block every ~3 seconds, so 20 blocks = ~1 minute of transactions
+MAX_ANKR_BLOCKS_TO_SCAN = 20
+# Divisor for blocks_to_analyze setting to calculate Ankr blocks
+BLOCKS_TO_ANALYZE_DIVISOR = 10
+# Multiplier for over-collecting transactions before filtering
+TRANSACTION_BUFFER_MULTIPLIER = 2
+
 # ===== Расширенный список адресов бирж для отслеживания на BSC =====
 TRACKED_BSC_ADDRESSES = [
     # Binance Hot Wallets
@@ -357,8 +366,11 @@ class BSCTracker:
             transactions = []
 
             # BSC создает блоки каждые ~3 секунды
-            # Анализируем последние 20 блоков для захвата большего количества транзакций
-            blocks_to_scan = min(20, self.blocks_to_analyze // 10)
+            # Анализируем последние блоки для захвата большего количества транзакций
+            blocks_to_scan = min(
+                MAX_ANKR_BLOCKS_TO_SCAN,
+                self.blocks_to_analyze // BLOCKS_TO_ANALYZE_DIVISOR
+            )
 
             logger.debug(
                 "Ankr RPC: анализируем блоки",
@@ -417,7 +429,7 @@ class BSCTracker:
                     )
 
                 # Прерываем если набрали достаточно транзакций
-                if len(transactions) >= limit * 2:
+                if len(transactions) >= limit * TRANSACTION_BUFFER_MULTIPLIER:
                     break
 
             if transactions:
