@@ -53,7 +53,55 @@ GETBLOCK_TON_API_URL = "https://go.getblock.io/ton/mainnet"
 
 # TON address constants
 # TON user-friendly address is 36 bytes: 1 byte flags + 1 byte workchain + 32 bytes address + 2 bytes CRC16
-TON_ADDRESS_MIN_BYTES = 36
+# However, some addresses may have slight variations, so we allow 35-36 bytes
+TON_ADDRESS_MIN_BYTES = 35
+TON_ADDRESS_MAX_BYTES = 36
+
+
+def is_valid_ton_address(address: str) -> bool:
+    """
+    Check if TON address is valid.
+
+    Args:
+        address: TON address to validate
+
+    Returns:
+        bool: True if address is valid
+    """
+    if not address:
+        return False
+
+    # Raw format: workchain:64hex (e.g., 0:a3935861f79daf59a13d6d182e6811868c8879f13943b613aa5e423fec3dbe48)
+    if ":" in address:
+        parts = address.split(":")
+        if len(parts) == 2:
+            try:
+                int(parts[0])  # workchain should be integer
+                if len(parts[1]) == 64:  # 32 bytes = 64 hex chars
+                    return True
+            except ValueError:
+                pass
+        return False
+
+    # User-friendly format: 48 chars base64 (EQ/UQ/Ef/Uf/kQ/kf prefixes)
+    if len(address) == 48:
+        # Check valid prefixes for bounceable/non-bounceable addresses
+        valid_prefixes = ("EQ", "UQ", "Ef", "Uf", "kQ", "kf")
+        if address.startswith(valid_prefixes):
+            return True
+        # Also accept addresses that look like base64 even without standard prefix
+        try:
+            address_b64 = address.replace("-", "+").replace("_", "/")
+            padding = 4 - len(address_b64) % 4
+            if padding != 4:
+                address_b64 += "=" * padding
+            decoded = base64.b64decode(address_b64)
+            if TON_ADDRESS_MIN_BYTES <= len(decoded) <= TON_ADDRESS_MAX_BYTES:
+                return True
+        except Exception:
+            pass
+
+    return False
 
 
 def user_friendly_to_raw(address: str) -> str:
@@ -130,8 +178,8 @@ TON_EXCHANGES: dict[str, str] = {
     "EQCjk1hh952vWaE9bRguaBGGjIh58TlDaxOqXkI_7D2-SJ6I": "Binance",
     "EQDvJkkZlTjBsn9kXQlkZcJb4_3jgD75HbjVv8w8tshO4KhI": "Binance Hot",
 
-    # OKX
-    "EQBfAN7LfaUYgXZNw5Wc7GBgkEX2yhuJ5ka95J1JJwXiD4s": "OKX",
+    # OKX - valid address format
+    "EQBfAN7LfaUYgXZNw5Wc7GBgkEX2yhuJ5ka95J1JJwXiD4sO": "OKX",
     "EQCuPm-skZKcMv7cUeDCf6wZZ3dZMxHJ_8KnZkh_lsS_kARI": "OKX Hot",
 
     # Bybit
@@ -152,7 +200,7 @@ TON_EXCHANGES: dict[str, str] = {
 
     # DEX - STON.fi
     "EQB3ncyBUTjZUA5EnFKR5_EnOMI9V1tTEAAPaiU71gc4TiUt": "STON.fi",
-    "EQBsGx9ArADUrREB34W-ghgsCgBShvfUr4Jk5a4MQxpD7JFXO": "STON.fi Router",
+    "EQBsGx9ArADUrREB34W-ghgsCgBShvfUr4Jk5a4MQxpD7JFX": "STON.fi Router",
     "EQARULUYsmJq1RiZ-YiH-IJLcAZUVkVff-KBPwEmmaQGH6aC": "STON.fi Pool",
 
     # DEX - DeDust
@@ -175,7 +223,6 @@ TON_EXCHANGES: dict[str, str] = {
 # Известные киты TON
 TON_WHALES: dict[str, str] = {
     "EQAUZyAC52VvhiM_GHiXxYfASpFXG1nGPBrRfh1F1jSsqHPI": "TON Whale 1",
-    "EQD_____TON_Foundation_____7Jz-AAAAAAAAAAAAAAAAAA": "TON Foundation",
     "Ef8zMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM0vF": "TON Whale 2",
 }
 
@@ -518,6 +565,11 @@ class TONTracker:
             list[TONTransaction]: Список транзакций
         """
         try:
+            # Validate address before making API call
+            if not is_valid_ton_address(address):
+                logger.debug(f"Skipping invalid TON address: {address}")
+                return []
+
             # Конвертируем адрес в raw формат для API
             raw_address = user_friendly_to_raw(address)
 
@@ -638,6 +690,11 @@ class TONTracker:
             list[TONTransaction]: Список транзакций
         """
         try:
+            # Validate address before making API call
+            if not is_valid_ton_address(address):
+                logger.debug(f"Skipping invalid TON address: {address}")
+                return []
+
             # Конвертируем адрес в raw формат для API
             raw_address = user_friendly_to_raw(address)
 
@@ -761,6 +818,11 @@ class TONTracker:
             list[TONTransaction]: Список транзакций
         """
         try:
+            # Validate address before making API call
+            if not is_valid_ton_address(address):
+                logger.debug(f"Skipping invalid TON address: {address}")
+                return []
+
             # Конвертируем адрес в raw формат для API
             raw_address = user_friendly_to_raw(address)
 
@@ -874,6 +936,11 @@ class TONTracker:
             list[TONTransaction]: Список транзакций
         """
         try:
+            # Validate address before making API call
+            if not is_valid_ton_address(address):
+                logger.debug(f"Skipping invalid TON address: {address}")
+                return []
+
             # Конвертируем адрес в raw формат для API
             raw_address = user_friendly_to_raw(address)
 

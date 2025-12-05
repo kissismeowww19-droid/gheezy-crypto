@@ -47,16 +47,19 @@ BSCSCAN_DIRECT_API_URL = "https://api.bscscan.com/api"
 # Note: Using the correct endpoint format
 BLOCKSCOUT_BSC_API_URL = "https://api.bscscan.com"
 
-# ===== Публичные RPC URL для BSC (с приоритетом Ankr) =====
+# ===== Публичные RPC URL для BSC (с приоритетом Binance официальных) =====
+# Binance official dataseed servers are most reliable
 PUBLIC_BSC_RPC_URLS = [
-    ANKR_BSC_RPC,  # Ankr - основной, самый надежный
-    "https://bsc.publicnode.com",
-    "https://bsc-mainnet.public.blastapi.io",
-    "https://bsc-dataseed.binance.org",
     "https://bsc-dataseed1.binance.org",
     "https://bsc-dataseed2.binance.org",
     "https://bsc-dataseed3.binance.org",
     "https://bsc-dataseed4.binance.org",
+    "https://bsc-dataseed1.defibit.io",
+    "https://bsc-dataseed2.defibit.io",
+    "https://bsc-dataseed1.ninicoin.io",
+    "https://bsc-dataseed2.ninicoin.io",
+    "https://bsc.publicnode.com",
+    ANKR_BSC_RPC,  # Ankr as fallback
 ]
 
 # ===== Block scanning constants =====
@@ -296,12 +299,12 @@ class BSCTracker:
         await self._update_bnb_price()
         min_value_bnb = self.min_value_usd / self._bnb_price
 
-        # 1. Пробуем Ankr RPC (основной метод, бесплатный)
-        logger.debug("Пробуем получить данные через Ankr RPC")
-        transactions = await self._get_from_ankr_rpc(min_value_bnb, limit)
+        # 1. Пробуем публичные RPC (Binance dataseed - наиболее надежные)
+        logger.debug("Пробуем получить данные через Binance RPC")
+        transactions = await self._get_from_rpc(min_value_bnb, limit)
         if transactions:
             logger.info(
-                "Данные получены через Ankr RPC",
+                "Данные получены через Binance RPC",
                 count=len(transactions),
             )
             return transactions
@@ -317,12 +320,12 @@ class BSCTracker:
                 )
                 return transactions
 
-        # 3. Резервный вариант через другие публичные RPC
-        logger.debug("Пробуем получить данные через публичные RPC")
-        transactions = await self._get_from_rpc(min_value_bnb, limit)
+        # 3. Резервный вариант через Ankr RPC
+        logger.debug("Пробуем получить данные через Ankr RPC")
+        transactions = await self._get_from_ankr_rpc(min_value_bnb, limit)
         if transactions:
             logger.info(
-                "Данные получены через RPC",
+                "Данные получены через Ankr RPC",
                 count=len(transactions),
             )
             return transactions

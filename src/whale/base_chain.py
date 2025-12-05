@@ -231,16 +231,15 @@ class BaseTracker:
         """
         await self._update_eth_price()
 
-        # Пробуем Basescan API если есть ключ
-        if self.api_key:
-            logger.debug("Base: Пробуем получить данные через Basescan API")
-            transactions = await self._get_from_basescan(limit)
-            if transactions:
-                logger.info(
-                    "Base: Данные получены через Basescan",
-                    count=len(transactions),
-                )
-                return transactions
+        # Пробуем Basescan API (работает и без ключа с rate limit)
+        logger.debug("Base: Пробуем получить данные через Basescan API")
+        transactions = await self._get_from_basescan(limit)
+        if transactions:
+            logger.info(
+                "Base: Данные получены через Basescan",
+                count=len(transactions),
+            )
+            return transactions
 
         # Пробуем публичные RPC
         logger.debug("Base: Пробуем получить данные через RPC")
@@ -259,26 +258,31 @@ class BaseTracker:
         self,
         limit: int,
     ) -> list[BaseTransaction]:
-        """Получение транзакций через Basescan API."""
-        if not self.api_key:
-            return []
-
+        """Получение транзакций через Basescan API (работает без ключа с rate limit)."""
         try:
             transactions = []
+            # Limit addresses when no API key to avoid rate limiting
+            num_addresses = 10 if self.api_key else 3
 
-            for address in TRACKED_BASE_ADDRESSES[:10]:
+            for address in TRACKED_BASE_ADDRESSES[:num_addresses]:
                 params = {
                     "module": "account",
                     "action": "txlist",
                     "address": address,
+                    "startblock": 0,
+                    "endblock": 99999999,
                     "page": 1,
                     "offset": 50,
                     "sort": "desc",
-                    "apikey": self.api_key,
                 }
+                if self.api_key:
+                    params["apikey"] = self.api_key
 
                 data = await self._make_api_request(BASESCAN_API_URL, params=params)
                 if not data or data.get("status") != "1":
+                    # Rate limit delay without API key
+                    if not self.api_key:
+                        await asyncio.sleep(0.5)
                     continue
 
                 for tx in data.get("result", []):
@@ -308,7 +312,8 @@ class BaseTracker:
                         )
                     )
 
-                await asyncio.sleep(0.2)
+                # Rate limit delay - longer without API key
+                await asyncio.sleep(0.5 if not self.api_key else 0.2)
 
             return self._deduplicate_and_sort(transactions, limit)
 
