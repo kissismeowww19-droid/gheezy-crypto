@@ -501,7 +501,6 @@ class SolanaTracker:
         except Exception as e:
             logger.debug(f"Ошибка при получении транзакций адреса {address}: {e}")
             return []
-            return []
 
     def _deduplicate_and_sort(
         self,
