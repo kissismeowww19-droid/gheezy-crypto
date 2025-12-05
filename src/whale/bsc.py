@@ -15,7 +15,7 @@ Gheezy Crypto - BSC Whale Tracker
 import asyncio
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import aiohttp
@@ -32,9 +32,11 @@ from whale.known_wallets import get_bsc_wallet_label
 
 logger = structlog.get_logger()
 
-# Etherscan API V2 URL (used for BSC with chainid parameter)
-BSCSCAN_API_URL = "https://api.etherscan.io/v2/api"
-BSC_CHAIN_ID = 56  # BSC Mainnet
+# BscScan API URL (api.bscscan.com - прямой доступ к BSC)
+BSCSCAN_API_URL = "https://api.bscscan.com/api"
+
+# Blockscout BSC API URL (fallback, бесплатный)
+BLOCKSCOUT_BSC_API_URL = "https://bsc.blockscout.com/api/v2"
 
 # ===== Публичные RPC URL для BSC (резервные) =====
 PUBLIC_BSC_RPC_URLS = [
@@ -263,8 +265,9 @@ class BSCTracker:
         Получение крупных BNB транзакций.
 
         Использует несколько источников данных:
-        1. Etherscan API V2 с chainid=56 для BSC (если есть ключ)
-        2. Публичные RPC ноды
+        1. BscScan API (api.bscscan.com) если есть ключ
+        2. Blockscout BSC (бесплатный)
+        3. Публичные RPC ноды
 
         Args:
             limit: Максимальное количество транзакций
@@ -275,16 +278,26 @@ class BSCTracker:
         await self._update_bnb_price()
         min_value_bnb = self.min_value_usd / self._bnb_price
 
-        # Пробуем Etherscan API V2 если есть ключ
+        # Пробуем BscScan API если есть ключ
         if self.api_key:
-            logger.debug("Пробуем получить данные через Etherscan API V2")
+            logger.debug("Пробуем получить данные через BscScan API")
             transactions = await self._get_from_bscscan(min_value_bnb, limit)
             if transactions:
                 logger.info(
-                    "Данные получены через Etherscan API V2",
+                    "Данные получены через BscScan API",
                     count=len(transactions),
                 )
                 return transactions
+
+        # Пробуем Blockscout BSC (бесплатный)
+        logger.debug("Пробуем получить данные через Blockscout BSC")
+        transactions = await self._get_from_blockscout(min_value_bnb, limit)
+        if transactions:
+            logger.info(
+                "Данные получены через Blockscout BSC",
+                count=len(transactions),
+            )
+            return transactions
 
         # Резервный вариант через RPC
         logger.debug("Пробуем получить данные через публичные RPC")
@@ -296,7 +309,7 @@ class BSCTracker:
             )
             return transactions
 
-        logger.warning("Etherscan API ключ не настроен и RPC недоступен")
+        logger.warning("BSC данные временно недоступны")
         return []
 
     async def _get_from_bscscan(
@@ -305,7 +318,7 @@ class BSCTracker:
         limit: int,
     ) -> list[BSCTransaction]:
         """
-        Получение транзакций через Etherscan API V2 (chainid=56 для BSC).
+        Получение транзакций через BscScan API (api.bscscan.com).
 
         Args:
             min_value_bnb: Минимальная сумма в BNB
@@ -320,7 +333,6 @@ class BSCTracker:
         try:
             # Получаем последний блок
             params_block = {
-                "chainid": BSC_CHAIN_ID,
                 "module": "proxy",
                 "action": "eth_blockNumber",
                 "apikey": self.api_key,
@@ -328,7 +340,7 @@ class BSCTracker:
 
             data = await self._make_api_request(BSCSCAN_API_URL, params=params_block)
             if not data or "result" not in data:
-                logger.warning("Не удалось получить номер последнего блока через Etherscan API V2")
+                logger.warning("Не удалось получить номер последнего блока через BscScan API")
                 return []
 
             latest_block = int(data["result"], 16)
@@ -343,11 +355,9 @@ class BSCTracker:
             )
 
             # Параллельные запросы к адресам бирж
-            # Ограничиваем до 15 адресов для соблюдения rate limits Etherscan API
-            # (бесплатный tier: 5 calls/sec)
-            # Адреса отсортированы по важности (крупнейшие биржи первые)
+            # Ограничиваем до 10 адресов для соблюдения rate limits BscScan API
             tasks = []
-            for address in TRACKED_BSC_ADDRESSES[:15]:
+            for address in TRACKED_BSC_ADDRESSES[:10]:
                 tasks.append(
                     self._fetch_address_transactions(
                         address, start_block, latest_block, min_value_bnb
@@ -369,7 +379,93 @@ class BSCTracker:
 
         except Exception as e:
             logger.error(
-                "Ошибка Etherscan API V2",
+                "Ошибка BscScan API",
+                error=str(e),
+            )
+            return []
+
+    async def _get_from_blockscout(
+        self,
+        min_value_bnb: float,
+        limit: int,
+    ) -> list[BSCTransaction]:
+        """
+        Получение транзакций через Blockscout BSC API (бесплатный).
+
+        Args:
+            min_value_bnb: Минимальная сумма в BNB
+            limit: Максимальное количество транзакций
+
+        Returns:
+            list[BSCTransaction]: Список транзакций
+        """
+        try:
+            # Получаем последние блоки
+            blocks_url = f"{BLOCKSCOUT_BSC_API_URL}/blocks"
+            data = await self._make_api_request(blocks_url)
+
+            if not data or "items" not in data:
+                logger.debug("Blockscout BSC: не удалось получить блоки")
+                return []
+
+            transactions = []
+
+            # Анализируем последние блоки
+            for block in data["items"][:5]:  # Последние 5 блоков
+                block_number = block.get("height")
+                if not block_number:
+                    continue
+
+                # Получаем транзакции блока
+                txs_url = f"{BLOCKSCOUT_BSC_API_URL}/blocks/{block_number}/transactions"
+                txs_data = await self._make_api_request(txs_url)
+
+                if not txs_data or "items" not in txs_data:
+                    continue
+
+                for tx in txs_data["items"]:
+                    value_wei = int(tx.get("value", "0") or "0")
+                    value_bnb = value_wei / 10**18
+                    value_usd = value_bnb * self._bnb_price
+
+                    if value_bnb < min_value_bnb:
+                        continue
+
+                    try:
+                        timestamp_str = tx.get("timestamp")
+                        if timestamp_str:
+                            timestamp = datetime.fromisoformat(
+                                timestamp_str.replace("Z", "+00:00")
+                            )
+                        else:
+                            timestamp = datetime.now(timezone.utc)
+                    except (ValueError, TypeError):
+                        timestamp = datetime.now(timezone.utc)
+
+                    transactions.append(
+                        BSCTransaction(
+                            tx_hash=tx.get("hash", ""),
+                            from_address=tx.get("from", {}).get("hash", ""),
+                            to_address=tx.get("to", {}).get("hash", "") if tx.get("to") else "",
+                            value_bnb=value_bnb,
+                            value_usd=value_usd,
+                            token_symbol="BNB",
+                            timestamp=timestamp,
+                            block_number=block_number,
+                        )
+                    )
+
+                    if len(transactions) >= limit * 2:
+                        break
+
+                # Небольшая задержка
+                await asyncio.sleep(0.1)
+
+            return self._deduplicate_and_sort(transactions, limit)
+
+        except Exception as e:
+            logger.warning(
+                "Ошибка Blockscout BSC API",
                 error=str(e),
             )
             return []
@@ -394,7 +490,6 @@ class BSCTracker:
             list[BSCTransaction]: Список транзакций
         """
         params = {
-            "chainid": BSC_CHAIN_ID,
             "module": "account",
             "action": "txlist",
             "address": address,
@@ -420,9 +515,9 @@ class BSCTracker:
                 continue
 
             try:
-                timestamp = datetime.fromtimestamp(int(tx.get("timeStamp", 0)))
+                timestamp = datetime.fromtimestamp(int(tx.get("timeStamp", 0)), tz=timezone.utc)
             except (ValueError, OSError):
-                timestamp = datetime.now()
+                timestamp = datetime.now(timezone.utc)
 
             transactions.append(
                 BSCTransaction(
@@ -536,9 +631,9 @@ class BSCTracker:
                     continue
 
                 try:
-                    timestamp = datetime.fromtimestamp(block_timestamp)
+                    timestamp = datetime.fromtimestamp(block_timestamp, tz=timezone.utc)
                 except (ValueError, OSError):
-                    timestamp = datetime.now()
+                    timestamp = datetime.now(timezone.utc)
 
                 transactions.append(
                     BSCTransaction(
@@ -581,7 +676,7 @@ class BSCTracker:
 
         for tx in sorted(
             transactions,
-            key=lambda x: x.timestamp or datetime.now(),
+            key=lambda x: x.timestamp or datetime.now(timezone.utc),
             reverse=True,
         ):
             if tx.tx_hash not in seen_hashes:
@@ -608,12 +703,11 @@ class BSCTracker:
             list[BSCTransaction]: Список транзакций
         """
         if not self.api_key:
-            logger.warning("Etherscan API ключ не настроен для BEP-20")
+            logger.warning("BscScan API ключ не настроен для BEP-20")
             return []
 
         try:
             params = {
-                "chainid": BSC_CHAIN_ID,
                 "module": "account",
                 "action": "tokentx",
                 "contractaddress": token_contract,
@@ -643,9 +737,9 @@ class BSCTracker:
                     continue
 
                 try:
-                    timestamp = datetime.fromtimestamp(int(tx.get("timeStamp", 0)))
+                    timestamp = datetime.fromtimestamp(int(tx.get("timeStamp", 0)), tz=timezone.utc)
                 except (ValueError, OSError):
-                    timestamp = datetime.now()
+                    timestamp = datetime.now(timezone.utc)
 
                 transactions.append(
                     BSCTransaction(

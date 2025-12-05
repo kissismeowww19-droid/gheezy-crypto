@@ -16,7 +16,7 @@ Gheezy Crypto - Ethereum Whale Tracker
 import asyncio
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import aiohttp
@@ -433,9 +433,9 @@ class EthereumTracker:
                 continue
 
             try:
-                timestamp = datetime.fromtimestamp(int(tx.get("timeStamp", 0)))
+                timestamp = datetime.fromtimestamp(int(tx.get("timeStamp", 0)), tz=timezone.utc)
             except (ValueError, OSError):
-                timestamp = datetime.now()
+                timestamp = datetime.now(timezone.utc)
 
             transactions.append(
                 EthereumTransaction(
@@ -508,9 +508,9 @@ class EthereumTracker:
                                 timestamp_str.replace("Z", "+00:00")
                             )
                         else:
-                            timestamp = datetime.now()
+                            timestamp = datetime.now(timezone.utc)
                     except (ValueError, TypeError):
-                        timestamp = datetime.now()
+                        timestamp = datetime.now(timezone.utc)
 
                     transactions.append(
                         EthereumTransaction(
@@ -639,9 +639,9 @@ class EthereumTracker:
                     continue
 
                 try:
-                    timestamp = datetime.fromtimestamp(block_timestamp)
+                    timestamp = datetime.fromtimestamp(block_timestamp, tz=timezone.utc)
                 except (ValueError, OSError):
-                    timestamp = datetime.now()
+                    timestamp = datetime.now(timezone.utc)
 
                 transactions.append(
                     EthereumTransaction(
@@ -684,7 +684,7 @@ class EthereumTracker:
 
         for tx in sorted(
             transactions,
-            key=lambda x: x.timestamp or datetime.now(),
+            key=lambda x: x.timestamp or datetime.now(timezone.utc),
             reverse=True,
         ):
             if tx.tx_hash not in seen_hashes:
@@ -746,9 +746,9 @@ class EthereumTracker:
                     continue
 
                 try:
-                    timestamp = datetime.fromtimestamp(int(tx.get("timeStamp", 0)))
+                    timestamp = datetime.fromtimestamp(int(tx.get("timeStamp", 0)), tz=timezone.utc)
                 except (ValueError, OSError):
-                    timestamp = datetime.now()
+                    timestamp = datetime.now(timezone.utc)
 
                 transactions.append(
                     EthereumTransaction(
