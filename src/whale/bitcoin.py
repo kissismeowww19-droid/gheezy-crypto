@@ -39,6 +39,9 @@ MEMPOOL_API_URL = "https://mempool.space/api"
 # Blockstream.info API URL (free, no API key required) - резервный
 BLOCKSTREAM_API_URL = "https://blockstream.info/api"
 
+# Blockchain.info API URL (free, no API key required) - дополнительный
+BLOCKCHAIN_INFO_API_URL = "https://blockchain.info"
+
 
 @dataclass
 class BitcoinTransaction:
@@ -53,6 +56,11 @@ class BitcoinTransaction:
         value_usd: Сумма в USD
         timestamp: Время транзакции
         block_height: Высота блока
+        fee_btc: Комиссия в BTC
+        fee_usd: Комиссия в USD
+        confirmations: Количество подтверждений
+        size_bytes: Размер транзакции в байтах
+        weight: Weight в виртуальных байтах (vbytes)
     """
 
     tx_hash: str
@@ -62,6 +70,11 @@ class BitcoinTransaction:
     value_usd: float
     timestamp: Optional[datetime] = None
     block_height: Optional[int] = None
+    fee_btc: float = 0.0
+    fee_usd: float = 0.0
+    confirmations: int = 0
+    size_bytes: int = 0
+    weight: int = 0
 
     @property
     def primary_from(self) -> str:
@@ -215,7 +228,8 @@ class BitcoinTracker:
 
         Использует несколько источников данных:
         1. mempool.space API (основной)
-        2. blockstream.info API (резервный)
+        2. blockchain.info API (резервный)
+        3. blockstream.info API (запасной)
 
         Args:
             limit: Максимальное количество транзакций
@@ -236,8 +250,18 @@ class BitcoinTracker:
             )
             return transactions
 
+        # Пробуем blockchain.info (резервный)
+        logger.debug("Пробуем получить данные через blockchain.info")
+        transactions = await self._get_from_blockchain_info(min_value_btc, limit)
+        if transactions:
+            logger.info(
+                "Данные получены через blockchain.info",
+                count=len(transactions),
+            )
+            return transactions
+
         # Резервный вариант через blockstream.info
-        logger.warning("mempool.space недоступен, пробуем blockstream.info")
+        logger.warning("mempool.space и blockchain.info недоступны, пробуем blockstream.info")
         transactions = await self._get_from_blockstream(min_value_btc, limit)
         if transactions:
             logger.info(
@@ -314,6 +338,127 @@ class BitcoinTracker:
             )
             return []
 
+    async def _get_from_blockchain_info(
+        self,
+        min_value_btc: float,
+        limit: int,
+    ) -> list[BitcoinTransaction]:
+        """
+        Получение транзакций через blockchain.info API.
+
+        Args:
+            min_value_btc: Минимальная сумма в BTC
+            limit: Максимальное количество транзакций
+
+        Returns:
+            list[BitcoinTransaction]: Список транзакций
+        """
+        try:
+            # Получаем последний блок
+            latest_url = f"{BLOCKCHAIN_INFO_API_URL}/latestblock"
+            latest_data = await self._make_api_request(latest_url)
+
+            if not latest_data or "hash" not in latest_data:
+                logger.debug("blockchain.info: не удалось получить последний блок")
+                return []
+
+            transactions = []
+            block_hash = latest_data.get("hash")
+
+            # Получаем данные блока с транзакциями
+            block_url = f"{BLOCKCHAIN_INFO_API_URL}/rawblock/{block_hash}"
+            block_data = await self._make_api_request(block_url)
+
+            if not block_data or "tx" not in block_data:
+                logger.debug("blockchain.info: не удалось получить транзакции блока")
+                return []
+
+            for tx_data in block_data.get("tx", []):
+                if tx_data is None:
+                    continue
+
+                tx = self._parse_blockchain_info_transaction(tx_data, min_value_btc)
+                if tx:
+                    transactions.append(tx)
+
+                if len(transactions) >= limit * 2:
+                    break
+
+            return self._deduplicate_and_sort(transactions, limit)
+
+        except Exception as e:
+            logger.warning(
+                "Ошибка blockchain.info API",
+                error=str(e),
+            )
+            return []
+
+    def _parse_blockchain_info_transaction(
+        self,
+        tx_data: dict,
+        min_value_btc: float,
+    ) -> Optional[BitcoinTransaction]:
+        """
+        Парсинг транзакции из формата blockchain.info.
+
+        Args:
+            tx_data: Данные транзакции
+            min_value_btc: Минимальная сумма в BTC
+
+        Returns:
+            BitcoinTransaction: Транзакция или None если не подходит
+        """
+        # Суммируем все выходы транзакции
+        outputs = tx_data.get("out", []) or []
+        output_total = sum((out.get("value", 0) or 0) for out in outputs if out)
+        value_btc = output_total / 100_000_000
+        value_usd = value_btc * self._btc_price
+
+        if value_btc < min_value_btc:
+            return None
+
+        # Получаем адреса входов и выходов
+        inputs = tx_data.get("inputs", []) or []
+
+        from_addresses = list(dict.fromkeys(
+            inp.get("prev_out", {}).get("addr", "")
+            for inp in inputs
+            if inp and inp.get("prev_out", {}).get("addr")
+        ))
+        to_addresses = list(dict.fromkeys(
+            out.get("addr", "")
+            for out in outputs
+            if out and out.get("addr")
+        ))
+
+        # Время транзакции
+        timestamp = None
+        tx_time = tx_data.get("time", 0)
+        if tx_time:
+            try:
+                timestamp = datetime.fromtimestamp(tx_time, tz=timezone.utc)
+            except (ValueError, OSError):
+                timestamp = datetime.now(timezone.utc)
+
+        # Комиссия
+        fee_satoshis = tx_data.get("fee", 0) or 0
+        fee_btc = fee_satoshis / 100_000_000
+        fee_usd = fee_btc * self._btc_price
+
+        return BitcoinTransaction(
+            tx_hash=tx_data.get("hash", ""),
+            from_addresses=from_addresses,
+            to_addresses=to_addresses,
+            value_btc=value_btc,
+            value_usd=value_usd,
+            timestamp=timestamp,
+            block_height=tx_data.get("block_height"),
+            fee_btc=fee_btc,
+            fee_usd=fee_usd,
+            size_bytes=tx_data.get("size", 0) or 0,
+            weight=tx_data.get("weight", 0) or 0,
+        )
+
     def _parse_mempool_transaction(
         self,
         tx_data: dict,
@@ -362,6 +507,11 @@ class BitcoinTracker:
             except (ValueError, OSError):
                 timestamp = datetime.now(timezone.utc)
 
+        # Комиссия (fee)
+        fee_satoshis = tx_data.get("fee", 0) or 0
+        fee_btc = fee_satoshis / 100_000_000
+        fee_usd = fee_btc * self._btc_price
+
         return BitcoinTransaction(
             tx_hash=tx_data.get("txid", ""),
             from_addresses=from_addresses,
@@ -370,6 +520,10 @@ class BitcoinTracker:
             value_usd=value_usd,
             timestamp=timestamp,
             block_height=status.get("block_height"),
+            fee_btc=fee_btc,
+            fee_usd=fee_usd,
+            size_bytes=tx_data.get("size", 0) or 0,
+            weight=tx_data.get("weight", 0) or 0,
         )
 
     async def _get_from_blockstream(
@@ -482,6 +636,11 @@ class BitcoinTracker:
             except (ValueError, OSError):
                 timestamp = datetime.now(timezone.utc)
 
+        # Комиссия (fee)
+        fee_satoshis = tx_data.get("fee", 0) or 0
+        fee_btc = fee_satoshis / 100_000_000
+        fee_usd = fee_btc * self._btc_price
+
         return BitcoinTransaction(
             tx_hash=tx_data.get("txid", ""),
             from_addresses=from_addresses,
@@ -490,6 +649,10 @@ class BitcoinTracker:
             value_usd=value_usd,
             timestamp=timestamp,
             block_height=status.get("block_height"),
+            fee_btc=fee_btc,
+            fee_usd=fee_usd,
+            size_bytes=tx_data.get("size", 0) or 0,
+            weight=tx_data.get("weight", 0) or 0,
         )
 
     def _deduplicate_and_sort(

@@ -105,6 +105,10 @@ class EthereumTransaction:
         token_symbol: Символ токена (ETH или ERC-20)
         timestamp: Время транзакции
         block_number: Номер блока
+        gas_price_gwei: Цена газа в Gwei
+        gas_used: Использованный газ
+        tx_type: Тип транзакции (0=legacy, 2=EIP-1559)
+        is_internal: Является ли внутренней транзакцией
     """
 
     tx_hash: str
@@ -115,6 +119,10 @@ class EthereumTransaction:
     token_symbol: str = "ETH"
     timestamp: Optional[datetime] = None
     block_number: Optional[int] = None
+    gas_price_gwei: float = 0.0
+    gas_used: int = 0
+    tx_type: int = 0
+    is_internal: bool = False
 
     @property
     def from_label(self) -> Optional[str]:
