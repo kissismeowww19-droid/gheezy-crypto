@@ -390,13 +390,10 @@ async def cmd_help(message: Message):
     text = text + "/market — обзор рынка\n"
     text = text + "/prices — все монеты (с пагинацией)\n"
     text = text + "/help — справка\n\n"
-    text = text + "*Команды Whale Tracker (9 сетей):*\n\n"
+    text = text + "*Команды Whale Tracker (6 сетей):*\n\n"
     text = text + "/whale — все крупные транзакции\n"
     text = text + "/whale btc — только Bitcoin\n"
     text = text + "/whale eth — только Ethereum\n"
-    text = text + "/whale bsc — только BSC\n"
-    text = text + "/whale sol — только Solana\n"
-    text = text + "/whale ton — только TON\n"
     text = text + "/whale arb — только Arbitrum\n"
     text = text + "/whale polygon — только Polygon\n"
     text = text + "/whale avax — только Avalanche\n"
@@ -663,16 +660,11 @@ async def cmd_rune(message: Message):
 # ============================================
 
 def get_whale_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура для whale tracker с 9 сетями и DeFi."""
+    """Клавиатура для whale tracker с 6 сетями и DeFi."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="🟠 BTC", callback_data="whale_btc"),
             InlineKeyboardButton(text="🔷 ETH", callback_data="whale_eth"),
-            InlineKeyboardButton(text="🟡 BSC", callback_data="whale_bsc"),
-        ],
-        [
-            InlineKeyboardButton(text="🟣 SOL", callback_data="whale_sol"),
-            InlineKeyboardButton(text="💎 TON", callback_data="whale_ton"),
         ],
         [
             InlineKeyboardButton(text="🔵 Arbitrum", callback_data="whale_arb"),
@@ -714,7 +706,8 @@ async def cmd_whale(message: Message):
             "🐋 *Whale Tracker*\n\n"
             "✅ *Оповещения включены!*\n\n"
             "Вы будете получать уведомления о крупных\n"
-            "транзакциях на BTC, ETH, BSC, SOL и TON.\n\n"
+            "транзакциях на BTC, ETH, Arbitrum, Polygon,\n"
+            "Avalanche и Base.\n\n"
             "Минимальная сумма: $100,000+"
         )
         new_msg = await message.answer(text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
@@ -769,20 +762,19 @@ async def cmd_whale(message: Message):
         return
 
     if subcommand in ("bsc", "bnb", "binance"):
-        # Только BSC
-        loading_msg = await message.answer("⏳ *Загружаю BSC транзакции...*", parse_mode=ParseMode.MARKDOWN)
-        user_messages[chat_id] = loading_msg.message_id
-
-        try:
-            whale_text = await whale_tracker.format_whale_message(blockchain="bsc")
-            await loading_msg.edit_text(whale_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
-        except Exception as e:
-            logger.error(f"Whale BSC error: {e}")
-            await loading_msg.edit_text(
-                "🐋 *Whale Tracker - BSC*\n\n❌ Ошибка загрузки данных",
-                reply_markup=get_whale_keyboard(),
-                parse_mode=ParseMode.MARKDOWN
-            )
+        # BSC removed - API requires paid plan
+        text = (
+            "🐋 *Whale Tracker - BSC*\n\n"
+            "⚠️ *Временно недоступно*\n\n"
+            "BSC требует платный API ключ.\n"
+            "Используйте другие сети:\n"
+            "• ETH (Etherscan V2)\n"
+            "• Arbitrum, Polygon, Base\n"
+            "• BTC (mempool.space)\n"
+            "• AVAX (Snowtrace)"
+        )
+        new_msg = await message.answer(text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+        user_messages[chat_id] = new_msg.message_id
         return
 
     if subcommand in ("btc", "bitcoin"):
@@ -803,37 +795,35 @@ async def cmd_whale(message: Message):
         return
 
     if subcommand in ("sol", "solana"):
-        # Только Solana
-        loading_msg = await message.answer("⏳ *Загружаю SOL транзакции...*", parse_mode=ParseMode.MARKDOWN)
-        user_messages[chat_id] = loading_msg.message_id
-
-        try:
-            whale_text = await whale_tracker.format_whale_message(blockchain="sol")
-            await loading_msg.edit_text(whale_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
-        except Exception as e:
-            logger.error(f"Whale SOL error: {e}")
-            await loading_msg.edit_text(
-                "🐋 *Whale Tracker - Solana*\n\n❌ Ошибка загрузки данных",
-                reply_markup=get_whale_keyboard(),
-                parse_mode=ParseMode.MARKDOWN
-            )
+        # Solana removed - Solscan API returns 404
+        text = (
+            "🐋 *Whale Tracker - Solana*\n\n"
+            "⚠️ *Временно недоступно*\n\n"
+            "Solscan API недоступен (404).\n"
+            "Используйте другие сети:\n"
+            "• ETH (Etherscan V2)\n"
+            "• Arbitrum, Polygon, Base\n"
+            "• BTC (mempool.space)\n"
+            "• AVAX (Snowtrace)"
+        )
+        new_msg = await message.answer(text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+        user_messages[chat_id] = new_msg.message_id
         return
 
     if subcommand == "ton":
-        # Только TON
-        loading_msg = await message.answer("⏳ *Загружаю TON транзакции...*", parse_mode=ParseMode.MARKDOWN)
-        user_messages[chat_id] = loading_msg.message_id
-
-        try:
-            whale_text = await whale_tracker.format_whale_message(blockchain="ton")
-            await loading_msg.edit_text(whale_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
-        except Exception as e:
-            logger.error(f"Whale TON error: {e}")
-            await loading_msg.edit_text(
-                "🐋 *Whale Tracker - TON*\n\n❌ Ошибка загрузки данных",
-                reply_markup=get_whale_keyboard(),
-                parse_mode=ParseMode.MARKDOWN
-            )
+        # TON removed - complex API
+        text = (
+            "🐋 *Whale Tracker - TON*\n\n"
+            "⚠️ *Временно недоступно*\n\n"
+            "TON API сложен для интеграции.\n"
+            "Используйте другие сети:\n"
+            "• ETH (Etherscan V2)\n"
+            "• Arbitrum, Polygon, Base\n"
+            "• BTC (mempool.space)\n"
+            "• AVAX (Snowtrace)"
+        )
+        new_msg = await message.answer(text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+        user_messages[chat_id] = new_msg.message_id
         return
 
     if subcommand == "arb" or subcommand == "arbitrum":
@@ -1000,20 +990,19 @@ async def callback_whale_eth(callback: CallbackQuery):
 
 @router.callback_query(lambda c: c.data == "whale_bsc")
 async def callback_whale_bsc(callback: CallbackQuery):
-    """Транзакции BSC."""
-    await callback.answer("⏳ Загружаю BSC...")
-    await callback.message.edit_text("⏳ *Загружаю BSC транзакции...*", parse_mode=ParseMode.MARKDOWN)
-
-    try:
-        whale_text = await whale_tracker.format_whale_message(blockchain="bsc")
-        await callback.message.edit_text(whale_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
-    except Exception as e:
-        logger.error(f"Whale BSC callback error: {e}")
-        await callback.message.edit_text(
-            "🐋 *Whale Tracker - BSC*\n\n❌ Ошибка загрузки данных",
-            reply_markup=get_whale_keyboard(),
-            parse_mode=ParseMode.MARKDOWN
-        )
+    """BSC removed - requires paid API."""
+    await callback.answer("BSC временно недоступен")
+    text = (
+        "🐋 *Whale Tracker - BSC*\n\n"
+        "⚠️ *Временно недоступно*\n\n"
+        "BSC требует платный API ключ.\n"
+        "Используйте другие сети:\n"
+        "• ETH (Etherscan V2)\n"
+        "• Arbitrum, Polygon, Base\n"
+        "• BTC (mempool.space)\n"
+        "• AVAX (Snowtrace)"
+    )
+    await callback.message.edit_text(text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
 
 
 @router.callback_query(lambda c: c.data == "whale_btc")
@@ -1036,38 +1025,36 @@ async def callback_whale_btc(callback: CallbackQuery):
 
 @router.callback_query(lambda c: c.data == "whale_sol")
 async def callback_whale_sol(callback: CallbackQuery):
-    """Транзакции Solana."""
-    await callback.answer("⏳ Загружаю SOL...")
-    await callback.message.edit_text("⏳ *Загружаю SOL транзакции...*", parse_mode=ParseMode.MARKDOWN)
-
-    try:
-        whale_text = await whale_tracker.format_whale_message(blockchain="sol")
-        await callback.message.edit_text(whale_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
-    except Exception as e:
-        logger.error(f"Whale SOL callback error: {e}")
-        await callback.message.edit_text(
-            "🐋 *Whale Tracker - Solana*\n\n❌ Ошибка загрузки данных",
-            reply_markup=get_whale_keyboard(),
-            parse_mode=ParseMode.MARKDOWN
-        )
+    """Solana removed - API returns 404."""
+    await callback.answer("Solana временно недоступен")
+    text = (
+        "🐋 *Whale Tracker - Solana*\n\n"
+        "⚠️ *Временно недоступно*\n\n"
+        "Solscan API недоступен (404).\n"
+        "Используйте другие сети:\n"
+        "• ETH (Etherscan V2)\n"
+        "• Arbitrum, Polygon, Base\n"
+        "• BTC (mempool.space)\n"
+        "• AVAX (Snowtrace)"
+    )
+    await callback.message.edit_text(text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
 
 
 @router.callback_query(lambda c: c.data == "whale_ton")
 async def callback_whale_ton(callback: CallbackQuery):
-    """Транзакции TON."""
-    await callback.answer("⏳ Загружаю TON...")
-    await callback.message.edit_text("⏳ *Загружаю TON транзакции...*", parse_mode=ParseMode.MARKDOWN)
-
-    try:
-        whale_text = await whale_tracker.format_whale_message(blockchain="ton")
-        await callback.message.edit_text(whale_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
-    except Exception as e:
-        logger.error(f"Whale TON callback error: {e}")
-        await callback.message.edit_text(
-            "🐋 *Whale Tracker - TON*\n\n❌ Ошибка загрузки данных",
-            reply_markup=get_whale_keyboard(),
-            parse_mode=ParseMode.MARKDOWN
-        )
+    """TON removed - complex API."""
+    await callback.answer("TON временно недоступен")
+    text = (
+        "🐋 *Whale Tracker - TON*\n\n"
+        "⚠️ *Временно недоступно*\n\n"
+        "TON API сложен для интеграции.\n"
+        "Используйте другие сети:\n"
+        "• ETH (Etherscan V2)\n"
+        "• Arbitrum, Polygon, Base\n"
+        "• BTC (mempool.space)\n"
+        "• AVAX (Snowtrace)"
+    )
+    await callback.message.edit_text(text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
 
 
 @router.callback_query(lambda c: c.data == "whale_arb")

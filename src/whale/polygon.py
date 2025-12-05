@@ -27,10 +27,14 @@ from tenacity import (
 )
 
 from config import settings
+from whale.etherscan_v2 import get_etherscan_key, get_etherscan_v2_url
 
 logger = structlog.get_logger()
 
 # ===== API URLs =====
+# Use Etherscan V2 API with chainid=137 for Polygon
+ETHERSCAN_V2_URL = get_etherscan_v2_url("polygon") or "https://api.etherscan.io/v2/api?chainid=137"
+# Fallback to direct Polygonscan API
 POLYGONSCAN_API_URL = "https://api.polygonscan.com/api"
 
 # ===== Публичные RPC URL для Polygon =====
@@ -144,7 +148,8 @@ class PolygonTracker:
 
     def __init__(self):
         """Инициализация трекера."""
-        self.api_key = getattr(settings, "polygonscan_api_key", "")
+        # Use Etherscan V2 API key (shared across all EVM chains)
+        self.api_key = get_etherscan_key() or getattr(settings, "etherscan_api_key", "")
         self.min_value_matic = MIN_WHALE_MATIC
         self.min_value_usd = getattr(settings, "whale_min_transaction", 100_000)
         self.price_cache_ttl = getattr(settings, "whale_price_cache_ttl", 300)
@@ -235,7 +240,18 @@ class PolygonTracker:
         """
         await self._update_matic_price()
 
-        # Пробуем Polygonscan API (работает и без ключа с rate limit)
+        # Пробуем Etherscan V2 API (один ключ для всех EVM сетей)
+        logger.debug("Polygon: Пробуем получить данные через Etherscan V2")
+        transactions = await self._get_from_etherscan_v2(limit)
+        if transactions:
+            logger.info(
+                "Данные получены через Etherscan V2",
+                chain="polygon",
+                count=len(transactions),
+            )
+            return transactions
+
+        # Fallback to direct Polygonscan API
         logger.debug("Polygon: Пробуем получить данные через Polygonscan API")
         transactions = await self._get_from_polygonscan(limit)
         if transactions:
@@ -255,8 +271,72 @@ class PolygonTracker:
             )
             return transactions
 
-        logger.warning("Polygon: Не удалось получить транзакции")
+        logger.debug("Polygon: Не удалось получить транзакции")
         return []
+
+    async def _get_from_etherscan_v2(
+        self,
+        limit: int,
+    ) -> list[PolygonTransaction]:
+        """Получение транзакций через Etherscan V2 API."""
+        if not self.api_key:
+            return []
+
+        try:
+            transactions = []
+            num_addresses = 10
+
+            for address in TRACKED_POLYGON_ADDRESSES[:num_addresses]:
+                params = {
+                    "module": "account",
+                    "action": "txlist",
+                    "address": address,
+                    "startblock": 0,
+                    "endblock": 99999999,
+                    "page": 1,
+                    "offset": 50,
+                    "sort": "desc",
+                    "apikey": self.api_key,
+                }
+
+                data = await self._make_api_request(ETHERSCAN_V2_URL, params=params)
+                if not data or data.get("status") != "1":
+                    continue
+
+                for tx in data.get("result", []):
+                    value_wei = int(tx.get("value", 0))
+                    value_matic = value_wei / 10**18
+                    value_usd = value_matic * self._matic_price
+
+                    if value_matic < self.min_value_matic:
+                        continue
+
+                    try:
+                        timestamp = datetime.fromtimestamp(
+                            int(tx.get("timeStamp", 0)), tz=timezone.utc
+                        )
+                    except (ValueError, OSError):
+                        timestamp = datetime.now(timezone.utc)
+
+                    transactions.append(
+                        PolygonTransaction(
+                            tx_hash=tx.get("hash", ""),
+                            from_address=tx.get("from", ""),
+                            to_address=tx.get("to", ""),
+                            value_matic=value_matic,
+                            value_usd=value_usd,
+                            timestamp=timestamp,
+                            block_number=int(tx.get("blockNumber", 0)),
+                        )
+                    )
+
+                await asyncio.sleep(0.2)
+
+            return self._deduplicate_and_sort(transactions, limit)
+
+        except Exception as e:
+            logger.debug("Polygon: Ошибка Etherscan V2 API", error=str(e))
+            return []
 
     async def _get_from_polygonscan(
         self,
