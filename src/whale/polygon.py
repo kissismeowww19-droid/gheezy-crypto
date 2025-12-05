@@ -335,7 +335,7 @@ class PolygonTracker:
             return self._deduplicate_and_sort(transactions, limit)
 
         except Exception as e:
-            logger.debug(f"Polygon: Ошибка Etherscan V2 API: {e}")
+            logger.debug("Polygon: Ошибка Etherscan V2 API", error=str(e))
             return []
 
     async def _get_from_polygonscan(

@@ -1206,10 +1206,13 @@ class WhaleTracker:
         Returns:
             list[WhaleTransaction]: Список демо-транзакций
         """
-        # Demo hashes use padding to match realistic lengths
+        import uuid
+        current_time = datetime.now(timezone.utc)
+
+        # Generate unique demo transaction hashes using UUID
         demo_data = [
             WhaleTransaction(
-                tx_hash="0xdemo1" + "a" * 58,
+                tx_hash=f"0xdemo_eth_{uuid.uuid4().hex[:56]}",
                 blockchain="Ethereum",
                 token_symbol="ETH",
                 amount=5000,
@@ -1218,11 +1221,11 @@ class WhaleTracker:
                 to_address="0x28c6c06298d514db089934071355e5743bf21d60",
                 from_label=None,
                 to_label="Binance",
-                timestamp=datetime.now(timezone.utc),
+                timestamp=current_time,
                 tx_type="DEPOSIT",
             ),
             WhaleTransaction(
-                tx_hash="demo2" + "c" * 59,
+                tx_hash=f"demo_btc_{uuid.uuid4().hex[:58]}",
                 blockchain="Bitcoin",
                 token_symbol="BTC",
                 amount=500,
@@ -1231,11 +1234,11 @@ class WhaleTracker:
                 to_address="34xp4vrocgjym3xr7ycvpfhocnxv4twseo",
                 from_label="Unknown Whale",
                 to_label="Binance",
-                timestamp=datetime.now(timezone.utc),
+                timestamp=current_time,
                 tx_type="DEPOSIT",
             ),
             WhaleTransaction(
-                tx_hash="0xdemo3" + "d" * 58,
+                tx_hash=f"0xdemo_arb_{uuid.uuid4().hex[:54]}",
                 blockchain="Arbitrum",
                 token_symbol="ETH",
                 amount=2000,
@@ -1244,11 +1247,11 @@ class WhaleTracker:
                 to_address="0xe592427a0aece92de3edee1f18e0157c05861564",
                 from_label="Binance Arbitrum",
                 to_label="Uniswap V3 Router",
-                timestamp=datetime.now(timezone.utc),
+                timestamp=current_time,
                 tx_type="DEX_SWAP",
             ),
             WhaleTransaction(
-                tx_hash="0xdemo4" + "e" * 58,
+                tx_hash=f"0xdemo_poly_{uuid.uuid4().hex[:53]}",
                 blockchain="Polygon",
                 token_symbol="MATIC",
                 amount=5000000,
@@ -1257,11 +1260,11 @@ class WhaleTracker:
                 to_address="0xa5e0829caced8ffdd4de3c43696c57f7d7a678ff",
                 from_label="Binance",
                 to_label="QuickSwap Router",
-                timestamp=datetime.now(timezone.utc),
+                timestamp=current_time,
                 tx_type="DEX_SWAP",
             ),
             WhaleTransaction(
-                tx_hash="0xdemo5" + "f" * 58,
+                tx_hash=f"0xdemo_base_{uuid.uuid4().hex[:53]}",
                 blockchain="Base",
                 token_symbol="ETH",
                 amount=1500,
@@ -1270,7 +1273,7 @@ class WhaleTracker:
                 to_address="0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad",
                 from_label="Coinbase",
                 to_label="Uniswap Universal Router",
-                timestamp=datetime.now(timezone.utc),
+                timestamp=current_time,
                 tx_type="DEX_SWAP",
             ),
         ]
