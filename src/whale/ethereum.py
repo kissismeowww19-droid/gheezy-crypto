@@ -367,27 +367,21 @@ class EthereumTracker:
                 blocks_count=self.blocks_to_analyze,
             )
 
-            # Параллельные запросы к адресам бирж
-            # Ограничиваем до 15 адресов для соблюдения rate limits Etherscan API
-            # (бесплатный tier: 5 calls/sec, 100K calls/day)
+            # Sequential requests with delay to avoid rate limits (3 req/sec)
+            # Ограничиваем до 10 адресов для соблюдения rate limits Etherscan API
             # Адреса отсортированы по важности (крупнейшие биржи первые)
-            tasks = []
-            for address in TRACKED_EXCHANGE_ADDRESSES[:15]:
-                tasks.append(
-                    self._fetch_address_transactions(
+            transactions = []
+            for address in TRACKED_EXCHANGE_ADDRESSES[:10]:
+                try:
+                    result = await self._fetch_address_transactions(
                         address, start_block, latest_block, min_value_eth
                     )
-                )
-
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            # Собираем все транзакции
-            transactions = []
-            for result in results:
-                if isinstance(result, list):
-                    transactions.extend(result)
-                elif isinstance(result, Exception):
-                    logger.debug(f"Ошибка при получении транзакций: {result}")
+                    if result:
+                        transactions.extend(result)
+                except Exception as e:
+                    logger.debug(f"Ошибка при получении транзакций: {e}")
+                # Rate limit: 3 req/sec, add 0.4s delay between requests
+                await asyncio.sleep(0.4)
 
             # Удаляем дубликаты и сортируем
             return self._deduplicate_and_sort(transactions, limit)

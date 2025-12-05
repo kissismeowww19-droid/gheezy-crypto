@@ -1,21 +1,21 @@
 """
 Gheezy Crypto - Трекер китов
 
-Отслеживание крупных транзакций китов на 6 блокчейнах:
+Отслеживание крупных транзакций китов на 5 блокчейнах:
 - Ethereum (Etherscan V2)
 - Bitcoin (mempool.space - no key needed)
 - Arbitrum (Etherscan V2)
 - Polygon (Etherscan V2)
 - Avalanche (Snowtrace - no key needed)
-- Base (Etherscan V2)
 
 Removed chains (API issues):
 - BSC (chainid=56 requires paid Etherscan plan)
+- Base (chainid=8453 requires paid Etherscan plan)
 - TON (complex API)
 - SOL (Solscan returns 404)
 
 Использует несколько источников данных с приоритетом:
-- Etherscan V2 API (один ключ для ETH, Arbitrum, Polygon, Base)
+- Etherscan V2 API (один ключ для ETH, Arbitrum, Polygon)
 - Snowtrace API (бесплатный для Avalanche)
 - mempool.space для Bitcoin
 - Публичные RPC ноды (fallback)
@@ -46,7 +46,7 @@ from whale.bitcoin import BitcoinTracker
 from whale.arbitrum import ArbitrumTracker
 from whale.polygon import PolygonTracker
 from whale.avalanche import AvalancheTracker
-from whale.base_chain import BaseTracker
+# Base chain removed - requires paid Etherscan plan
 # DeFi tracker
 from whale.defi import DeFiTracker
 from whale.known_wallets import (
@@ -225,7 +225,7 @@ class WhaleTracker:
         init_whale_db()
 
         # Инициализация трекеров для работающих блокчейнов
-        # Using Etherscan V2 API (one key for ETH, Arbitrum, Polygon, Base)
+        # Using Etherscan V2 API (one key for ETH, Arbitrum, Polygon)
         self._eth_tracker = EthereumTracker()
         self._btc_tracker = BitcoinTracker()  # mempool.space - no key needed
 
@@ -233,7 +233,7 @@ class WhaleTracker:
         self._arb_tracker = ArbitrumTracker()
         self._polygon_tracker = PolygonTracker()
         self._avax_tracker = AvalancheTracker()  # Snowtrace - no key needed
-        self._base_tracker = BaseTracker()
+        # Base chain removed - requires paid Etherscan plan
 
         # DeFi трекер
         self._defi_tracker = DeFiTracker()
@@ -251,7 +251,7 @@ class WhaleTracker:
             check_interval=self.check_interval,
             use_demo_data=self.use_demo_data,
             etherscan_key="настроен" if settings.etherscan_api_key else "не настроен",
-            networks=["ETH", "BTC", "ARB", "POLYGON", "AVAX", "BASE"],
+            networks=["ETH", "BTC", "ARB", "POLYGON", "AVAX"],
             database="SQLite",
             defi_tracking="enabled",
         )
@@ -272,7 +272,7 @@ class WhaleTracker:
         await self._arb_tracker.close()
         await self._polygon_tracker.close()
         await self._avax_tracker.close()
-        await self._base_tracker.close()
+        # Base tracker removed
 
         # Закрываем DeFi трекер
         await self._defi_tracker.close()
@@ -379,7 +379,6 @@ class WhaleTracker:
                     arb=len([t for t in transactions if t.blockchain == "Arbitrum"]),
                     polygon=len([t for t in transactions if t.blockchain == "Polygon"]),
                     avax=len([t for t in transactions if t.blockchain == "Avalanche"]),
-                    base=len([t for t in transactions if t.blockchain == "Base"]),
                 )
             except Exception as e:
                 logger.error(
@@ -674,46 +673,16 @@ class WhaleTracker:
         limit: int = 20,
     ) -> list[WhaleTransaction]:
         """
-        Получение крупных ETH транзакций на Base.
+        Base removed - requires paid Etherscan API plan.
 
         Args:
             limit: Максимальное количество транзакций
 
         Returns:
-            list[WhaleTransaction]: Список транзакций
+            list[WhaleTransaction]: Empty list (Base disabled)
         """
-        try:
-            base_txs = await self._base_tracker.get_large_transactions(limit=limit)
-
-            transactions = []
-            for tx in base_txs:
-                transactions.append(
-                    WhaleTransaction(
-                        tx_hash=tx.tx_hash,
-                        blockchain="Base",
-                        token_symbol="ETH",
-                        amount=tx.value_eth,
-                        amount_usd=tx.value_usd,
-                        from_address=tx.from_address,
-                        to_address=tx.to_address,
-                        from_label=tx.from_label,
-                        to_label=tx.to_label,
-                        timestamp=tx.timestamp,
-                    )
-                )
-
-            logger.debug(
-                "Получены Base транзакции",
-                count=len(transactions),
-            )
-            return transactions
-
-        except Exception as e:
-            logger.error(
-                "Ошибка Base трекера",
-                error=str(e),
-            )
-            return []
+        logger.debug("Base трекер отключен - требуется платный API")
+        return []
 
     async def get_defi_events(self, limit: int = 20) -> list:
         """
@@ -741,18 +710,18 @@ class WhaleTracker:
         limit: int = 20,
     ) -> list[WhaleTransaction]:
         """
-        Получение транзакций со всех работающих блокчейнов (6 сетей).
+        Получение транзакций со всех работающих блокчейнов (5 сетей).
 
         Working chains:
         - BTC (mempool.space - no key needed)
         - ETH (Etherscan V2)
         - Arbitrum (Etherscan V2)
         - Polygon (Etherscan V2)
-        - Base (Etherscan V2)
         - AVAX (Snowtrace - no key needed)
 
         Removed chains:
         - BSC (requires paid API)
+        - Base (requires paid API)
         - TON (complex API)
         - SOL (Solscan 404)
 
@@ -768,10 +737,9 @@ class WhaleTracker:
         arb_task = self.get_arbitrum_transactions(limit=limit)
         polygon_task = self.get_polygon_transactions(limit=limit)
         avax_task = self.get_avalanche_transactions(limit=limit)
-        base_task = self.get_base_transactions(limit=limit)
 
         results = await asyncio.gather(
-            eth_task, btc_task, arb_task, polygon_task, avax_task, base_task,
+            eth_task, btc_task, arb_task, polygon_task, avax_task,
             return_exceptions=True
         )
 
@@ -836,6 +804,7 @@ class WhaleTracker:
         elif blockchain_lower in ("avax", "avalanche"):
             return await self.get_avalanche_transactions(limit=limit)
         elif blockchain_lower == "base":
+            # Base requires paid API - return unavailable message
             return await self.get_base_transactions(limit=limit)
         else:
             logger.warning(f"Unknown blockchain: {blockchain}")
@@ -868,7 +837,6 @@ class WhaleTracker:
         arb_count = len([tx for tx in transactions if tx.blockchain == "Arbitrum"])
         polygon_count = len([tx for tx in transactions if tx.blockchain == "Polygon"])
         avax_count = len([tx for tx in transactions if tx.blockchain == "Avalanche"])
-        base_count = len([tx for tx in transactions if tx.blockchain == "Base"])
 
         return {
             "total_transactions": len(transactions),
@@ -883,7 +851,7 @@ class WhaleTracker:
             "arb_transactions": arb_count,
             "polygon_transactions": polygon_count,
             "avax_transactions": avax_count,
-            "base_transactions": base_count,
+            "base_transactions": 0,  # Disabled - requires paid API
             "sentiment": "bearish" if deposits > withdrawals else "bullish",
         }
 
@@ -964,7 +932,6 @@ class WhaleTracker:
             "Arbitrum": "ARB",
             "Polygon": "POLYGON",
             "Avalanche": "AVAX",
-            "Base": "BASE",
         }
 
         for network_name, network_key in network_map.items():
@@ -1264,15 +1231,15 @@ class WhaleTracker:
                 tx_type="DEX_SWAP",
             ),
             WhaleTransaction(
-                tx_hash=f"0xdemo_base_{uuid.uuid4().hex[:53]}",
-                blockchain="Base",
-                token_symbol="ETH",
-                amount=1500,
-                amount_usd=3_000_000,
-                from_address="0xa9d1e08c7793af67e9d92fe308d5697fb81d3e43",
-                to_address="0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad",
-                from_label="Coinbase",
-                to_label="Uniswap Universal Router",
+                tx_hash=f"0xdemo_avax_{uuid.uuid4().hex[:53]}",
+                blockchain="Avalanche",
+                token_symbol="AVAX",
+                amount=100000,
+                amount_usd=3_500_000,
+                from_address="0x9f8c163cba728e99993abe7495f06c0a3c8ac8b9",
+                to_address="0x60ae616a2155ee3d9a68541ba4544862310933d4",
+                from_label="Binance AVAX",
+                to_label="TraderJoe Router",
                 timestamp=current_time,
                 tx_type="DEX_SWAP",
             ),

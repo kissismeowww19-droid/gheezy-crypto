@@ -2,15 +2,15 @@
 Gheezy Crypto - Etherscan V2 API Client
 
 Etherscan V2 uses ONE API key for multiple EVM chains.
-Supported chains: ETH, Polygon, Arbitrum, Base
-Note: BSC (chainid=56) requires paid plan - NOT included.
+Supported chains: ETH, Polygon, Arbitrum
+Note: BSC (chainid=56) and Base (chainid=8453) require paid plan - NOT included.
 
 API endpoint format:
 https://api.etherscan.io/v2/api?chainid={CHAIN_ID}&module=...
 """
 
+import itertools
 import os
-import random
 from typing import Optional
 
 import structlog
@@ -21,18 +21,34 @@ logger = structlog.get_logger()
 ETHERSCAN_V2_BASE = "https://api.etherscan.io/v2/api"
 
 # Chain IDs for Etherscan V2
-# Note: BSC (56) requires paid plan - NOT included
+# Note: BSC (56) and Base (8453) require paid plan - NOT included
 CHAIN_IDS = {
     "eth": 1,
     "polygon": 137,
     "arbitrum": 42161,
-    "base": 8453,
 }
+
+# API key rotation using itertools.cycle for consistent round-robin rotation
+_etherscan_keys: list[str] = []
+_key_cycle: Optional[itertools.cycle] = None
+
+
+def _init_key_rotation() -> None:
+    """Initialize API key rotation from environment variables."""
+    global _etherscan_keys, _key_cycle
+    keys = [
+        os.getenv("ETHERSCAN_API_KEY"),
+        os.getenv("ETHERSCAN_API_KEY_2"),
+        os.getenv("ETHERSCAN_API_KEY_3"),
+    ]
+    _etherscan_keys = [k for k in keys if k]
+    if _etherscan_keys:
+        _key_cycle = itertools.cycle(_etherscan_keys)
 
 
 def get_etherscan_key() -> Optional[str]:
     """
-    Rotate between available Etherscan API keys.
+    Rotate between available Etherscan API keys using round-robin.
 
     Supports up to 3 API keys for rate limit management:
     - ETHERSCAN_API_KEY (primary)
@@ -40,15 +56,17 @@ def get_etherscan_key() -> Optional[str]:
     - ETHERSCAN_API_KEY_3 (optional)
 
     Returns:
-        str: Random available API key or None if no keys configured
+        str: Next available API key in rotation or None if no keys configured
     """
-    keys = [
-        os.getenv("ETHERSCAN_API_KEY"),
-        os.getenv("ETHERSCAN_API_KEY_2"),
-        os.getenv("ETHERSCAN_API_KEY_3"),
-    ]
-    available_keys = [k for k in keys if k]
-    return random.choice(available_keys) if available_keys else None
+    global _key_cycle
+    if _key_cycle is None:
+        _init_key_rotation()
+    if _key_cycle is None:
+        return None
+    try:
+        return next(_key_cycle)
+    except StopIteration:
+        return None
 
 
 def get_etherscan_v2_url(chain: str) -> Optional[str]:
