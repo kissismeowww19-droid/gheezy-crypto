@@ -120,6 +120,10 @@ def get_blockchain_explorer_url(tx_hash: str, blockchain: str) -> str:
         return f"https://bscscan.com/tx/{tx_hash}"
     elif blockchain_lower in ("bitcoin", "btc"):
         return f"https://blockchair.com/bitcoin/transaction/{tx_hash}"
+    elif blockchain_lower in ("solana", "sol"):
+        return f"https://solscan.io/tx/{tx_hash}"
+    elif blockchain_lower == "ton":
+        return f"https://tonviewer.com/transaction/{tx_hash}"
     return f"https://blockchair.com/{blockchain_lower}/transaction/{tx_hash}"
 
 
@@ -135,13 +139,16 @@ def get_blockchain_emoji(blockchain: str) -> str:
     """
     blockchain_lower = blockchain.lower()
     emojis = {
-        "ethereum": "⟠",
-        "eth": "⟠",
-        "bsc": "🔶",
-        "bnb": "🔶",
-        "binance": "🔶",
-        "bitcoin": "₿",
-        "btc": "₿",
+        "ethereum": "🔷",
+        "eth": "🔷",
+        "bsc": "🟡",
+        "bnb": "🟡",
+        "binance": "🟡",
+        "bitcoin": "🟠",
+        "btc": "🟠",
+        "solana": "🟣",
+        "sol": "🟣",
+        "ton": "💎",
     }
     return emojis.get(blockchain_lower, "💰")
 
@@ -301,6 +308,8 @@ def format_whale_summary(alerts: list[WhaleAlert], period: str = "24ч") -> str:
     eth_count = len([a for a in alerts if a.blockchain.lower() in ("ethereum", "eth")])
     bsc_count = len([a for a in alerts if a.blockchain.lower() in ("bsc", "bnb")])
     btc_count = len([a for a in alerts if a.blockchain.lower() in ("bitcoin", "btc")])
+    sol_count = len([a for a in alerts if a.blockchain.lower() in ("solana", "sol")])
+    ton_count = len([a for a in alerts if a.blockchain.lower() == "ton"])
 
     message = (
         f"🐋 *Whale Tracker - Сводка за {period}*\n"
@@ -313,9 +322,11 @@ def format_whale_summary(alerts: list[WhaleAlert], period: str = "24ч") -> str:
         f"• Выводы с бирж: *{len(withdrawals)}* ({format_usd(withdrawal_volume)})\n"
         f"• Переводы: *{len(transfers)}*\n\n"
         f"🔗 *По блокчейнам:*\n"
-        f"• ⟠ Ethereum: *{eth_count}*\n"
-        f"• 🔶 BSC: *{bsc_count}*\n"
-        f"• ₿ Bitcoin: *{btc_count}*\n\n"
+        f"• 🟠 Bitcoin: *{btc_count}*\n"
+        f"• 🔷 Ethereum: *{eth_count}*\n"
+        f"• 🟡 BSC: *{bsc_count}*\n"
+        f"• 🟣 Solana: *{sol_count}*\n"
+        f"• 💎 TON: *{ton_count}*\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
     )
 
@@ -355,6 +366,8 @@ def format_stats_message(
     eth_transactions: int,
     bsc_transactions: int,
     btc_transactions: int,
+    sol_transactions: int = 0,
+    ton_transactions: int = 0,
 ) -> str:
     """
     Форматирование сообщения со статистикой.
@@ -367,6 +380,8 @@ def format_stats_message(
         eth_transactions: Количество ETH транзакций
         bsc_transactions: Количество BSC транзакций
         btc_transactions: Количество BTC транзакций
+        sol_transactions: Количество SOL транзакций
+        ton_transactions: Количество TON транзакций
 
     Returns:
         str: Форматированное сообщение статистики
@@ -381,7 +396,9 @@ def format_stats_message(
         f"• 📥 Депозиты на биржи: *{deposits}*\n"
         f"• 📤 Выводы с бирж: *{withdrawals}*\n\n"
         f"🔗 *По блокчейнам:*\n"
-        f"• ⟠ Ethereum: *{eth_transactions}*\n"
-        f"• 🔶 BSC: *{bsc_transactions}*\n"
-        f"• ₿ Bitcoin: *{btc_transactions}*\n"
+        f"• 🟠 Bitcoin: *{btc_transactions}*\n"
+        f"• 🔷 Ethereum: *{eth_transactions}*\n"
+        f"• 🟡 BSC: *{bsc_transactions}*\n"
+        f"• 🟣 Solana: *{sol_transactions}*\n"
+        f"• 💎 TON: *{ton_transactions}*\n"
     )
