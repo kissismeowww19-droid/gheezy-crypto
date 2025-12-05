@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from src.config import settings
+from config import settings
 
 # Создаём асинхронный движок
 engine = create_async_engine(
@@ -87,7 +87,7 @@ async def init_db() -> None:
     Создаёт все таблицы, определённые в моделях.
     Вызывается при запуске приложения.
     """
-    from src.database.models import Base
+    from database.models import Base
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

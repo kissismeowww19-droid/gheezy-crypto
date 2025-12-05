@@ -21,15 +21,15 @@ from typing import Optional
 
 import structlog
 
-from src.config import settings
-from src.whale.ethereum import EthereumTracker
-from src.whale.bsc import BSCTracker
-from src.whale.bitcoin import BitcoinTracker
-from src.whale.known_wallets import (
+from config import settings
+from whale.ethereum import EthereumTracker
+from whale.bsc import BSCTracker
+from whale.bitcoin import BitcoinTracker
+from whale.known_wallets import (
     is_exchange_address,
     get_short_address,
 )
-from src.whale.alerts import (
+from whale.alerts import (
     WhaleAlert,
     format_whale_summary,
     format_stats_message,

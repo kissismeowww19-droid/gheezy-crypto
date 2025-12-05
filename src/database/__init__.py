@@ -4,13 +4,13 @@ Gheezy Crypto - Модуль базы данных
 Подключение к PostgreSQL и модели SQLAlchemy.
 """
 
-from src.database.db import (
+from database.db import (
     async_session_factory,
     engine,
     get_session,
     init_db,
 )
-from src.database.models import (
+from database.models import (
     Alert,
     Base,
     Portfolio,

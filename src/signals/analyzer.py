@@ -11,8 +11,8 @@ from typing import List, Optional, Tuple
 import aiohttp
 import structlog
 
-from src.config import settings
-from src.signals.indicators import (
+from config import settings
+from signals.indicators import (
     BollingerBands,
     MACD,
     RSI,

@@ -20,7 +20,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
-from src.database.models import Base
+from database.models import Base
 
 
 class WhaleTransaction(Base):
