@@ -334,7 +334,7 @@ class ArbitrumTracker:
                         )
                     )
 
-                await asyncio.sleep(0.2)
+                await asyncio.sleep(0.4)  # Rate limit: 3 req/sec
 
             return self._deduplicate_and_sort(transactions, limit)
 

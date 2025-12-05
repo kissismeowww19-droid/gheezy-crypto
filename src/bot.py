@@ -390,15 +390,13 @@ async def cmd_help(message: Message):
     text = text + "/market — обзор рынка\n"
     text = text + "/prices — все монеты (с пагинацией)\n"
     text = text + "/help — справка\n\n"
-    text = text + "*Команды Whale Tracker (6 сетей):*\n\n"
+    text = text + "*Команды Whale Tracker (5 сетей):*\n\n"
     text = text + "/whale — все крупные транзакции\n"
     text = text + "/whale btc — только Bitcoin\n"
     text = text + "/whale eth — только Ethereum\n"
     text = text + "/whale arb — только Arbitrum\n"
     text = text + "/whale polygon — только Polygon\n"
     text = text + "/whale avax — только Avalanche\n"
-    text = text + "/whale base — только Base\n"
-    text = text + "/whale defi — DeFi операции\n"
     text = text + "/whale on — включить оповещения\n"
     text = text + "/whale off — выключить оповещения\n"
     text = text + "/whale stats — статистика за день\n"
@@ -660,7 +658,7 @@ async def cmd_rune(message: Message):
 # ============================================
 
 def get_whale_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура для whale tracker с 6 сетями и DeFi."""
+    """Клавиатура для whale tracker с 5 сетями."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="🟠 BTC", callback_data="whale_btc"),
@@ -672,10 +670,6 @@ def get_whale_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="🔺 Avalanche", callback_data="whale_avax"),
-            InlineKeyboardButton(text="🔵 Base", callback_data="whale_base"),
-        ],
-        [
-            InlineKeyboardButton(text="🏦 DeFi", callback_data="whale_defi"),
             InlineKeyboardButton(text="📊 Статистика", callback_data="whale_stats"),
         ],
         [
@@ -706,8 +700,8 @@ async def cmd_whale(message: Message):
             "🐋 *Whale Tracker*\n\n"
             "✅ *Оповещения включены!*\n\n"
             "Вы будете получать уведомления о крупных\n"
-            "транзакциях на BTC, ETH, Arbitrum, Polygon,\n"
-            "Avalanche и Base.\n\n"
+            "транзакциях на BTC, ETH, Arbitrum, Polygon\n"
+            "и Avalanche.\n\n"
             "Минимальная сумма: $100,000+"
         )
         new_msg = await message.answer(text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
@@ -878,37 +872,34 @@ async def cmd_whale(message: Message):
         return
 
     if subcommand == "base":
-        # Только Base
-        loading_msg = await message.answer("⏳ *Загружаю Base транзакции...*", parse_mode=ParseMode.MARKDOWN)
-        user_messages[chat_id] = loading_msg.message_id
-
-        try:
-            whale_text = await whale_tracker.format_whale_message(blockchain="base")
-            await loading_msg.edit_text(whale_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
-        except Exception as e:
-            logger.error(f"Whale Base error: {e}")
-            await loading_msg.edit_text(
-                "🐋 *Whale Tracker - Base*\n\n❌ Ошибка загрузки данных",
-                reply_markup=get_whale_keyboard(),
-                parse_mode=ParseMode.MARKDOWN
-            )
+        # Base removed - requires paid Etherscan plan
+        text = (
+            "🐋 *Whale Tracker - Base*\n\n"
+            "⚠️ *Временно недоступно*\n\n"
+            "Base требует платный API ключ.\n"
+            "Используйте другие сети:\n"
+            "• ETH (Etherscan V2)\n"
+            "• Arbitrum, Polygon\n"
+            "• BTC (mempool.space)\n"
+            "• AVAX (Snowtrace)"
+        )
+        new_msg = await message.answer(text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+        user_messages[chat_id] = new_msg.message_id
         return
 
     if subcommand == "defi":
-        # DeFi операции
-        loading_msg = await message.answer("⏳ *Загружаю DeFi операции...*", parse_mode=ParseMode.MARKDOWN)
-        user_messages[chat_id] = loading_msg.message_id
-
-        try:
-            defi_text = await whale_tracker.format_defi_message()
-            await loading_msg.edit_text(defi_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
-        except Exception as e:
-            logger.error(f"DeFi error: {e}")
-            await loading_msg.edit_text(
-                "🏦 *DeFi Tracker*\n\n❌ Ошибка загрузки данных",
-                reply_markup=get_whale_keyboard(),
-                parse_mode=ParseMode.MARKDOWN
-            )
+        # DeFi button removed from menu
+        text = (
+            "🏦 *DeFi Tracker*\n\n"
+            "⚠️ *Функция отключена*\n\n"
+            "DeFi трекинг временно недоступен.\n"
+            "Используйте основные сети:\n"
+            "• ETH, Arbitrum, Polygon\n"
+            "• BTC (mempool.space)\n"
+            "• AVAX (Snowtrace)"
+        )
+        new_msg = await message.answer(text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+        user_messages[chat_id] = new_msg.message_id
         return
 
     # Все транзакции (по умолчанию)
@@ -1113,38 +1104,35 @@ async def callback_whale_avax(callback: CallbackQuery):
 
 @router.callback_query(lambda c: c.data == "whale_base")
 async def callback_whale_base(callback: CallbackQuery):
-    """Транзакции Base."""
-    await callback.answer("⏳ Загружаю Base...")
-    await callback.message.edit_text("⏳ *Загружаю Base транзакции...*", parse_mode=ParseMode.MARKDOWN)
-
-    try:
-        whale_text = await whale_tracker.format_whale_message(blockchain="base")
-        await callback.message.edit_text(whale_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
-    except Exception as e:
-        logger.error(f"Whale Base callback error: {e}")
-        await callback.message.edit_text(
-            "🐋 *Whale Tracker - Base*\n\n❌ Ошибка загрузки данных",
-            reply_markup=get_whale_keyboard(),
-            parse_mode=ParseMode.MARKDOWN
-        )
+    """Base removed - requires paid API."""
+    await callback.answer("Base временно недоступен")
+    text = (
+        "🐋 *Whale Tracker - Base*\n\n"
+        "⚠️ *Временно недоступно*\n\n"
+        "Base требует платный API ключ.\n"
+        "Используйте другие сети:\n"
+        "• ETH (Etherscan V2)\n"
+        "• Arbitrum, Polygon\n"
+        "• BTC (mempool.space)\n"
+        "• AVAX (Snowtrace)"
+    )
+    await callback.message.edit_text(text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
 
 
 @router.callback_query(lambda c: c.data == "whale_defi")
 async def callback_whale_defi(callback: CallbackQuery):
-    """DeFi операции."""
-    await callback.answer("⏳ Загружаю DeFi...")
-    await callback.message.edit_text("⏳ *Загружаю DeFi операции...*", parse_mode=ParseMode.MARKDOWN)
-
-    try:
-        defi_text = await whale_tracker.format_defi_message()
-        await callback.message.edit_text(defi_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
-    except Exception as e:
-        logger.error(f"DeFi callback error: {e}")
-        await callback.message.edit_text(
-            "🏦 *DeFi Tracker*\n\n❌ Ошибка загрузки данных",
-            reply_markup=get_whale_keyboard(),
-            parse_mode=ParseMode.MARKDOWN
-        )
+    """DeFi button removed from menu."""
+    await callback.answer("DeFi временно недоступен")
+    text = (
+        "🏦 *DeFi Tracker*\n\n"
+        "⚠️ *Функция отключена*\n\n"
+        "DeFi трекинг временно недоступен.\n"
+        "Используйте основные сети:\n"
+        "• ETH, Arbitrum, Polygon\n"
+        "• BTC (mempool.space)\n"
+        "• AVAX (Snowtrace)"
+    )
+    await callback.message.edit_text(text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
 
 
 @router.callback_query(lambda c: c.data == "whale_stats")
