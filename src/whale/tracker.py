@@ -16,6 +16,7 @@ Gheezy Crypto - Трекер китов
 - Параллельные запросы ко всем сетям
 - Единая статистика по всем сетям
 - Fallback на демо-данные (опционально, с предупреждением)
+- SQLite база данных для сохранения транзакций
 """
 
 import asyncio
@@ -28,6 +29,7 @@ from typing import Optional
 import structlog
 
 from config import settings
+from database.whale_db import init_whale_db, save_transaction
 from whale.ethereum import EthereumTracker
 from whale.bsc import BSCTracker
 from whale.bitcoin import BitcoinTracker
@@ -49,6 +51,12 @@ from whale.stats import (
     format_network_stats_message,
     format_top_transactions_message,
     format_24h_summary_message,
+    format_db_stats_message,
+)
+from database.whale_db import (
+    get_transactions as get_db_transactions,
+    get_multi_period_stats,
+    get_transaction_count,
 )
 
 logger = structlog.get_logger()
@@ -195,6 +203,9 @@ class WhaleTracker:
         self.check_interval = getattr(settings, "whale_check_interval", 60)
         self.use_demo_data = getattr(settings, "whale_use_demo_data", False)
 
+        # Инициализация SQLite базы данных для транзакций
+        init_whale_db()
+
         # Инициализация трекеров для каждого блокчейна
         self._eth_tracker = EthereumTracker()
         self._bsc_tracker = BSCTracker()
@@ -217,6 +228,7 @@ class WhaleTracker:
             etherscan_key="настроен" if settings.etherscan_api_key else "не настроен",
             bscscan_key="настроен" if settings.bscscan_api_key else "не настроен",
             networks=["ETH", "BSC", "BTC", "SOL", "TON"],
+            database="SQLite",
         )
 
     async def close(self) -> None:
@@ -261,15 +273,73 @@ class WhaleTracker:
                 pass
         logger.info("Whale tracker остановлен")
 
+    def _prepare_tx_for_db(self, tx: "WhaleTransaction") -> dict:
+        """
+        Подготовить транзакцию для сохранения в базу данных.
+
+        Args:
+            tx: Транзакция для сохранения
+
+        Returns:
+            dict: Данные транзакции для сохранения
+        """
+        # Определяем тип транзакции
+        tx_type = tx.get_transaction_type().value
+
+        # Преобразуем blockchain в chain
+        chain_map = {
+            "Ethereum": "ETH",
+            "BSC": "BSC",
+            "Bitcoin": "BTC",
+            "Solana": "SOL",
+            "TON": "TON",
+        }
+        chain = chain_map.get(tx.blockchain, tx.blockchain)
+
+        return {
+            "tx_hash": tx.tx_hash,
+            "chain": chain,
+            "from_address": tx.from_address,
+            "to_address": tx.to_address,
+            "amount": tx.amount,
+            "amount_usd": tx.amount_usd,
+            "token": tx.token_symbol,
+            "timestamp": tx.timestamp,
+            "from_label": tx.from_label,
+            "to_label": tx.to_label,
+            "tx_type": tx_type,
+        }
+
+    async def _save_to_db_async(self, tx: "WhaleTransaction") -> bool:
+        """
+        Асинхронно сохранить транзакцию в SQLite базу данных.
+
+        Args:
+            tx: Транзакция для сохранения
+
+        Returns:
+            bool: True если сохранено успешно
+        """
+        tx_data = self._prepare_tx_for_db(tx)
+        return await asyncio.to_thread(save_transaction, tx_data)
+
     async def _monitoring_loop(self) -> None:
         """Цикл мониторинга транзакций."""
         while self._running:
             try:
                 transactions = await self.get_all_transactions()
                 self._last_transactions = transactions
+
+                # Сохраняем каждую транзакцию в базу данных асинхронно
+                saved_count = 0
+                for tx in transactions:
+                    if await self._save_to_db_async(tx):
+                        saved_count += 1
+
                 logger.info(
                     "Проверка китов завершена",
                     total=len(transactions),
+                    saved=saved_count,
                     eth=len([t for t in transactions if t.blockchain == "Ethereum"]),
                     bsc=len([t for t in transactions if t.blockchain == "BSC"]),
                     btc=len([t for t in transactions if t.blockchain == "Bitcoin"]),
@@ -655,7 +725,9 @@ class WhaleTracker:
             str: Форматированное сообщение
         """
         if blockchain:
-            transactions = await self.get_transactions_by_blockchain(blockchain, limit=10)
+            transactions = await self.get_transactions_by_blockchain(
+                blockchain, limit=10
+            )
         else:
             transactions = await self.get_all_transactions(limit=10)
 
@@ -877,6 +949,72 @@ class WhaleTracker:
             list[WhaleTransaction]: Список транзакций
         """
         return await self.get_ethereum_transactions(limit=limit)
+
+    async def get_stats_from_db(
+        self,
+        chain: Optional[str] = None,
+    ) -> dict[str, dict]:
+        """
+        Получение статистики из базы данных за 24ч/7д/30д.
+
+        Args:
+            chain: Фильтр по сети (BTC, ETH, BSC, SOL, TON)
+
+        Returns:
+            dict: Статистика по периодам
+        """
+        return await asyncio.to_thread(get_multi_period_stats, chain)
+
+    async def format_stats_from_db_message(
+        self,
+        chain: Optional[str] = None,
+    ) -> str:
+        """
+        Форматирование статистики из базы данных.
+
+        Args:
+            chain: Фильтр по сети
+
+        Returns:
+            str: Форматированное сообщение для Telegram
+        """
+        stats = await asyncio.to_thread(get_multi_period_stats, chain)
+        return format_db_stats_message(
+            stats_24h=stats["24h"],
+            stats_7d=stats["7d"],
+            stats_30d=stats["30d"],
+            chain=chain,
+        )
+
+    async def get_db_transaction_count_async(self) -> int:
+        """
+        Асинхронное получение количества транзакций в базе данных.
+
+        Returns:
+            int: Количество транзакций
+        """
+        return await asyncio.to_thread(get_transaction_count)
+
+    async def get_db_transactions(
+        self,
+        chain: Optional[str] = None,
+        limit: int = 100,
+        hours: int = 24,
+    ) -> list[dict]:
+        """
+        Получение транзакций из базы данных.
+
+        Args:
+            chain: Фильтр по сети
+            limit: Максимальное количество
+            hours: Период в часах
+
+        Returns:
+            list[dict]: Список транзакций
+        """
+        return await asyncio.to_thread(
+            get_db_transactions, chain, limit, hours
+        )
 
     async def _get_demo_transactions(self) -> list[WhaleTransaction]:
         """

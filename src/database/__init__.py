@@ -2,6 +2,7 @@
 Gheezy Crypto - Модуль базы данных
 
 Подключение к PostgreSQL и модели SQLAlchemy.
+SQLite база данных для транзакций китов.
 """
 
 from database.db import (
@@ -19,8 +20,17 @@ from database.models import (
     User,
     WhaleTx,
 )
+from database.whale_db import (
+    init_whale_db,
+    save_transaction,
+    get_stats,
+    get_transactions,
+    get_multi_period_stats,
+    get_transaction_count,
+)
 
 __all__ = [
+    # PostgreSQL (async)
     "engine",
     "async_session_factory",
     "get_session",
@@ -32,4 +42,11 @@ __all__ = [
     "Signal",
     "WhaleTx",
     "Alert",
+    # SQLite для китов
+    "init_whale_db",
+    "save_transaction",
+    "get_stats",
+    "get_transactions",
+    "get_multi_period_stats",
+    "get_transaction_count",
 ]

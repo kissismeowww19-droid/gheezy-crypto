@@ -392,3 +392,86 @@ def format_24h_summary_message(stats: WhaleStats) -> str:
         )
 
     return message
+
+
+def format_db_stats_message(
+    stats_24h: dict,
+    stats_7d: dict,
+    stats_30d: dict,
+    chain: Optional[str] = None,
+) -> str:
+    """
+    Форматирование статистики из базы данных за несколько периодов.
+
+    Args:
+        stats_24h: Статистика за 24 часа
+        stats_7d: Статистика за 7 дней
+        stats_30d: Статистика за 30 дней
+        chain: Название сети (None для всех)
+
+    Returns:
+        str: Форматированное сообщение для Telegram
+    """
+    # Эмодзи для сетей
+    network_emojis = {
+        "BTC": "🟠",
+        "ETH": "🔷",
+        "BSC": "🟡",
+        "SOL": "🟣",
+        "TON": "💎",
+        "ALL": "🐋",
+    }
+
+    chain_display = chain or "ВСЕ СЕТИ"
+    emoji = network_emojis.get(chain or "ALL", "🐋")
+
+    message = (
+        f"{emoji} *WHALE СТАТИСТИКА {chain_display}*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n\n"
+    )
+
+    # 24 часа
+    message += (
+        f"📊 *За 24 часа:*\n"
+        f"├── TX: *{stats_24h['tx_count']:,}*\n"
+        f"├── Объём: *{format_usd_amount(stats_24h['total_volume_usd'])}*\n"
+        f"└── Крупнейшая: *{format_usd_amount(stats_24h['largest_tx_usd'])}*\n\n"
+    )
+
+    # 7 дней
+    message += (
+        f"📊 *За 7 дней:*\n"
+        f"├── TX: *{stats_7d['tx_count']:,}*\n"
+        f"├── Объём: *{format_usd_amount(stats_7d['total_volume_usd'])}*\n"
+        f"└── Крупнейшая: *{format_usd_amount(stats_7d['largest_tx_usd'])}*\n\n"
+    )
+
+    # 30 дней
+    message += (
+        f"📊 *За 30 дней:*\n"
+        f"├── TX: *{stats_30d['tx_count']:,}*\n"
+        f"├── Объём: *{format_usd_amount(stats_30d['total_volume_usd'])}*\n"
+        f"└── Крупнейшая: *{format_usd_amount(stats_30d['largest_tx_usd'])}*\n\n"
+    )
+
+    # Дополнительная информация за 24ч
+    if stats_24h["deposits_count"] > 0 or stats_24h["withdrawals_count"] > 0:
+        deps = stats_24h["deposits_count"]
+        wdrw = stats_24h["withdrawals_count"]
+
+        # Определяем сентимент
+        if wdrw > deps * 1.2:
+            sentiment = "📈 *Бычий* (выводы > депозитов)"
+        elif deps > wdrw * 1.2:
+            sentiment = "📉 *Медвежий* (депозиты > выводов)"
+        else:
+            sentiment = "↔️ *Нейтральный*"
+
+        message += (
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🎯 *Сентимент (24ч):* {sentiment}\n"
+            f"📥 Депозитов: *{deps}*\n"
+            f"📤 Выводов: *{wdrw}*\n"
+        )
+
+    return message
