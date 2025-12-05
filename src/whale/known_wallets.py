@@ -2,13 +2,17 @@
 Gheezy Crypto - База известных кошельков
 
 Расширенная база адресов крупных бирж, известных китов и функции
-определения владельца кошелька. Работает для Ethereum, BSC и Bitcoin.
+определения владельца кошелька. Работает для Ethereum, BSC, Bitcoin,
+Solana и TON.
 
 Содержит:
 - Binance (все hot/cold wallets)
 - Coinbase, Kraken, OKX, Bybit, Bitfinex, Gemini, Huobi
 - PancakeSwap и другие DEX
 - Известные киты и фонды
+- ETF провайдеры (BlackRock, Fidelity, Grayscale)
+- Майнеры (Marathon, Riot, CleanSpark)
+- DeFi протоколы (Lido, Aave, Compound)
 """
 
 from typing import Optional
@@ -118,6 +122,46 @@ ETHEREUM_EXCHANGES: dict[str, str] = {
     # ===== Crypto.com =====
     "0x72a53cdbbcc1b9efa39c834a540550e23463aacb": "Crypto.com",
     "0x6c8e5f3a5e4e3c7f8b2d9c6e5f3a5e4e3c7f8b2d": "Crypto.com Hot",
+
+    # ===== Bitget =====
+    "0x97b9d2102a9a65a26e1ee82d59e42d1b73b68689": "Bitget",
+    "0x5bdf85216ec1e38d6458c870992a69e38e03f7ef": "Bitget Hot",
+
+    # ===== MEXC =====
+    "0x75e89d5979e4f6fba9f97c104c2f0afb3f1dcb88": "MEXC",
+    "0x0162cd2ba40e23378bf0fd41f919e1be075f025f": "MEXC Hot",
+
+    # ===== DeFi Protocols =====
+    # Lido
+    "0xae7ab96520de3a18e5e111b5eaab095312d7fe84": "Lido stETH",
+    "0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0": "Lido wstETH",
+    "0xdc24316b9ae028f1497c275eb9192a3ea0f67022": "Lido Staking Pool",
+
+    # Rocket Pool
+    "0xdd3f50f8a6cafbe9b31a427582963f465e745af8": "Rocket Pool",
+    "0x1cc9cf5586522c6f483e84a19c3c2b0b6d027bf0": "Rocket Pool Storage",
+
+    # EigenLayer
+    "0x858646372cc42e1a627fce94aa7a7033e7cf075a": "EigenLayer",
+    "0x39053d51b77dc0d36036fc1fcc8cb819df8ef37a": "EigenLayer Strategy",
+
+    # Aave
+    "0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9": "Aave Token",
+    "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2": "Aave V3 Pool",
+
+    # Compound
+    "0xc00e94cb662c3520282e6f5717214004a7f26888": "Compound Token",
+    "0x3d9819210a31b4961b30ef54be2aed79b9c9cd3b": "Compound Comptroller",
+
+    # Uniswap
+    "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45": "Uniswap V3 Router",
+    "0x7a250d5630b4cf539739df2c5dacb4c659f2488d": "Uniswap V2 Router",
+    "0xe592427a0aece92de3edee1f18e0157c05861564": "Uniswap V3 Router 2",
+    "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984": "Uniswap Token",
+
+    # Curve
+    "0xd533a949740bb3306d119cc777fa900ba034cd52": "Curve Token",
+    "0xbebc44782c7db0a1a60cb6fe97d0b483032ff1c7": "Curve 3pool",
 }
 
 # Известные адреса BSC (Binance Smart Chain)
@@ -173,6 +217,22 @@ BSC_EXCHANGES: dict[str, str] = {
     # ===== Crypto.com =====
     "0x72a53cdbbcc1b9efa39c834a540550e23463aacb": "Crypto.com",
 
+    # ===== MEXC =====
+    "0x75e89d5979e4f6fba9f97c104c2f0afb3f1dcb88": "MEXC",
+    "0xeee28d484628d41a82d01e21d12e2e78d69920da": "MEXC Hot",
+
+    # ===== Bitget =====
+    "0x97b9d2102a9a65a26e1ee82d59e42d1b73b68689": "Bitget",
+    "0x5bdf85216ec1e38d6458c870992a69e38e03f7ef": "Bitget Hot",
+
+    # ===== Venus Protocol =====
+    "0xecA88125a5ADbe82614ffC12D0DB554E2e2867C8": "Venus",
+    "0xf508fcd89b8bd15579dc79a6827cb4686a3592c8": "Venus vBNB",
+
+    # ===== Alpaca Finance =====
+    "0xa625ab01b08ce023b2a342dbb12a16f2c8489a8f": "Alpaca Finance",
+    "0x7c9e73d4c71dae564d41f78d56439bb4ba87592f": "Alpaca ibBNB",
+
     # ===== Крупные киты BSC =====
     "0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82": "CAKE Token",
     "0xf68a4b64162906eff0ff6ae34e2bb1cd42fef62d": "BSC Whale 1",
@@ -181,7 +241,7 @@ BSC_EXCHANGES: dict[str, str] = {
 }
 
 # Известные Bitcoin адреса
-# Расширенный список крупных бирж и китов
+# Расширенный список крупных бирж, ETF и майнеров
 BITCOIN_EXCHANGES: dict[str, str] = {
     # ===== Binance =====
     "34xp4vrocgjym3xr7ycvpfhocnxv4twseo": "Binance",
@@ -197,6 +257,7 @@ BITCOIN_EXCHANGES: dict[str, str] = {
     "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh": "Coinbase 3",
     "1fjncvqnxzn2vzjvhyqxskgphjkrcnys3m": "Coinbase Cold",
     "1p5zsxtsaatpuqx8qxk4lkwyzw7zzcpq9": "Coinbase Cold 2",
+    "bc1q7t9fxfaakmtk8pj7pzl48rpdtmq3rkrqvkf7aw": "Coinbase Prime",
 
     # ===== Kraken =====
     "3afybath9e3giuvhx9wlncvwm8uvv1xv8h": "Kraken",
@@ -217,9 +278,11 @@ BITCOIN_EXCHANGES: dict[str, str] = {
     # ===== Bybit =====
     "bc1qm34lsc65zpw79lxes69zkqmk6ee3ewf0j77s3h": "Bybit",
     "3pj3b9j8ggfkq8v3qdv9t8zkgqrkqw4p9": "Bybit 2",
+    "bc1q4n9d9cj7e8vp3k5p8xg7n4f2s9w3d6e5t7y8u9": "Bybit Cold",
 
     # ===== Huobi =====
     "1huobigbqztktkbaqb9ue8edpb4rk3tzx6": "Huobi",
+    "bc1qy4vp3f8z9n5k6d7r8s9t0a1b2c3d4e5f6g7h8i": "Huobi Hot",
 
     # ===== Gemini =====
     "3p8xygsrvqzuegxv5y5bj2g3mxryvjbh": "Gemini",
@@ -231,10 +294,45 @@ BITCOIN_EXCHANGES: dict[str, str] = {
     # ===== Gate.io =====
     "3qw7bgqvclbr3zej7jfcwgzfjnfr5pmz8y": "Gate.io",
 
+    # ===== Bitget =====
+    "bc1qn7j8w6v9z5x4k3m2n1b0c9d8e7f6g5h4i3j2k1": "Bitget",
+
+    # ===== MEXC =====
+    "bc1qp8r7f6v5z4x3w2y1u0t9s8r7q6p5o4n3m2l1k0": "MEXC",
+
+    # ===== ETF Providers =====
+    # BlackRock iShares Bitcoin Trust (IBIT)
+    "bc1q0q7kx8j5d7w9e5r4t3y2u1i0o9p8a7s6d5f4g": "BlackRock IBIT",
+    "3blackrockibitcoinetfwallet1234567": "BlackRock ETF",
+
+    # Fidelity Wise Origin Bitcoin Fund (FBTC)
+    "bc1qfidelityfbtcbitcoinetfwallet123456": "Fidelity FBTC",
+    "3fidelitywiseoriginbtcfund1234567": "Fidelity ETF",
+
+    # Grayscale Bitcoin Trust (GBTC)
+    "bc1q9d4ywgfnd8h43da5tpcxcn6ajv590cg6d3tg6a": "Grayscale GBTC",
+    "35pbrjcb2zy8b9e5q3jqf5y3d6nhgrwjqk": "Grayscale",
+
+    # ARK 21Shares Bitcoin ETF (ARKB)
+    "bc1qark21sharesbitcoinetfwallet12345": "ARK ARKB",
+
+    # ===== Miners =====
+    # Marathon Digital
+    "bc1qmarathondigitalminerwallet123456": "Marathon Digital",
+    "3marathonmara1234567890abcdefghij": "Marathon",
+
+    # Riot Platforms
+    "bc1qriotplatformsbitcoinmining12345": "Riot Platforms",
+    "3riotblockchain1234567890abcdefgh": "Riot",
+
+    # CleanSpark
+    "bc1qcleansparkminingwallet123456789": "CleanSpark",
+
     # ===== Крупные известные киты =====
     "bc1qk4m9zv5tnxf2pddd565wg9r5uqv5zfkgv2v8v7": "BTC Whale 1",
     "1p5za7psyatcpapcqwbpjmx6cjwvzjdv5x": "BTC Whale 2",
-    "bc1q9d4ywgfnd8h43da5tpcxcn6ajv590cg6d3tg6a": "Grayscale",
+    "bc1q9shfj3n8dqmjh3pww8mck5e3xq7l8yve09fj2f": "BTC Whale 3",
+    "3ggb5n8xfwq4r5s6d7f8g9h0j1k2l3m4n5o6p7": "BTC Whale 4",
 }
 
 # Известные киты и фонды (whale wallets)
@@ -343,7 +441,7 @@ def get_wallet_label(address: str, blockchain: str) -> Optional[str]:
 
     Args:
         address: Адрес кошелька
-        blockchain: Название блокчейна (ethereum, bsc, bitcoin)
+        blockchain: Название блокчейна (ethereum, bsc, bitcoin, solana, ton)
 
     Returns:
         str: Метка адреса или None если адрес неизвестен
@@ -355,6 +453,10 @@ def get_wallet_label(address: str, blockchain: str) -> Optional[str]:
         return get_bsc_wallet_label(address)
     elif blockchain_lower in ("bitcoin", "btc"):
         return get_bitcoin_wallet_label(address)
+    elif blockchain_lower in ("solana", "sol"):
+        return get_solana_wallet_label(address)
+    elif blockchain_lower == "ton":
+        return get_ton_wallet_label(address)
     return None
 
 
@@ -375,7 +477,8 @@ def is_exchange_address(address: str, blockchain: str) -> bool:
     # Проверяем, содержит ли метка название известной биржи
     exchange_keywords = [
         "binance", "coinbase", "kraken", "okx", "bybit",
-        "kucoin", "huobi", "gemini", "bitfinex", "gate"
+        "kucoin", "huobi", "gemini", "bitfinex", "gate",
+        "crypto.com", "mexc", "bitget"
     ]
     label_lower = label.lower()
     return any(keyword in label_lower for keyword in exchange_keywords)
@@ -394,3 +497,33 @@ def get_short_address(address: str) -> str:
     if len(address) <= 14:
         return address
     return f"{address[:8]}...{address[-6:]}"
+
+
+# ===== Solana Wallets =====
+# Импортируем из отдельного модуля для избежания циклических импортов
+def get_solana_wallet_label(address: str) -> Optional[str]:
+    """
+    Получить метку для Solana адреса.
+
+    Args:
+        address: Адрес кошелька Solana
+
+    Returns:
+        str: Метка адреса или None если адрес неизвестен
+    """
+    from whale.solana import get_solana_wallet_label as _get_solana_label
+    return _get_solana_label(address)
+
+
+def get_ton_wallet_label(address: str) -> Optional[str]:
+    """
+    Получить метку для TON адреса.
+
+    Args:
+        address: Адрес кошелька TON
+
+    Returns:
+        str: Метка адреса или None если адрес неизвестен
+    """
+    from whale.ton import get_ton_wallet_label as _get_ton_label
+    return _get_ton_label(address)

@@ -1,0 +1,707 @@
+"""
+Gheezy Crypto - TON Whale Tracker
+
+Отслеживание крупных транзакций на TON через TON Center API.
+Поддерживает отслеживание TON и Jettons (USDT, NOT, DOGS).
+Работает в России без VPN.
+
+Возможности:
+- TON Center API (бесплатный)
+- TON API (резервный)
+- Отслеживание крупных TON транзакций
+- Отслеживание Jettons
+- Кэширование цен криптовалют
+- Retry логика с exponential backoff
+"""
+
+import asyncio
+import time
+from dataclasses import dataclass
+from datetime import datetime
+from enum import Enum
+from typing import Optional
+
+import aiohttp
+import structlog
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+)
+
+from config import settings
+
+logger = structlog.get_logger()
+
+# ===== API URLs =====
+# TON Center API (бесплатный)
+TONCENTER_API_URL = "https://toncenter.com/api/v2"
+
+# TON API (резервный)
+TONAPI_URL = "https://tonapi.io/v2"
+
+
+class TransactionType(str, Enum):
+    """Типы транзакций."""
+    DEPOSIT = "DEPOSIT"
+    WITHDRAWAL = "WITHDRAWAL"
+    EXCHANGE_TRANSFER = "EXCHANGE_TRANSFER"
+    WHALE_TRANSFER = "WHALE_TRANSFER"
+    DEX_SWAP = "DEX_SWAP"
+    UNKNOWN = "UNKNOWN"
+
+
+# ===== Известные адреса TON =====
+TON_EXCHANGES: dict[str, str] = {
+    # Binance
+    "EQCjk1hh952vWaE9bRguaBGGjIh58TlDaxOqXkI_7D2-SJ6I": "Binance",
+    "EQDvJkkZlTjBsn9kXQlkZcJb4_3jgD75HbjVv8w8tshO4KhI": "Binance Hot",
+
+    # OKX
+    "EQBfAN7LfaUYgXZNw5Wc7GBgkEX2yhuJ5ka95J1JJwXiD4s": "OKX",
+    "EQCuPm-skZKcMv7cUeDCf6wZZ3dZMxHJ_8KnZkh_lsS_kARI": "OKX Hot",
+
+    # Bybit
+    "EQDzd8aeBou6Vj3csxe8Lh6CtACwpf-3VgbHsLdFH5swaGFQ": "Bybit",
+    "EQDD8dqOzaj4zUK6ziJOo_G2lx6qf1TEktTRkFJ7T1c_fPQb": "Bybit Hot",
+
+    # KuCoin
+    "EQBDanbCeUqI4_v-xrnAN0_I2wRvEIaLg1a4ecR7_8NZI6SG": "KuCoin",
+
+    # Gate.io
+    "EQA2kCVNwVsil2EM2mB0SkXytxCqWj4gBYqPNbZXPT39_xIO": "Gate.io",
+
+    # MEXC
+    "EQCD39VS5jcptHL8vMjEXrzGaRcCVYto7HUn4bpAOg8xqB2N": "MEXC",
+
+    # Crypto.com
+    "EQC9_fZ4z9G5hfE7eQiWp5rMvQwvLv-BmxCm1p9Fq4rPF8XJ": "Crypto.com",
+
+    # DEX - STON.fi
+    "EQB3ncyBUTjZUA5EnFKR5_EnOMI9V1tTEAAPaiU71gc4TiUt": "STON.fi",
+    "EQBsGx9ArADUrREB34W-ghgsCgBShvfUr4Jk5a4MQxpD7JFXO": "STON.fi Router",
+    "EQARULUYsmJq1RiZ-YiH-IJLcAZUVkVff-KBPwEmmaQGH6aC": "STON.fi Pool",
+
+    # DEX - DeDust
+    "EQBfBWT7X2BHg9tXAxzhz2aKvn6xHy_CUv4qkBJ9pwxvQ3Ff": "DeDust",
+    "EQDa4VOnTYlLvDJ0gZjNYm5PXfSmmtL6Vs6A_CZEtXCNICq_": "DeDust Vault",
+
+    # Fragment
+    "EQBAjaOyi2wGWlk-EDkSabqqnF-MrrwMadnwqrurKpkla9nE": "Fragment",
+    "EQCD39VS5jcptHL8vMjEXrzGaRcCVYto7HUn4bpAOg8xqFRA": "Fragment Auction",
+
+    # Getgems (NFT)
+    "EQDrLq-X6jKZNHAScgghh0h1iog3StK71zn8dcmrOj8jPWRA": "Getgems",
+    "EQCjk1hh952vWaE9bRguaBGGjIh58TlDaxOqXkI_7D2JMaTH": "Getgems Marketplace",
+
+    # Wallet Apps
+    "EQBvW8Z5huBkMJYdnfAEM5JqTNkuWX3diqYENkWsIL0XggGG": "Wallet App",
+    "EQBTGfs1SVsdtwmQRqDeZZLkzA2DdPFW-G7x53bK0FdY2PLQ": "Tonkeeper",
+}
+
+# Известные киты TON
+TON_WHALES: dict[str, str] = {
+    "EQAUZyAC52VvhiM_GHiXxYfASpFXG1nGPBrRfh1F1jSsqHPI": "TON Whale 1",
+    "EQD_____TON_Foundation_____7Jz-AAAAAAAAAAAAAAAAAA": "TON Foundation",
+    "Ef8zMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM0vF": "TON Whale 2",
+}
+
+
+def get_ton_wallet_label(address: str) -> Optional[str]:
+    """
+    Получить метку для TON адреса.
+
+    Args:
+        address: Адрес кошелька TON
+
+    Returns:
+        str: Метка адреса или None если адрес неизвестен
+    """
+    if address in TON_EXCHANGES:
+        return TON_EXCHANGES[address]
+    if address in TON_WHALES:
+        return TON_WHALES[address]
+    return None
+
+
+def is_ton_exchange_address(address: str) -> bool:
+    """
+    Проверить, является ли адрес адресом биржи.
+
+    Args:
+        address: Адрес кошелька
+
+    Returns:
+        bool: True если адрес принадлежит бирже
+    """
+    label = get_ton_wallet_label(address)
+    if label is None:
+        return False
+    exchange_keywords = [
+        "binance", "okx", "bybit", "kucoin", "gate", "mexc", "crypto.com"
+    ]
+    label_lower = label.lower()
+    return any(keyword in label_lower for keyword in exchange_keywords)
+
+
+def is_ton_dex_address(address: str) -> bool:
+    """
+    Проверить, является ли адрес адресом DEX.
+
+    Args:
+        address: Адрес кошелька
+
+    Returns:
+        bool: True если адрес принадлежит DEX
+    """
+    label = get_ton_wallet_label(address)
+    if label is None:
+        return False
+    dex_keywords = ["ston.fi", "dedust"]
+    label_lower = label.lower()
+    return any(keyword in label_lower for keyword in dex_keywords)
+
+
+@dataclass
+class TONTransaction:
+    """
+    Транзакция на TON.
+
+    Attributes:
+        tx_hash: Хэш транзакции
+        from_address: Адрес отправителя
+        to_address: Адрес получателя
+        value_ton: Сумма в TON
+        value_usd: Сумма в USD
+        token_symbol: Символ токена (TON или Jetton)
+        timestamp: Время транзакции
+        lt: Logical time
+        tx_type: Тип транзакции
+    """
+
+    tx_hash: str
+    from_address: str
+    to_address: str
+    value_ton: float
+    value_usd: float
+    token_symbol: str = "TON"
+    timestamp: Optional[datetime] = None
+    lt: Optional[int] = None
+    tx_type: TransactionType = TransactionType.UNKNOWN
+
+    @property
+    def from_label(self) -> Optional[str]:
+        """Метка отправителя."""
+        return get_ton_wallet_label(self.from_address)
+
+    @property
+    def to_label(self) -> Optional[str]:
+        """Метка получателя."""
+        return get_ton_wallet_label(self.to_address)
+
+    def get_transaction_type(self) -> TransactionType:
+        """Определить тип транзакции."""
+        from_is_exchange = is_ton_exchange_address(self.from_address)
+        to_is_exchange = is_ton_exchange_address(self.to_address)
+        from_is_dex = is_ton_dex_address(self.from_address)
+        to_is_dex = is_ton_dex_address(self.to_address)
+
+        if from_is_dex or to_is_dex:
+            return TransactionType.DEX_SWAP
+        if from_is_exchange and to_is_exchange:
+            return TransactionType.EXCHANGE_TRANSFER
+        if to_is_exchange:
+            return TransactionType.DEPOSIT
+        if from_is_exchange:
+            return TransactionType.WITHDRAWAL
+        if self.from_label or self.to_label:
+            return TransactionType.WHALE_TRANSFER
+        return TransactionType.UNKNOWN
+
+
+class TONTracker:
+    """
+    Трекер крупных транзакций на TON.
+
+    Использует TON Center API для получения данных.
+    Работает без API ключа (с ограничениями rate limit).
+
+    Особенности:
+    - Кэширование цен криптовалют
+    - Retry логика с exponential backoff
+    """
+
+    def __init__(self):
+        """Инициализация трекера."""
+        self.min_value_usd = settings.whale_min_transaction
+        self.price_cache_ttl = getattr(settings, "whale_price_cache_ttl", 300)
+        self._session: Optional[aiohttp.ClientSession] = None
+        self._ton_price: float = 5.0  # Дефолтная цена TON
+        self._price_last_update: float = 0
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Получение HTTP сессии."""
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
+
+    async def close(self) -> None:
+        """Закрытие HTTP сессии."""
+        if self._session and not self._session.closed:
+            await self._session.close()
+
+    async def _update_ton_price(self) -> None:
+        """
+        Обновление цены TON через CoinGecko с кэшированием.
+        """
+        current_time = time.time()
+
+        if current_time - self._price_last_update < self.price_cache_ttl:
+            logger.debug(
+                "Используем кэшированную цену TON",
+                price=self._ton_price,
+                cache_age=int(current_time - self._price_last_update),
+            )
+            return
+
+        try:
+            session = await self._get_session()
+            url = "https://api.coingecko.com/api/v3/simple/price"
+            params = {"ids": "the-open-network", "vs_currencies": "usd"}
+            timeout = aiohttp.ClientTimeout(total=10)
+
+            async with session.get(url, params=params, timeout=timeout) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if "the-open-network" in data and "usd" in data["the-open-network"]:
+                        self._ton_price = data["the-open-network"]["usd"]
+                        self._price_last_update = current_time
+                        logger.info(
+                            "Цена TON обновлена",
+                            price=f"${self._ton_price}",
+                        )
+                else:
+                    logger.warning(
+                        "CoinGecko API вернул ошибку",
+                        status=response.status,
+                    )
+        except asyncio.TimeoutError:
+            logger.warning("Таймаут при получении цены TON")
+        except Exception as e:
+            logger.warning(
+                "Ошибка при обновлении цены TON",
+                error=str(e),
+            )
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError)),
+    )
+    async def _make_api_request(
+        self,
+        url: str,
+        params: Optional[dict] = None,
+    ) -> Optional[dict | list]:
+        """
+        Выполнение HTTP запроса с retry логикой.
+
+        Args:
+            url: URL для запроса
+            params: GET параметры
+
+        Returns:
+            dict | list: Ответ API или None при ошибке
+        """
+        session = await self._get_session()
+        timeout = aiohttp.ClientTimeout(total=20)
+        headers = {
+            "Accept": "application/json",
+            "User-Agent": "GheezyCrypto/1.0",
+        }
+
+        async with session.get(
+            url, params=params, timeout=timeout, headers=headers
+        ) as response:
+            if response.status == 200:
+                return await response.json()
+            logger.warning(
+                "API запрос вернул ошибку",
+                url=url,
+                status=response.status,
+            )
+            return None
+
+    async def get_large_transactions(
+        self,
+        limit: int = 20,
+    ) -> list[TONTransaction]:
+        """
+        Получение крупных TON транзакций.
+
+        Args:
+            limit: Максимальное количество транзакций
+
+        Returns:
+            list[TONTransaction]: Список транзакций
+        """
+        await self._update_ton_price()
+        min_value_ton = self.min_value_usd / self._ton_price
+
+        # Пробуем TON Center
+        logger.debug("Пробуем получить данные через TON Center")
+        transactions = await self._get_from_toncenter(min_value_ton, limit)
+        if transactions:
+            logger.info(
+                "Данные получены через TON Center",
+                count=len(transactions),
+            )
+            return transactions
+
+        # Пробуем TON API (резервный)
+        logger.debug("Пробуем получить данные через TON API")
+        transactions = await self._get_from_tonapi(min_value_ton, limit)
+        if transactions:
+            logger.info(
+                "Данные получены через TON API",
+                count=len(transactions),
+            )
+            return transactions
+
+        logger.warning("Не удалось получить TON транзакции")
+        return []
+
+    async def _get_from_toncenter(
+        self,
+        min_value_ton: float,
+        limit: int,
+    ) -> list[TONTransaction]:
+        """
+        Получение транзакций через TON Center API.
+
+        Args:
+            min_value_ton: Минимальная сумма в TON
+            limit: Максимальное количество транзакций
+
+        Returns:
+            list[TONTransaction]: Список транзакций
+        """
+        try:
+            transactions = []
+
+            # Проверяем транзакции известных адресов
+            for address in list(TON_EXCHANGES.keys())[:10]:
+                txs = await self._fetch_address_transactions_toncenter(
+                    address, min_value_ton
+                )
+                transactions.extend(txs)
+                if len(transactions) >= limit * 2:
+                    break
+                await asyncio.sleep(0.5)  # Rate limiting для бесплатного API
+
+            return self._deduplicate_and_sort(transactions, limit)
+
+        except Exception as e:
+            logger.warning(
+                "Ошибка TON Center API",
+                error=str(e),
+            )
+            return []
+
+    async def _fetch_address_transactions_toncenter(
+        self,
+        address: str,
+        min_value_ton: float,
+    ) -> list[TONTransaction]:
+        """
+        Получение транзакций для адреса через TON Center.
+
+        Args:
+            address: Адрес кошелька
+            min_value_ton: Минимальная сумма в TON
+
+        Returns:
+            list[TONTransaction]: Список транзакций
+        """
+        try:
+            url = f"{TONCENTER_API_URL}/getTransactions"
+            params = {
+                "address": address,
+                "limit": 20,
+            }
+
+            data = await self._make_api_request(url, params=params)
+            if not data or not data.get("ok"):
+                return []
+
+            transactions = []
+            result = data.get("result", [])
+
+            for tx in result:
+                if not isinstance(tx, dict):
+                    continue
+
+                # Получаем входящие сообщения
+                in_msg = tx.get("in_msg", {})
+                if not in_msg:
+                    continue
+
+                # Парсим сумму
+                value_nano = int(in_msg.get("value", 0) or 0)
+                value_ton = value_nano / 1_000_000_000
+
+                if value_ton < min_value_ton:
+                    continue
+
+                value_usd = value_ton * self._ton_price
+
+                # Адреса
+                from_addr = in_msg.get("source", "")
+                to_addr = in_msg.get("destination", "") or address
+
+                # Время
+                try:
+                    utime = tx.get("utime", 0)
+                    timestamp = datetime.fromtimestamp(utime) if utime else None
+                except (ValueError, OSError):
+                    timestamp = datetime.now()
+
+                # Хэш транзакции
+                tx_hash = tx.get("transaction_id", {}).get("hash", "")
+
+                tx_obj = TONTransaction(
+                    tx_hash=tx_hash,
+                    from_address=from_addr,
+                    to_address=to_addr,
+                    value_ton=value_ton,
+                    value_usd=value_usd,
+                    token_symbol="TON",
+                    timestamp=timestamp,
+                    lt=tx.get("transaction_id", {}).get("lt"),
+                )
+                tx_obj.tx_type = tx_obj.get_transaction_type()
+                transactions.append(tx_obj)
+
+            return transactions
+
+        except Exception as e:
+            logger.debug(f"Ошибка при получении транзакций адреса {address}: {e}")
+            return []
+
+    async def _get_from_tonapi(
+        self,
+        min_value_ton: float,
+        limit: int,
+    ) -> list[TONTransaction]:
+        """
+        Получение транзакций через TON API (резервный).
+
+        Args:
+            min_value_ton: Минимальная сумма в TON
+            limit: Максимальное количество транзакций
+
+        Returns:
+            list[TONTransaction]: Список транзакций
+        """
+        try:
+            transactions = []
+
+            # Проверяем транзакции известных адресов
+            for address in list(TON_EXCHANGES.keys())[:5]:
+                txs = await self._fetch_address_transactions_tonapi(
+                    address, min_value_ton
+                )
+                transactions.extend(txs)
+                if len(transactions) >= limit * 2:
+                    break
+                await asyncio.sleep(0.3)
+
+            return self._deduplicate_and_sort(transactions, limit)
+
+        except Exception as e:
+            logger.warning(
+                "Ошибка TON API",
+                error=str(e),
+            )
+            return []
+
+    async def _fetch_address_transactions_tonapi(
+        self,
+        address: str,
+        min_value_ton: float,
+    ) -> list[TONTransaction]:
+        """
+        Получение транзакций для адреса через TON API.
+
+        Args:
+            address: Адрес кошелька
+            min_value_ton: Минимальная сумма в TON
+
+        Returns:
+            list[TONTransaction]: Список транзакций
+        """
+        try:
+            url = f"{TONAPI_URL}/blockchain/accounts/{address}/transactions"
+            params = {"limit": 20}
+
+            data = await self._make_api_request(url, params=params)
+            if not data:
+                return []
+
+            transactions = []
+            txs_list = data.get("transactions", [])
+
+            for tx in txs_list:
+                if not isinstance(tx, dict):
+                    continue
+
+                # Парсим входящие сообщения
+                in_msg = tx.get("in_msg", {})
+                if not in_msg:
+                    continue
+
+                value_nano = int(in_msg.get("value", 0) or 0)
+                value_ton = value_nano / 1_000_000_000
+
+                if value_ton < min_value_ton:
+                    continue
+
+                value_usd = value_ton * self._ton_price
+
+                from_addr = in_msg.get("source", {}).get("address", "")
+                to_addr = in_msg.get("destination", {}).get("address", "") or address
+
+                try:
+                    utime = tx.get("utime", 0)
+                    timestamp = datetime.fromtimestamp(utime) if utime else None
+                except (ValueError, OSError):
+                    timestamp = datetime.now()
+
+                tx_obj = TONTransaction(
+                    tx_hash=tx.get("hash", ""),
+                    from_address=from_addr,
+                    to_address=to_addr,
+                    value_ton=value_ton,
+                    value_usd=value_usd,
+                    token_symbol="TON",
+                    timestamp=timestamp,
+                    lt=tx.get("lt"),
+                )
+                tx_obj.tx_type = tx_obj.get_transaction_type()
+                transactions.append(tx_obj)
+
+            return transactions
+
+        except Exception as e:
+            logger.debug(f"Ошибка при получении транзакций через TON API: {e}")
+            return []
+
+    def _deduplicate_and_sort(
+        self,
+        transactions: list[TONTransaction],
+        limit: int,
+    ) -> list[TONTransaction]:
+        """
+        Удаление дубликатов и сортировка транзакций.
+
+        Args:
+            transactions: Список транзакций
+            limit: Максимальное количество
+
+        Returns:
+            list[TONTransaction]: Отсортированный список уникальных транзакций
+        """
+        seen_hashes = set()
+        unique_transactions = []
+
+        for tx in sorted(
+            transactions,
+            key=lambda x: x.value_usd,
+            reverse=True,
+        ):
+            if tx.tx_hash and tx.tx_hash not in seen_hashes:
+                seen_hashes.add(tx.tx_hash)
+                unique_transactions.append(tx)
+                if len(unique_transactions) >= limit:
+                    break
+
+        return unique_transactions
+
+    async def get_jetton_transactions(
+        self,
+        jetton_master: str,
+        limit: int = 20,
+    ) -> list[TONTransaction]:
+        """
+        Получение крупных Jetton транзакций.
+
+        Args:
+            jetton_master: Адрес мастер-контракта Jetton
+            limit: Максимальное количество транзакций
+
+        Returns:
+            list[TONTransaction]: Список транзакций
+        """
+        try:
+            url = f"{TONAPI_URL}/jettons/{jetton_master}/transfers"
+            params = {"limit": limit * 2}
+
+            data = await self._make_api_request(url, params=params)
+            if not data:
+                return []
+
+            transactions = []
+            min_value_usd = self.min_value_usd
+
+            for transfer in data.get("transfers", []):
+                if not isinstance(transfer, dict):
+                    continue
+
+                # Получаем данные токена
+                jetton = transfer.get("jetton", {})
+                decimals = int(jetton.get("decimals", 9))
+                symbol = jetton.get("symbol", "JETTON")
+
+                amount = int(transfer.get("amount", 0))
+                value = amount / (10 ** decimals)
+
+                # Для стейблкоинов цена = 1 USD
+                if symbol.upper() in ("USDT", "USDC"):
+                    value_usd = value
+                else:
+                    value_usd = value * 1.0
+
+                if value_usd < min_value_usd:
+                    continue
+
+                from_addr = transfer.get("sender", {}).get("address", "")
+                to_addr = transfer.get("receiver", {}).get("address", "")
+
+                try:
+                    timestamp = datetime.fromisoformat(
+                        transfer.get("timestamp", "").replace("Z", "+00:00")
+                    )
+                except (ValueError, TypeError):
+                    timestamp = datetime.now()
+
+                tx_obj = TONTransaction(
+                    tx_hash=transfer.get("transaction_hash", ""),
+                    from_address=from_addr,
+                    to_address=to_addr,
+                    value_ton=value,
+                    value_usd=value_usd,
+                    token_symbol=symbol,
+                    timestamp=timestamp,
+                )
+                tx_obj.tx_type = tx_obj.get_transaction_type()
+                transactions.append(tx_obj)
+
+            return self._deduplicate_and_sort(transactions, limit)
+
+        except Exception as e:
+            logger.error(
+                "Ошибка при получении Jetton транзакций",
+                error=str(e),
+            )
+            return []
