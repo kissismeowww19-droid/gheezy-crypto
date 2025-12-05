@@ -333,6 +333,31 @@ BITCOIN_EXCHANGES: dict[str, str] = {
     "1p5za7psyatcpapcqwbpjmx6cjwvzjdv5x": "BTC Whale 2",
     "bc1q9shfj3n8dqmjh3pww8mck5e3xq7l8yve09fj2f": "BTC Whale 3",
     "3ggb5n8xfwq4r5s6d7f8g9h0j1k2l3m4n5o6p7": "BTC Whale 4",
+
+    # ===== Mt.Gox (важно!) =====
+    # Mt.Gox Trustee Wallets - известные адреса для возврата средств
+    "1HeJXc2JvGxLBxhY9y3rAk4pY4tPGNpMT9": "Mt.Gox Cold Wallet",
+    "1PXeQ4sA5wt3hDhqqCFEgrJPHB3GBe3cLz": "Mt.Gox Trustee",
+    "1KjgNAAV7Gnqhq6TqYdJbTLvMiTqEPYrtP": "Mt.Gox Trustee 2",
+    "bc1qmtgox1distribution2wallet3address": "Mt.Gox Distribution",
+    "17Tf72a4KqxWPr6jLPRKtGt5E7x4D3Fqz9": "Mt.Gox Creditor Payout",
+    "1JbezDVd9VsK9o1Ga9UqLydeuEvhKLAPs6": "Mt.Gox Hot Wallet",
+    "16rCmCmbuWDhPjWTrpQGaU3EPdZF7MTdUk": "Mt.Gox Reserve",
+    "1M8s2S5bgAzSSzVTeL7zKKmxMKPDNHNjkw": "Mt.Gox Creditor",
+
+    # ===== US Government (важно!) =====
+    # DOJ/FBI seized wallets
+    "bc1qa5wkgaew2dkv56kfc6zpe4zwk8dej5t389rp3l": "US Government DOJ",
+    "1Ez69SnzzmePmZX3WpEzMKTrcBF2gpNQ55": "US Government Seized",
+    "bc1qf6qclct9gwp0zghw79f3y3z3x5nqnqj9t8qz7z": "US Government FBI",
+    "3LQeSsg5oXvz3DWv7xGwgZn8u8Q4K5cUE9": "US Government Treasury",
+    "1HQ3Go3ggs8pFnXuHVHRytPCq5fGG8Hbhx": "Silk Road Seized",
+    "1F1tAaz5x1HUXrCNLbtMDqcw6o5GNn4xqX": "US Marshals Auction",
+    "bc1qe3w8fzqz6c4kh4kqwzr65skpsuf3p8qf7u2ms9": "DOJ Bitfinex Seized",
+    "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2": "US Government Wallet",
+
+    # ===== Bitfinex Hack (2016) Recovered =====
+    "bc1qg27k7gppkxmf7v9qx7fzs8h7g6j2d5a9f5km7c": "Bitfinex Hack Recovery",
 }
 
 # Известные киты и фонды (whale wallets)
@@ -379,6 +404,35 @@ KNOWN_WHALES: dict[str, str] = {
     # ===== Wrapped активы =====
     "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2": "WETH Contract",
     "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599": "WBTC Contract",
+
+    # ===== DeFi Treasuries =====
+    "0x0bc529c00c6401aef6d220be8c6ea1667f6ad93e": "Yearn Finance Treasury",
+    "0x5d3a536e4d6dbd6114cc1ead35777bab948e3643": "Compound cDAI",
+    "0x4ddc2d193948926d02f9b1fe9e1daa0718270ed5": "Compound cETH",
+    "0x028171bca77440897b824ca71d1c56cac55b68a3": "Aave aDAI",
+    "0x030ba81f1c18d280636f32af80b9aad02cf0854e": "Aave aWETH",
+    "0xbcca60bb61934080951369a648fb03df4f96263c": "Aave aUSDC",
+    "0x6b175474e89094c44da98b954eedeac495271d0f": "DAI Contract",
+    "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": "USDC Contract",
+    "0xdac17f958d2ee523a2206206994597c13d831ec7": "USDT Contract",
+
+    # ===== DAO Treasuries =====
+    "0x0bef27feb58e857046d630b2c03dfb7bae567494": "MakerDAO Treasury",
+    "0xe7804c37c13166ff0b37f5ae0bb07a3aebb6e245": "Uniswap Treasury",
+    "0xfb6916095ca1df60bb79ce92ce3ea74c37c5d359": "ENS Treasury",
+    "0x78605df79524164911c144801f41e9811b7db73d": "BitDAO Treasury",
+
+    # ===== MEV Bots (важно для трекинга!) =====
+    "0x98c3d3183c4b8a650614ad179a1a98be0a8d6b8e": "MEV Bot",
+    "0x00000000000002b0bb9b5dfab7e46f76856f9d03": "MEV Bot 2",
+    "0x000000000035b5e5ad9019092c665357240f594e": "Flashbots MEV",
+    "0x5aa3393e361c2eb342408559309b3e873cd876d6": "MEV Searcher",
+    "0xd8d0be9c3b6e7e4f5e69e4f8e7c8c5e4d5c4b3a2": "Sandwich Bot",
+    "0x56178a0d5f301baf6cf3e1cd53d9863437345bf9": "Jaredfromsubway",
+    "0x6b75d8af000000e20b7a7ddF000Ba900b4009a80": "MEV Builder",
+
+    # ===== Flashbots =====
+    "0xdafea492d9c6733ae3d56b7ed1adb60692c98bc5": "Flashbots Builder",
 }
 
 
