@@ -263,7 +263,7 @@ class BSCTracker:
         Получение крупных BNB транзакций.
 
         Использует несколько источников данных:
-        1. BscScan API (если есть ключ)
+        1. Etherscan API V2 с chainid=56 для BSC (если есть ключ)
         2. Публичные RPC ноды
 
         Args:
@@ -275,13 +275,13 @@ class BSCTracker:
         await self._update_bnb_price()
         min_value_bnb = self.min_value_usd / self._bnb_price
 
-        # Пробуем BscScan если есть ключ
+        # Пробуем Etherscan API V2 если есть ключ
         if self.api_key:
-            logger.debug("Пробуем получить данные через BscScan API")
+            logger.debug("Пробуем получить данные через Etherscan API V2")
             transactions = await self._get_from_bscscan(min_value_bnb, limit)
             if transactions:
                 logger.info(
-                    "Данные получены через BscScan",
+                    "Данные получены через Etherscan API V2",
                     count=len(transactions),
                 )
                 return transactions
@@ -296,7 +296,7 @@ class BSCTracker:
             )
             return transactions
 
-        logger.warning("BscScan API ключ не настроен и RPC недоступен")
+        logger.warning("Etherscan API ключ не настроен и RPC недоступен")
         return []
 
     async def _get_from_bscscan(
@@ -328,7 +328,7 @@ class BSCTracker:
 
             data = await self._make_api_request(BSCSCAN_API_URL, params=params_block)
             if not data or "result" not in data:
-                logger.warning("Не удалось получить номер последнего блока BscScan")
+                logger.warning("Не удалось получить номер последнего блока через Etherscan API V2")
                 return []
 
             latest_block = int(data["result"], 16)
@@ -343,8 +343,8 @@ class BSCTracker:
             )
 
             # Параллельные запросы к адресам бирж
-            # Ограничиваем до 15 адресов для соблюдения rate limits BscScan API
-            # (бесплатный tier: 5 calls/sec, 100K calls/day)
+            # Ограничиваем до 15 адресов для соблюдения rate limits Etherscan API
+            # (бесплатный tier: 5 calls/sec)
             # Адреса отсортированы по важности (крупнейшие биржи первые)
             tasks = []
             for address in TRACKED_BSC_ADDRESSES[:15]:
@@ -369,7 +369,7 @@ class BSCTracker:
 
         except Exception as e:
             logger.error(
-                "Ошибка BscScan API",
+                "Ошибка Etherscan API V2",
                 error=str(e),
             )
             return []
@@ -608,7 +608,7 @@ class BSCTracker:
             list[BSCTransaction]: Список транзакций
         """
         if not self.api_key:
-            logger.warning("BscScan API ключ не настроен для BEP-20")
+            logger.warning("Etherscan API ключ не настроен для BEP-20")
             return []
 
         try:
