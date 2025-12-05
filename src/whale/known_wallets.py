@@ -330,16 +330,14 @@ BITCOIN_EXCHANGES: dict[str, str] = {
 
     # ===== Крупные известные киты =====
     "bc1qk4m9zv5tnxf2pddd565wg9r5uqv5zfkgv2v8v7": "BTC Whale 1",
-    "1p5za7psyatcpapcqwbpjmx6cjwvzjdv5x": "BTC Whale 2",
+    "1P5ZEDWTKTFGxQjZphgWPQUpe554WKDfHQ": "BTC Whale 2",
     "bc1q9shfj3n8dqmjh3pww8mck5e3xq7l8yve09fj2f": "BTC Whale 3",
-    "3ggb5n8xfwq4r5s6d7f8g9h0j1k2l3m4n5o6p7": "BTC Whale 4",
 
     # ===== Mt.Gox (важно!) =====
     # Mt.Gox Trustee Wallets - известные адреса для возврата средств
     "1HeJXc2JvGxLBxhY9y3rAk4pY4tPGNpMT9": "Mt.Gox Cold Wallet",
     "1PXeQ4sA5wt3hDhqqCFEgrJPHB3GBe3cLz": "Mt.Gox Trustee",
     "1KjgNAAV7Gnqhq6TqYdJbTLvMiTqEPYrtP": "Mt.Gox Trustee 2",
-    "bc1qmtgox1distribution2wallet3address": "Mt.Gox Distribution",
     "17Tf72a4KqxWPr6jLPRKtGt5E7x4D3Fqz9": "Mt.Gox Creditor Payout",
     "1JbezDVd9VsK9o1Ga9UqLydeuEvhKLAPs6": "Mt.Gox Hot Wallet",
     "16rCmCmbuWDhPjWTrpQGaU3EPdZF7MTdUk": "Mt.Gox Reserve",
@@ -347,17 +345,11 @@ BITCOIN_EXCHANGES: dict[str, str] = {
 
     # ===== US Government (важно!) =====
     # DOJ/FBI seized wallets
-    "bc1qa5wkgaew2dkv56kfc6zpe4zwk8dej5t389rp3l": "US Government DOJ",
     "1Ez69SnzzmePmZX3WpEzMKTrcBF2gpNQ55": "US Government Seized",
-    "bc1qf6qclct9gwp0zghw79f3y3z3x5nqnqj9t8qz7z": "US Government FBI",
     "3LQeSsg5oXvz3DWv7xGwgZn8u8Q4K5cUE9": "US Government Treasury",
     "1HQ3Go3ggs8pFnXuHVHRytPCq5fGG8Hbhx": "Silk Road Seized",
     "1F1tAaz5x1HUXrCNLbtMDqcw6o5GNn4xqX": "US Marshals Auction",
-    "bc1qe3w8fzqz6c4kh4kqwzr65skpsuf3p8qf7u2ms9": "DOJ Bitfinex Seized",
     "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2": "US Government Wallet",
-
-    # ===== Bitfinex Hack (2016) Recovered =====
-    "bc1qg27k7gppkxmf7v9qx7fzs8h7g6j2d5a9f5km7c": "Bitfinex Hack Recovery",
 }
 
 # Известные киты и фонды (whale wallets)

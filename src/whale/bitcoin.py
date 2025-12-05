@@ -354,42 +354,35 @@ class BitcoinTracker:
             list[BitcoinTransaction]: Список транзакций
         """
         try:
-            # Получаем последние блоки
-            blocks_url = f"{BLOCKCHAIN_INFO_API_URL}/blocks?format=json"
-            data = await self._make_api_request(blocks_url)
+            # Получаем последний блок
+            latest_url = f"{BLOCKCHAIN_INFO_API_URL}/latestblock"
+            latest_data = await self._make_api_request(latest_url)
 
-            if not data or "blocks" not in data:
-                logger.debug("blockchain.info: не удалось получить блоки")
+            if not latest_data or "hash" not in latest_data:
+                logger.debug("blockchain.info: не удалось получить последний блок")
                 return []
 
             transactions = []
-            blocks = data.get("blocks", [])[:3]
+            block_hash = latest_data.get("hash")
 
-            for block in blocks:
-                block_hash = block.get("hash")
-                if not block_hash:
+            # Получаем данные блока с транзакциями
+            block_url = f"{BLOCKCHAIN_INFO_API_URL}/rawblock/{block_hash}"
+            block_data = await self._make_api_request(block_url)
+
+            if not block_data or "tx" not in block_data:
+                logger.debug("blockchain.info: не удалось получить транзакции блока")
+                return []
+
+            for tx_data in block_data.get("tx", []):
+                if tx_data is None:
                     continue
 
-                # Получаем данные блока с транзакциями
-                block_url = f"{BLOCKCHAIN_INFO_API_URL}/rawblock/{block_hash}"
-                block_data = await self._make_api_request(block_url)
+                tx = self._parse_blockchain_info_transaction(tx_data, min_value_btc)
+                if tx:
+                    transactions.append(tx)
 
-                if not block_data or "tx" not in block_data:
-                    continue
-
-                for tx_data in block_data.get("tx", []):
-                    if tx_data is None:
-                        continue
-
-                    tx = self._parse_blockchain_info_transaction(tx_data, min_value_btc)
-                    if tx:
-                        transactions.append(tx)
-
-                    if len(transactions) >= limit * 2:
-                        break
-
-                # Небольшая задержка
-                await asyncio.sleep(0.2)
+                if len(transactions) >= limit * 2:
+                    break
 
             return self._deduplicate_and_sort(transactions, limit)
 
