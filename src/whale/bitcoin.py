@@ -15,7 +15,7 @@ Gheezy Crypto - Bitcoin Whale Tracker
 import asyncio
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import aiohttp
@@ -358,9 +358,9 @@ class BitcoinTracker:
         block_time = status.get("block_time")
         if block_time:
             try:
-                timestamp = datetime.fromtimestamp(block_time)
+                timestamp = datetime.fromtimestamp(block_time, tz=timezone.utc)
             except (ValueError, OSError):
-                timestamp = datetime.now()
+                timestamp = datetime.now(timezone.utc)
 
         return BitcoinTransaction(
             tx_hash=tx_data.get("txid", ""),
@@ -478,9 +478,9 @@ class BitcoinTracker:
         block_time = status.get("block_time")
         if block_time:
             try:
-                timestamp = datetime.fromtimestamp(block_time)
+                timestamp = datetime.fromtimestamp(block_time, tz=timezone.utc)
             except (ValueError, OSError):
-                timestamp = datetime.now()
+                timestamp = datetime.now(timezone.utc)
 
         return BitcoinTransaction(
             tx_hash=tx_data.get("txid", ""),

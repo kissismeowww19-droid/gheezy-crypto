@@ -16,7 +16,7 @@ Gheezy Crypto - Solana Whale Tracker
 import asyncio
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
@@ -34,11 +34,24 @@ from config import settings
 logger = structlog.get_logger()
 
 # ===== API URLs =====
-# Solscan Public API (бесплатный, без ключа)
-SOLSCAN_API_URL = "https://public-api.solscan.io"
+# Solscan Pro API (requires API key, but has public endpoints)
+SOLSCAN_API_URL = "https://pro-api.solscan.io/v2.0"
+
+# Solscan Public API v1 (legacy, limited functionality)
+SOLSCAN_PUBLIC_API_URL = "https://public-api.solscan.io"
 
 # Solana RPC URL (резервный)
 SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com"
+
+# Jupiter API для получения данных о свапах
+JUPITER_API_URL = "https://stats.jup.ag/coingecko"
+
+# Public Solana RPC endpoints (fallback)
+PUBLIC_SOLANA_RPC_URLS = [
+    "https://api.mainnet-beta.solana.com",
+    "https://rpc.ankr.com/solana",
+    "https://solana.publicnode.com",
+]
 
 
 class TransactionType(str, Enum):
@@ -370,7 +383,17 @@ class SolanaTracker:
             )
             return transactions
 
-        logger.warning("Не удалось получить SOL транзакции")
+        # Пробуем получить данные через публичные RPC ноды
+        logger.debug("Пробуем получить данные через Solana RPC")
+        transactions = await self._get_from_rpc(min_value_sol, limit)
+        if transactions:
+            logger.info(
+                "Данные получены через Solana RPC",
+                count=len(transactions),
+            )
+            return transactions
+
+        logger.warning("SOL транзакции временно недоступны")
         return []
 
     async def _get_from_solscan(
@@ -379,7 +402,7 @@ class SolanaTracker:
         limit: int,
     ) -> list[SolanaTransaction]:
         """
-        Получение транзакций через Solscan Public API.
+        Получение транзакций через Solscan API.
 
         Args:
             min_value_sol: Минимальная сумма в SOL
@@ -391,22 +414,14 @@ class SolanaTracker:
         try:
             transactions = []
 
-            # Получаем последние блоки с транзакциями
-            blocks_url = f"{SOLSCAN_API_URL}/block/last"
-            params = {"limit": 10}
-
-            blocks_data = await self._make_api_request(blocks_url, params=params)
-            if not blocks_data:
-                logger.debug("Solscan: не удалось получить блоки")
-                return []
-
             # Проверяем крупные транзакции известных кошельков
+            # Используем старый API endpoint для получения транзакций адресов
             for address in list(SOLANA_EXCHANGES.keys())[:10]:
                 txs = await self._fetch_address_transactions(address, min_value_sol)
                 transactions.extend(txs)
                 if len(transactions) >= limit * 2:
                     break
-                await asyncio.sleep(0.2)  # Rate limiting
+                await asyncio.sleep(0.3)  # Rate limiting
 
             return self._deduplicate_and_sort(transactions, limit)
 
@@ -433,7 +448,8 @@ class SolanaTracker:
             list[SolanaTransaction]: Список транзакций
         """
         try:
-            url = f"{SOLSCAN_API_URL}/account/transactions"
+            # Use the public API endpoint for account transactions
+            url = f"{SOLSCAN_PUBLIC_API_URL}/account/transactions"
             params = {
                 "account": address,
                 "limit": 20,
@@ -463,9 +479,9 @@ class SolanaTracker:
 
                 try:
                     block_time = tx.get("blockTime", 0)
-                    timestamp = datetime.fromtimestamp(block_time) if block_time else None
+                    timestamp = datetime.fromtimestamp(block_time, tz=timezone.utc) if block_time else None
                 except (ValueError, OSError):
-                    timestamp = datetime.now()
+                    timestamp = datetime.now(timezone.utc)
 
                 tx_obj = SolanaTransaction(
                     tx_hash=tx.get("txHash", ""),
@@ -517,6 +533,159 @@ class SolanaTracker:
 
         return unique_transactions
 
+    async def _get_from_rpc(
+        self,
+        min_value_sol: float,
+        limit: int,
+    ) -> list[SolanaTransaction]:
+        """
+        Резервное получение транзакций через публичные Solana RPC ноды.
+
+        Args:
+            min_value_sol: Минимальная сумма в SOL
+            limit: Максимальное количество транзакций
+
+        Returns:
+            list[SolanaTransaction]: Список транзакций
+        """
+        for rpc_url in PUBLIC_SOLANA_RPC_URLS:
+            try:
+                transactions = await self._get_from_single_rpc(
+                    rpc_url, min_value_sol, limit
+                )
+                if transactions:
+                    return transactions
+            except Exception as e:
+                logger.debug(
+                    "Solana RPC недоступен",
+                    url=rpc_url,
+                    error=str(e),
+                )
+                continue
+
+        logger.debug("Все публичные Solana RPC недоступны")
+        return []
+
+    async def _get_from_single_rpc(
+        self,
+        rpc_url: str,
+        min_value_sol: float,
+        limit: int,
+    ) -> list[SolanaTransaction]:
+        """
+        Получение транзакций через конкретную RPC ноду.
+
+        Args:
+            rpc_url: URL RPC ноды
+            min_value_sol: Минимальная сумма в SOL
+            limit: Максимальное количество транзакций
+
+        Returns:
+            list[SolanaTransaction]: Список транзакций
+        """
+        session = await self._get_session()
+        transactions = []
+
+        # Получаем сигнатуры транзакций для известных адресов бирж
+        for address in list(SOLANA_EXCHANGES.keys())[:5]:
+            try:
+                request_data = {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "getSignaturesForAddress",
+                    "params": [
+                        address,
+                        {"limit": 10}
+                    ]
+                }
+
+                timeout = aiohttp.ClientTimeout(total=15)
+                async with session.post(
+                    rpc_url, json=request_data, timeout=timeout
+                ) as response:
+                    if response.status != 200:
+                        continue
+
+                    data = await response.json()
+                    if "result" not in data:
+                        continue
+
+                    for sig_info in data["result"]:
+                        # Получаем детали транзакции
+                        tx_request = {
+                            "jsonrpc": "2.0",
+                            "id": 1,
+                            "method": "getTransaction",
+                            "params": [
+                                sig_info.get("signature", ""),
+                                {"encoding": "json", "maxSupportedTransactionVersion": 0}
+                            ]
+                        }
+
+                        async with session.post(
+                            rpc_url, json=tx_request, timeout=timeout
+                        ) as tx_response:
+                            if tx_response.status != 200:
+                                continue
+
+                            tx_data = await tx_response.json()
+                            if "result" not in tx_data or not tx_data["result"]:
+                                continue
+
+                            tx = tx_data["result"]
+                            meta = tx.get("meta", {})
+                            if not meta:
+                                continue
+
+                            # Вычисляем изменение баланса
+                            pre_balances = meta.get("preBalances", [])
+                            post_balances = meta.get("postBalances", [])
+
+                            if pre_balances and post_balances:
+                                # Находим максимальное изменение
+                                max_change = 0
+                                for i in range(min(len(pre_balances), len(post_balances))):
+                                    change = abs(post_balances[i] - pre_balances[i])
+                                    if change > max_change:
+                                        max_change = change
+
+                                value_sol = max_change / 1_000_000_000
+                                if value_sol < min_value_sol:
+                                    continue
+
+                                value_usd = value_sol * self._sol_price
+                                block_time = tx.get("blockTime", 0)
+
+                                try:
+                                    timestamp = datetime.fromtimestamp(block_time, tz=timezone.utc) if block_time else None
+                                except (ValueError, OSError):
+                                    timestamp = datetime.now(timezone.utc)
+
+                                tx_obj = SolanaTransaction(
+                                    tx_hash=sig_info.get("signature", ""),
+                                    from_address=address,
+                                    to_address="",
+                                    value_sol=value_sol,
+                                    value_usd=value_usd,
+                                    token_symbol="SOL",
+                                    timestamp=timestamp,
+                                    slot=sig_info.get("slot"),
+                                )
+                                tx_obj.tx_type = tx_obj.get_transaction_type()
+                                transactions.append(tx_obj)
+
+                                if len(transactions) >= limit:
+                                    return self._deduplicate_and_sort(transactions, limit)
+
+                # Rate limiting
+                await asyncio.sleep(0.2)
+
+            except Exception as e:
+                logger.debug(f"Ошибка RPC для адреса {address}: {e}")
+                continue
+
+        return self._deduplicate_and_sort(transactions, limit)
+
     async def get_spl_token_transactions(
         self,
         token_address: str,
@@ -533,7 +702,7 @@ class SolanaTracker:
             list[SolanaTransaction]: Список транзакций
         """
         try:
-            url = f"{SOLSCAN_API_URL}/token/transfer"
+            url = f"{SOLSCAN_PUBLIC_API_URL}/token/transfer"
             params = {
                 "token": token_address,
                 "limit": limit * 2,
@@ -567,9 +736,9 @@ class SolanaTracker:
 
                 try:
                     block_time = tx.get("blockTime", 0)
-                    timestamp = datetime.fromtimestamp(block_time) if block_time else None
+                    timestamp = datetime.fromtimestamp(block_time, tz=timezone.utc) if block_time else None
                 except (ValueError, OSError):
-                    timestamp = datetime.now()
+                    timestamp = datetime.now(timezone.utc)
 
                 tx_obj = SolanaTransaction(
                     tx_hash=tx.get("signature", ""),

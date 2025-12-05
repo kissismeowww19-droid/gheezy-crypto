@@ -17,7 +17,7 @@ Gheezy Crypto - TON Whale Tracker
 import asyncio
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
@@ -391,14 +391,16 @@ class TONTracker:
             transactions = []
 
             # Проверяем транзакции известных адресов
-            for address in list(TON_EXCHANGES.keys())[:10]:
+            # Уменьшаем количество адресов для снижения rate limit ошибок
+            for address in list(TON_EXCHANGES.keys())[:5]:
                 txs = await self._fetch_address_transactions_toncenter(
                     address, min_value_ton
                 )
                 transactions.extend(txs)
                 if len(transactions) >= limit * 2:
                     break
-                await asyncio.sleep(0.5)  # Rate limiting для бесплатного API
+                # Увеличиваем задержку для избежания 429 ошибок
+                await asyncio.sleep(1.0)
 
             return self._deduplicate_and_sort(transactions, limit)
 
@@ -426,9 +428,12 @@ class TONTracker:
         """
         try:
             url = f"{TONCENTER_API_URL}/getTransactions"
+            # Исправленные параметры для TON Center API
+            # Используем правильный формат адреса и параметров
             params = {
                 "address": address,
-                "limit": 20,
+                "limit": 10,  # Уменьшаем лимит для снижения нагрузки
+                "archival": "false",
             }
 
             data = await self._make_api_request(url, params=params)
@@ -463,9 +468,9 @@ class TONTracker:
                 # Время
                 try:
                     utime = tx.get("utime", 0)
-                    timestamp = datetime.fromtimestamp(utime) if utime else None
+                    timestamp = datetime.fromtimestamp(utime, tz=timezone.utc) if utime else None
                 except (ValueError, OSError):
-                    timestamp = datetime.now()
+                    timestamp = datetime.now(timezone.utc)
 
                 # Хэш транзакции
                 tx_hash = tx.get("transaction_id", {}).get("hash", "")
@@ -515,7 +520,7 @@ class TONTracker:
                 transactions.extend(txs)
                 if len(transactions) >= limit * 2:
                     break
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(0.5)  # Увеличенная задержка
 
             return self._deduplicate_and_sort(transactions, limit)
 
@@ -543,7 +548,7 @@ class TONTracker:
         """
         try:
             url = f"{TONAPI_URL}/blockchain/accounts/{address}/transactions"
-            params = {"limit": 20}
+            params = {"limit": 10}  # Уменьшаем лимит
 
             data = await self._make_api_request(url, params=params)
             if not data:
@@ -574,9 +579,9 @@ class TONTracker:
 
                 try:
                     utime = tx.get("utime", 0)
-                    timestamp = datetime.fromtimestamp(utime) if utime else None
+                    timestamp = datetime.fromtimestamp(utime, tz=timezone.utc) if utime else None
                 except (ValueError, OSError):
-                    timestamp = datetime.now()
+                    timestamp = datetime.now(timezone.utc)
 
                 tx_obj = TONTransaction(
                     tx_hash=tx.get("hash", ""),
@@ -683,7 +688,7 @@ class TONTracker:
                         transfer.get("timestamp", "").replace("Z", "+00:00")
                     )
                 except (ValueError, TypeError):
-                    timestamp = datetime.now()
+                    timestamp = datetime.now(timezone.utc)
 
                 tx_obj = TONTransaction(
                     tx_hash=transfer.get("transaction_hash", ""),

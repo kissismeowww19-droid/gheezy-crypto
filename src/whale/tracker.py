@@ -21,7 +21,7 @@ Gheezy Crypto - Трекер китов
 import asyncio
 import time as time_module
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
@@ -563,7 +563,7 @@ class WhaleTracker:
 
         # Сортируем по времени
         all_transactions.sort(
-            key=lambda x: x.timestamp if x.timestamp else datetime.now(),
+            key=lambda x: x.timestamp if x.timestamp else datetime.now(timezone.utc),
             reverse=True,
         )
 
@@ -897,7 +897,7 @@ class WhaleTracker:
                 to_address="0x28c6c06298d514db089934071355e5743bf21d60",
                 from_label=None,
                 to_label="Binance",
-                timestamp=datetime.now(),
+                timestamp=datetime.now(timezone.utc),
                 tx_type="DEPOSIT",
             ),
             WhaleTransaction(
@@ -910,7 +910,7 @@ class WhaleTracker:
                 to_address="0x2345678901abcdef2345678901abcdef23456789",
                 from_label="Coinbase",
                 to_label=None,
-                timestamp=datetime.now(),
+                timestamp=datetime.now(timezone.utc),
                 tx_type="WITHDRAWAL",
             ),
             WhaleTransaction(
@@ -923,7 +923,7 @@ class WhaleTracker:
                 to_address="34xp4vrocgjym3xr7ycvpfhocnxv4twseo",
                 from_label="Unknown Whale",
                 to_label="Binance",
-                timestamp=datetime.now(),
+                timestamp=datetime.now(timezone.utc),
                 tx_type="DEPOSIT",
             ),
             WhaleTransaction(
@@ -936,7 +936,7 @@ class WhaleTracker:
                 to_address="JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
                 from_label="Binance",
                 to_label="Jupiter",
-                timestamp=datetime.now(),
+                timestamp=datetime.now(timezone.utc),
                 tx_type="DEX_SWAP",
             ),
             WhaleTransaction(
@@ -949,7 +949,7 @@ class WhaleTracker:
                 to_address="EQBfBWT7X2BHg9tXAxzhz2aKvn6xHy_CUv4qkBJ9pwxvQ3Ff",
                 from_label="Binance",
                 to_label="DeDust",
-                timestamp=datetime.now(),
+                timestamp=datetime.now(timezone.utc),
                 tx_type="DEX_SWAP",
             ),
         ]

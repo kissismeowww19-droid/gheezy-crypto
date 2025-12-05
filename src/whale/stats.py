@@ -6,7 +6,7 @@ Gheezy Crypto - Единая статистика для всех сетей
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 
@@ -66,7 +66,7 @@ class WhaleStats:
     """
 
     networks: dict[str, NetworkStats] = field(default_factory=dict)
-    timestamp: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def __post_init__(self):
         """Инициализация статистики для всех сетей."""
