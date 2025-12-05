@@ -357,8 +357,11 @@ class EthereumTracker:
             )
 
             # Параллельные запросы к адресам бирж
+            # Ограничиваем до 15 адресов для соблюдения rate limits Etherscan API
+            # (бесплатный tier: 5 calls/sec, 100K calls/day)
+            # Адреса отсортированы по важности (крупнейшие биржи первые)
             tasks = []
-            for address in TRACKED_EXCHANGE_ADDRESSES[:15]:  # Ограничиваем для скорости
+            for address in TRACKED_EXCHANGE_ADDRESSES[:15]:
                 tasks.append(
                     self._fetch_address_transactions(
                         address, start_block, latest_block, min_value_eth
