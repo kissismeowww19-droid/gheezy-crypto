@@ -273,15 +273,15 @@ class WhaleTracker:
                 pass
         logger.info("Whale tracker остановлен")
 
-    def _save_to_db(self, tx: "WhaleTransaction") -> bool:
+    def _prepare_tx_for_db(self, tx: "WhaleTransaction") -> dict:
         """
-        Сохранить транзакцию в SQLite базу данных.
+        Подготовить транзакцию для сохранения в базу данных.
 
         Args:
             tx: Транзакция для сохранения
 
         Returns:
-            bool: True если сохранено успешно
+            dict: Данные транзакции для сохранения
         """
         # Определяем тип транзакции
         tx_type = tx.get_transaction_type().value
@@ -296,7 +296,7 @@ class WhaleTracker:
         }
         chain = chain_map.get(tx.blockchain, tx.blockchain)
 
-        return save_transaction({
+        return {
             "tx_hash": tx.tx_hash,
             "chain": chain,
             "from_address": tx.from_address,
@@ -308,7 +308,20 @@ class WhaleTracker:
             "from_label": tx.from_label,
             "to_label": tx.to_label,
             "tx_type": tx_type,
-        })
+        }
+
+    async def _save_to_db_async(self, tx: "WhaleTransaction") -> bool:
+        """
+        Асинхронно сохранить транзакцию в SQLite базу данных.
+
+        Args:
+            tx: Транзакция для сохранения
+
+        Returns:
+            bool: True если сохранено успешно
+        """
+        tx_data = self._prepare_tx_for_db(tx)
+        return await asyncio.to_thread(save_transaction, tx_data)
 
     async def _monitoring_loop(self) -> None:
         """Цикл мониторинга транзакций."""
@@ -317,10 +330,10 @@ class WhaleTracker:
                 transactions = await self.get_all_transactions()
                 self._last_transactions = transactions
 
-                # Сохраняем каждую транзакцию в базу данных
+                # Сохраняем каждую транзакцию в базу данных асинхронно
                 saved_count = 0
                 for tx in transactions:
-                    if self._save_to_db(tx):
+                    if await self._save_to_db_async(tx):
                         saved_count += 1
 
                 logger.info(
@@ -950,7 +963,7 @@ class WhaleTracker:
         Returns:
             dict: Статистика по периодам
         """
-        return get_multi_period_stats(chain)
+        return await asyncio.to_thread(get_multi_period_stats, chain)
 
     async def format_stats_from_db_message(
         self,
@@ -965,7 +978,7 @@ class WhaleTracker:
         Returns:
             str: Форматированное сообщение для Telegram
         """
-        stats = get_multi_period_stats(chain)
+        stats = await asyncio.to_thread(get_multi_period_stats, chain)
         return format_db_stats_message(
             stats_24h=stats["24h"],
             stats_7d=stats["7d"],
@@ -973,14 +986,14 @@ class WhaleTracker:
             chain=chain,
         )
 
-    def get_db_transaction_count(self) -> int:
+    async def get_db_transaction_count_async(self) -> int:
         """
-        Получение количества транзакций в базе данных.
+        Асинхронное получение количества транзакций в базе данных.
 
         Returns:
             int: Количество транзакций
         """
-        return get_transaction_count()
+        return await asyncio.to_thread(get_transaction_count)
 
     async def get_db_transactions(
         self,
@@ -999,7 +1012,9 @@ class WhaleTracker:
         Returns:
             list[dict]: Список транзакций
         """
-        return get_db_transactions(chain=chain, limit=limit, hours=hours)
+        return await asyncio.to_thread(
+            get_db_transactions, chain, limit, hours
+        )
 
     async def _get_demo_transactions(self) -> list[WhaleTransaction]:
         """

@@ -27,47 +27,47 @@ def init_whale_db() -> None:
     """
     os.makedirs("data", exist_ok=True)
 
-    conn = sqlite3.connect(DATABASE_PATH)
-    cursor = conn.cursor()
+    with sqlite3.connect(DATABASE_PATH) as conn:
+        cursor = conn.cursor()
 
-    # Таблица транзакций
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS whale_transactions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tx_hash TEXT UNIQUE NOT NULL,
-            chain TEXT NOT NULL,
-            from_address TEXT,
-            to_address TEXT,
-            amount REAL NOT NULL,
-            amount_usd REAL,
-            token TEXT DEFAULT 'native',
-            timestamp DATETIME NOT NULL,
-            block_number INTEGER,
-            from_label TEXT,
-            to_label TEXT,
-            tx_type TEXT,
-            fee REAL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        # Таблица транзакций
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS whale_transactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tx_hash TEXT UNIQUE NOT NULL,
+                chain TEXT NOT NULL,
+                from_address TEXT,
+                to_address TEXT,
+                amount REAL NOT NULL,
+                amount_usd REAL,
+                token TEXT DEFAULT 'native',
+                timestamp DATETIME NOT NULL,
+                block_number INTEGER,
+                from_label TEXT,
+                to_label TEXT,
+                tx_type TEXT,
+                fee REAL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Индексы для быстрого поиска
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_chain ON whale_transactions(chain)"
         )
-    """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_timestamp ON whale_transactions(timestamp)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_amount_usd "
+            "ON whale_transactions(amount_usd)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_chain_timestamp "
+            "ON whale_transactions(chain, timestamp)"
+        )
 
-    # Индексы для быстрого поиска
-    cursor.execute(
-        "CREATE INDEX IF NOT EXISTS idx_chain ON whale_transactions(chain)"
-    )
-    cursor.execute(
-        "CREATE INDEX IF NOT EXISTS idx_timestamp ON whale_transactions(timestamp)"
-    )
-    cursor.execute(
-        "CREATE INDEX IF NOT EXISTS idx_amount_usd ON whale_transactions(amount_usd)"
-    )
-    cursor.execute(
-        "CREATE INDEX IF NOT EXISTS idx_chain_timestamp "
-        "ON whale_transactions(chain, timestamp)"
-    )
-
-    conn.commit()
-    conn.close()
+        conn.commit()
 
     logger.info(
         "SQLite база данных инициализирована",
@@ -99,9 +99,6 @@ def save_transaction(tx: dict[str, Any]) -> bool:
         bool: True если транзакция сохранена, False если дубликат или ошибка
     """
     try:
-        conn = sqlite3.connect(DATABASE_PATH)
-        cursor = conn.cursor()
-
         # Получаем timestamp
         timestamp = tx.get("timestamp")
         if timestamp is None:
@@ -109,34 +106,36 @@ def save_transaction(tx: dict[str, Any]) -> bool:
         elif isinstance(timestamp, datetime):
             timestamp = timestamp.isoformat()
 
-        cursor.execute(
-            """
-            INSERT OR IGNORE INTO whale_transactions (
-                tx_hash, chain, from_address, to_address,
-                amount, amount_usd, token, timestamp,
-                block_number, from_label, to_label, tx_type, fee
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                tx.get("tx_hash"),
-                tx.get("chain"),
-                tx.get("from_address"),
-                tx.get("to_address"),
-                tx.get("amount", 0),
-                tx.get("amount_usd", 0),
-                tx.get("token", "native"),
-                timestamp,
-                tx.get("block_number"),
-                tx.get("from_label"),
-                tx.get("to_label"),
-                tx.get("tx_type"),
-                tx.get("fee"),
-            ),
-        )
+        with sqlite3.connect(DATABASE_PATH) as conn:
+            cursor = conn.cursor()
 
-        conn.commit()
-        rows_affected = cursor.rowcount
-        conn.close()
+            cursor.execute(
+                """
+                INSERT OR IGNORE INTO whale_transactions (
+                    tx_hash, chain, from_address, to_address,
+                    amount, amount_usd, token, timestamp,
+                    block_number, from_label, to_label, tx_type, fee
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    tx.get("tx_hash"),
+                    tx.get("chain"),
+                    tx.get("from_address"),
+                    tx.get("to_address"),
+                    tx.get("amount", 0),
+                    tx.get("amount_usd", 0),
+                    tx.get("token", "native"),
+                    timestamp,
+                    tx.get("block_number"),
+                    tx.get("from_label"),
+                    tx.get("to_label"),
+                    tx.get("tx_type"),
+                    tx.get("fee"),
+                ),
+            )
+
+            conn.commit()
+            rows_affected = cursor.rowcount
 
         if rows_affected > 0:
             logger.debug(
@@ -181,67 +180,65 @@ def get_stats(
             - withdrawals_volume: Объём выводов
     """
     try:
-        conn = sqlite3.connect(DATABASE_PATH)
-        cursor = conn.cursor()
-
         # Время начала периода
         start_time = datetime.now(timezone.utc) - timedelta(hours=hours)
         start_time_str = start_time.isoformat()
 
-        # Базовый запрос для статистики
-        base_query = """
-            SELECT
-                COUNT(*) as tx_count,
-                COALESCE(SUM(amount_usd), 0) as total_volume,
-                COALESCE(AVG(amount_usd), 0) as avg_tx,
-                COALESCE(MAX(amount_usd), 0) as largest_tx
-            FROM whale_transactions
-            WHERE timestamp >= ?
-        """
+        with sqlite3.connect(DATABASE_PATH) as conn:
+            cursor = conn.cursor()
 
-        params: list[Any] = [start_time_str]
-        if chain:
-            base_query += " AND chain = ?"
-            params.append(chain)
+            # Базовый запрос для статистики
+            base_query = """
+                SELECT
+                    COUNT(*) as tx_count,
+                    COALESCE(SUM(amount_usd), 0) as total_volume,
+                    COALESCE(AVG(amount_usd), 0) as avg_tx,
+                    COALESCE(MAX(amount_usd), 0) as largest_tx
+                FROM whale_transactions
+                WHERE timestamp >= ?
+            """
 
-        cursor.execute(base_query, params)
-        row = cursor.fetchone()
-        tx_count, total_volume, avg_tx, largest_tx = row
+            params: list[Any] = [start_time_str]
+            if chain:
+                base_query += " AND chain = ?"
+                params.append(chain)
 
-        # Получаем количество депозитов и выводов
-        deposits_query = """
-            SELECT
-                COUNT(*) as count,
-                COALESCE(SUM(amount_usd), 0) as volume
-            FROM whale_transactions
-            WHERE timestamp >= ? AND tx_type = 'DEPOSIT'
-        """
-        deposits_params: list[Any] = [start_time_str]
-        if chain:
-            deposits_query += " AND chain = ?"
-            deposits_params.append(chain)
+            cursor.execute(base_query, params)
+            row = cursor.fetchone()
+            tx_count, total_volume, avg_tx, largest_tx = row
 
-        cursor.execute(deposits_query, deposits_params)
-        deposits_row = cursor.fetchone()
-        deposits_count, deposits_volume = deposits_row
+            # Получаем количество депозитов и выводов
+            deposits_query = """
+                SELECT
+                    COUNT(*) as count,
+                    COALESCE(SUM(amount_usd), 0) as volume
+                FROM whale_transactions
+                WHERE timestamp >= ? AND tx_type = 'DEPOSIT'
+            """
+            deposits_params: list[Any] = [start_time_str]
+            if chain:
+                deposits_query += " AND chain = ?"
+                deposits_params.append(chain)
 
-        withdrawals_query = """
-            SELECT
-                COUNT(*) as count,
-                COALESCE(SUM(amount_usd), 0) as volume
-            FROM whale_transactions
-            WHERE timestamp >= ? AND tx_type = 'WITHDRAWAL'
-        """
-        withdrawals_params: list[Any] = [start_time_str]
-        if chain:
-            withdrawals_query += " AND chain = ?"
-            withdrawals_params.append(chain)
+            cursor.execute(deposits_query, deposits_params)
+            deposits_row = cursor.fetchone()
+            deposits_count, deposits_volume = deposits_row
 
-        cursor.execute(withdrawals_query, withdrawals_params)
-        withdrawals_row = cursor.fetchone()
-        withdrawals_count, withdrawals_volume = withdrawals_row
+            withdrawals_query = """
+                SELECT
+                    COUNT(*) as count,
+                    COALESCE(SUM(amount_usd), 0) as volume
+                FROM whale_transactions
+                WHERE timestamp >= ? AND tx_type = 'WITHDRAWAL'
+            """
+            withdrawals_params: list[Any] = [start_time_str]
+            if chain:
+                withdrawals_query += " AND chain = ?"
+                withdrawals_params.append(chain)
 
-        conn.close()
+            cursor.execute(withdrawals_query, withdrawals_params)
+            withdrawals_row = cursor.fetchone()
+            withdrawals_count, withdrawals_volume = withdrawals_row
 
         # Форматирование периода
         if hours == 24:
@@ -304,34 +301,33 @@ def get_transactions(
         list[dict]: Список транзакций
     """
     try:
-        conn = sqlite3.connect(DATABASE_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-
         # Время начала периода
         start_time = datetime.now(timezone.utc) - timedelta(hours=hours)
         start_time_str = start_time.isoformat()
 
-        query = """
-            SELECT
-                tx_hash, chain, from_address, to_address,
-                amount, amount_usd, token, timestamp,
-                from_label, to_label, tx_type
-            FROM whale_transactions
-            WHERE timestamp >= ?
-        """
-        params: list[Any] = [start_time_str]
+        with sqlite3.connect(DATABASE_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
 
-        if chain:
-            query += " AND chain = ?"
-            params.append(chain)
+            query = """
+                SELECT
+                    tx_hash, chain, from_address, to_address,
+                    amount, amount_usd, token, timestamp,
+                    from_label, to_label, tx_type
+                FROM whale_transactions
+                WHERE timestamp >= ?
+            """
+            params: list[Any] = [start_time_str]
 
-        query += " ORDER BY amount_usd DESC LIMIT ?"
-        params.append(limit)
+            if chain:
+                query += " AND chain = ?"
+                params.append(chain)
 
-        cursor.execute(query, params)
-        rows = cursor.fetchall()
-        conn.close()
+            query += " ORDER BY amount_usd DESC LIMIT ?"
+            params.append(limit)
+
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
 
         return [
             {
@@ -388,11 +384,10 @@ def get_transaction_count() -> int:
         int: Количество транзакций
     """
     try:
-        conn = sqlite3.connect(DATABASE_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM whale_transactions")
-        count = cursor.fetchone()[0]
-        conn.close()
+        with sqlite3.connect(DATABASE_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM whale_transactions")
+            count = cursor.fetchone()[0]
         return count
     except Exception:
         return 0
