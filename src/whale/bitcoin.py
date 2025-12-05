@@ -2,23 +2,42 @@
 Gheezy Crypto - Bitcoin Whale Tracker
 
 Отслеживание крупных транзакций на Bitcoin через mempool.space API.
+Поддерживает резервный источник данных через blockstream.info.
 Работает в России без VPN и без API ключа.
+
+Возможности:
+- mempool.space API (основной, без ключа)
+- blockstream.info API (резервный, без ключа)
+- Кэширование цен криптовалют
+- Retry логика с exponential backoff
 """
 
+import asyncio
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
 import aiohttp
 import structlog
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+)
 
 from src.config import settings
 from src.whale.known_wallets import get_bitcoin_wallet_label
 
 logger = structlog.get_logger()
 
+# ===== API URLs =====
 # Mempool.space API URL (free, no API key required)
 MEMPOOL_API_URL = "https://mempool.space/api"
+
+# Blockstream.info API URL (free, no API key required) - резервный
+BLOCKSTREAM_API_URL = "https://blockstream.info/api"
 
 
 @dataclass
@@ -77,15 +96,25 @@ class BitcoinTracker:
     """
     Трекер крупных транзакций на Bitcoin.
 
-    Использует mempool.space API для мониторинга.
-    Работает без API ключа.
+    Использует несколько источников данных:
+    1. mempool.space API (основной)
+    2. blockstream.info API (резервный)
+
+    Все источники работают без API ключа.
+
+    Особенности:
+    - Кэширование цен криптовалют
+    - Retry логика с exponential backoff
     """
 
     def __init__(self):
         """Инициализация трекера."""
         self.min_value_usd = settings.whale_min_transaction
+        self.blocks_to_analyze = getattr(settings, "whale_blocks_to_analyze", 200)
+        self.price_cache_ttl = getattr(settings, "whale_price_cache_ttl", 300)
         self._session: Optional[aiohttp.ClientSession] = None
         self._btc_price: float = 40000.0  # Дефолтная цена BTC
+        self._price_last_update: float = 0  # Время последнего обновления цены
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Получение HTTP сессии."""
@@ -99,7 +128,22 @@ class BitcoinTracker:
             await self._session.close()
 
     async def _update_btc_price(self) -> None:
-        """Обновление цены BTC через CoinGecko."""
+        """
+        Обновление цены BTC через CoinGecko с кэшированием.
+
+        Цена кэшируется на время, заданное в whale_price_cache_ttl.
+        """
+        current_time = time.time()
+
+        # Проверяем кэш
+        if current_time - self._price_last_update < self.price_cache_ttl:
+            logger.debug(
+                "Используем кэшированную цену BTC",
+                price=self._btc_price,
+                cache_age=int(current_time - self._price_last_update),
+            )
+            return
+
         try:
             session = await self._get_session()
             url = "https://api.coingecko.com/api/v3/simple/price"
@@ -111,16 +155,67 @@ class BitcoinTracker:
                     data = await response.json()
                     if "bitcoin" in data and "usd" in data["bitcoin"]:
                         self._btc_price = data["bitcoin"]["usd"]
-                        logger.info(f"BTC price updated: ${self._btc_price}")
+                        self._price_last_update = current_time
+                        logger.info(
+                            "Цена BTC обновлена",
+                            price=f"${self._btc_price}",
+                        )
+                else:
+                    logger.warning(
+                        "CoinGecko API вернул ошибку",
+                        status=response.status,
+                    )
+        except asyncio.TimeoutError:
+            logger.warning("Таймаут при получении цены BTC")
         except Exception as e:
-            logger.warning(f"Failed to update BTC price: {e}")
+            logger.warning(
+                "Ошибка при обновлении цены BTC",
+                error=str(e),
+            )
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError)),
+    )
+    async def _make_api_request(
+        self,
+        url: str,
+        params: Optional[dict] = None,
+    ) -> Optional[dict | list]:
+        """
+        Выполнение HTTP запроса с retry логикой.
+
+        Args:
+            url: URL для запроса
+            params: GET параметры
+
+        Returns:
+            dict | list: Ответ API или None при ошибке
+        """
+        session = await self._get_session()
+        timeout = aiohttp.ClientTimeout(total=20)
+
+        async with session.get(url, params=params, timeout=timeout) as response:
+            if response.status == 200:
+                return await response.json()
+            logger.warning(
+                "API запрос вернул ошибку",
+                url=url,
+                status=response.status,
+            )
+            return None
 
     async def get_large_transactions(
         self,
         limit: int = 20,
     ) -> list[BitcoinTransaction]:
         """
-        Получение крупных BTC транзакций через mempool.space.
+        Получение крупных BTC транзакций.
+
+        Использует несколько источников данных:
+        1. mempool.space API (основной)
+        2. blockstream.info API (резервный)
 
         Args:
             limit: Максимальное количество транзакций
@@ -129,10 +224,30 @@ class BitcoinTracker:
             list[BitcoinTransaction]: Список транзакций
         """
         await self._update_btc_price()
-
         min_value_btc = self.min_value_usd / self._btc_price
 
-        return await self._get_from_mempool(min_value_btc, limit)
+        # Пробуем mempool.space (основной)
+        logger.debug("Пробуем получить данные через mempool.space")
+        transactions = await self._get_from_mempool(min_value_btc, limit)
+        if transactions:
+            logger.info(
+                "Данные получены через mempool.space",
+                count=len(transactions),
+            )
+            return transactions
+
+        # Резервный вариант через blockstream.info
+        logger.warning("mempool.space недоступен, пробуем blockstream.info")
+        transactions = await self._get_from_blockstream(min_value_btc, limit)
+        if transactions:
+            logger.info(
+                "Данные получены через blockstream.info",
+                count=len(transactions),
+            )
+            return transactions
+
+        logger.warning("Не удалось получить BTC транзакции")
+        return []
 
     async def _get_from_mempool(
         self,
@@ -152,102 +267,261 @@ class BitcoinTracker:
             list[BitcoinTransaction]: Список транзакций
         """
         try:
-            session = await self._get_session()
-
             # Получаем последние блоки для анализа подтверждённых транзакций
             blocks_url = f"{MEMPOOL_API_URL}/blocks"
+            blocks = await self._make_api_request(blocks_url)
 
-            async with session.get(
-                blocks_url, timeout=aiohttp.ClientTimeout(total=20)
-            ) as response:
-                if response.status != 200:
-                    logger.error(f"Mempool.space blocks error: {response.status}")
-                    return []
-
-                blocks = await response.json()
-
-                if not blocks:
-                    logger.warning("No blocks from mempool.space")
-                    return []
+            if not blocks:
+                logger.debug("mempool.space: не удалось получить блоки")
+                return []
 
             transactions = []
-            # Анализируем последние несколько блоков
-            for block in blocks[:3]:
+            # Анализируем больше блоков для лучшего покрытия
+            blocks_to_check = min(5, len(blocks))
+
+            for block in blocks[:blocks_to_check]:
                 block_hash = block.get("id")
                 if not block_hash:
                     continue
 
                 # Получаем транзакции блока
                 txs_url = f"{MEMPOOL_API_URL}/block/{block_hash}/txs"
+                block_txs = await self._make_api_request(txs_url)
 
-                async with session.get(
-                    txs_url, timeout=aiohttp.ClientTimeout(total=20)
-                ) as response:
-                    if response.status != 200:
+                if not block_txs:
+                    continue
+
+                for tx_data in block_txs:
+                    if tx_data is None:
                         continue
 
-                    block_txs = await response.json()
+                    tx = self._parse_mempool_transaction(tx_data, min_value_btc)
+                    if tx:
+                        transactions.append(tx)
 
-                    if not block_txs:
-                        continue
+                    if len(transactions) >= limit * 2:
+                        break
 
-                    for tx_data in block_txs:
-                        if tx_data is None:
-                            continue
+                # Небольшая задержка между запросами
+                await asyncio.sleep(0.1)
 
-                        # Суммируем все выходы транзакции
-                        outputs = tx_data.get("vout", []) or []
-                        output_total = sum((out.get("value", 0) or 0) for out in outputs if out)
-                        value_btc = output_total / 100_000_000
-                        value_usd = value_btc * self._btc_price
-
-                        if value_btc < min_value_btc:
-                            continue
-
-                        # Получаем адреса входов и выходов
-                        inputs = tx_data.get("vin", []) or []
-
-                        from_addresses = list(dict.fromkeys(
-                            (inp.get("prevout") or {}).get("scriptpubkey_address", "")
-                            for inp in inputs
-                            if inp and (inp.get("prevout") or {}).get("scriptpubkey_address")
-                        ))
-                        to_addresses = list(dict.fromkeys(
-                            out.get("scriptpubkey_address", "")
-                            for out in outputs
-                            if out and out.get("scriptpubkey_address")
-                        ))
-
-                        # Время подтверждения
-                        timestamp = None
-                        status = tx_data.get("status", {}) or {}
-                        block_time = status.get("block_time")
-                        if block_time:
-                            timestamp = datetime.fromtimestamp(block_time)
-
-                        transactions.append(
-                            BitcoinTransaction(
-                                tx_hash=tx_data.get("txid", ""),
-                                from_addresses=from_addresses,
-                                to_addresses=to_addresses,
-                                value_btc=value_btc,
-                                value_usd=value_usd,
-                                timestamp=timestamp,
-                                block_height=status.get("block_height"),
-                            )
-                        )
-
-                        if len(transactions) >= limit:
-                            break
-
-                if len(transactions) >= limit:
-                    break
-
-            return transactions[:limit]
+            return self._deduplicate_and_sort(transactions, limit)
 
         except Exception as e:
-            logger.error(f"Mempool.space error: {e}")
+            logger.warning(
+                "Ошибка mempool.space API",
+                error=str(e),
+            )
             return []
+
+    def _parse_mempool_transaction(
+        self,
+        tx_data: dict,
+        min_value_btc: float,
+    ) -> Optional[BitcoinTransaction]:
+        """
+        Парсинг транзакции из формата mempool.space.
+
+        Args:
+            tx_data: Данные транзакции
+            min_value_btc: Минимальная сумма в BTC
+
+        Returns:
+            BitcoinTransaction: Транзакция или None если не подходит
+        """
+        # Суммируем все выходы транзакции
+        outputs = tx_data.get("vout", []) or []
+        output_total = sum((out.get("value", 0) or 0) for out in outputs if out)
+        value_btc = output_total / 100_000_000
+        value_usd = value_btc * self._btc_price
+
+        if value_btc < min_value_btc:
+            return None
+
+        # Получаем адреса входов и выходов
+        inputs = tx_data.get("vin", []) or []
+
+        from_addresses = list(dict.fromkeys(
+            (inp.get("prevout") or {}).get("scriptpubkey_address", "")
+            for inp in inputs
+            if inp and (inp.get("prevout") or {}).get("scriptpubkey_address")
+        ))
+        to_addresses = list(dict.fromkeys(
+            out.get("scriptpubkey_address", "")
+            for out in outputs
+            if out and out.get("scriptpubkey_address")
+        ))
+
+        # Время подтверждения
+        timestamp = None
+        status = tx_data.get("status", {}) or {}
+        block_time = status.get("block_time")
+        if block_time:
+            try:
+                timestamp = datetime.fromtimestamp(block_time)
+            except (ValueError, OSError):
+                timestamp = datetime.now()
+
+        return BitcoinTransaction(
+            tx_hash=tx_data.get("txid", ""),
+            from_addresses=from_addresses,
+            to_addresses=to_addresses,
+            value_btc=value_btc,
+            value_usd=value_usd,
+            timestamp=timestamp,
+            block_height=status.get("block_height"),
+        )
+
+    async def _get_from_blockstream(
+        self,
+        min_value_btc: float,
+        limit: int,
+    ) -> list[BitcoinTransaction]:
+        """
+        Резервное получение транзакций через blockstream.info API.
+
+        Args:
+            min_value_btc: Минимальная сумма в BTC
+            limit: Максимальное количество транзакций
+
+        Returns:
+            list[BitcoinTransaction]: Список транзакций
+        """
+        try:
+            # Получаем последние блоки
+            blocks_url = f"{BLOCKSTREAM_API_URL}/blocks"
+            blocks = await self._make_api_request(blocks_url)
+
+            if not blocks:
+                logger.debug("blockstream.info: не удалось получить блоки")
+                return []
+
+            transactions = []
+
+            # Анализируем последние блоки
+            for block in blocks[:3]:
+                block_hash = block.get("id")
+                if not block_hash:
+                    continue
+
+                # Получаем транзакции блока
+                txs_url = f"{BLOCKSTREAM_API_URL}/block/{block_hash}/txs"
+                block_txs = await self._make_api_request(txs_url)
+
+                if not block_txs:
+                    continue
+
+                for tx_data in block_txs:
+                    if tx_data is None:
+                        continue
+
+                    tx = self._parse_blockstream_transaction(tx_data, min_value_btc)
+                    if tx:
+                        transactions.append(tx)
+
+                    if len(transactions) >= limit * 2:
+                        break
+
+                # Небольшая задержка
+                await asyncio.sleep(0.1)
+
+            return self._deduplicate_and_sort(transactions, limit)
+
+        except Exception as e:
+            logger.warning(
+                "Ошибка blockstream.info API",
+                error=str(e),
+            )
+            return []
+
+    def _parse_blockstream_transaction(
+        self,
+        tx_data: dict,
+        min_value_btc: float,
+    ) -> Optional[BitcoinTransaction]:
+        """
+        Парсинг транзакции из формата blockstream.info.
+
+        Формат похож на mempool.space.
+
+        Args:
+            tx_data: Данные транзакции
+            min_value_btc: Минимальная сумма в BTC
+
+        Returns:
+            BitcoinTransaction: Транзакция или None если не подходит
+        """
+        # Формат blockstream.info очень похож на mempool.space
+        outputs = tx_data.get("vout", []) or []
+        output_total = sum((out.get("value", 0) or 0) for out in outputs if out)
+        value_btc = output_total / 100_000_000
+        value_usd = value_btc * self._btc_price
+
+        if value_btc < min_value_btc:
+            return None
+
+        inputs = tx_data.get("vin", []) or []
+
+        from_addresses = list(dict.fromkeys(
+            (inp.get("prevout") or {}).get("scriptpubkey_address", "")
+            for inp in inputs
+            if inp and (inp.get("prevout") or {}).get("scriptpubkey_address")
+        ))
+        to_addresses = list(dict.fromkeys(
+            out.get("scriptpubkey_address", "")
+            for out in outputs
+            if out and out.get("scriptpubkey_address")
+        ))
+
+        timestamp = None
+        status = tx_data.get("status", {}) or {}
+        block_time = status.get("block_time")
+        if block_time:
+            try:
+                timestamp = datetime.fromtimestamp(block_time)
+            except (ValueError, OSError):
+                timestamp = datetime.now()
+
+        return BitcoinTransaction(
+            tx_hash=tx_data.get("txid", ""),
+            from_addresses=from_addresses,
+            to_addresses=to_addresses,
+            value_btc=value_btc,
+            value_usd=value_usd,
+            timestamp=timestamp,
+            block_height=status.get("block_height"),
+        )
+
+    def _deduplicate_and_sort(
+        self,
+        transactions: list[BitcoinTransaction],
+        limit: int,
+    ) -> list[BitcoinTransaction]:
+        """
+        Удаление дубликатов и сортировка транзакций.
+
+        Args:
+            transactions: Список транзакций
+            limit: Максимальное количество
+
+        Returns:
+            list[BitcoinTransaction]: Отсортированный список уникальных транзакций
+        """
+        seen_hashes = set()
+        unique_transactions = []
+
+        for tx in sorted(
+            transactions,
+            key=lambda x: x.value_usd,  # Сортируем по сумме для Bitcoin
+            reverse=True,
+        ):
+            if tx.tx_hash not in seen_hashes:
+                seen_hashes.add(tx.tx_hash)
+                unique_transactions.append(tx)
+                if len(unique_transactions) >= limit:
+                    break
+
+        return unique_transactions
 
     async def get_transaction_details(self, tx_hash: str) -> Optional[BitcoinTransaction]:
         """
@@ -260,58 +534,30 @@ class BitcoinTracker:
             BitcoinTransaction: Детали транзакции или None
         """
         try:
-            session = await self._get_session()
-
+            # Пробуем mempool.space
             url = f"{MEMPOOL_API_URL}/tx/{tx_hash}"
+            tx_data = await self._make_api_request(url)
 
-            async with session.get(
-                url, timeout=aiohttp.ClientTimeout(total=15)
-            ) as response:
-                if response.status != 200:
-                    return None
+            if tx_data:
+                # Используем парсер для mempool формата
+                await self._update_btc_price()
+                return self._parse_mempool_transaction(tx_data, 0)  # 0 = без фильтра
 
-                tx_data = await response.json()
+            # Пробуем blockstream.info
+            url = f"{BLOCKSTREAM_API_URL}/tx/{tx_hash}"
+            tx_data = await self._make_api_request(url)
 
-                # Получаем адреса входов и выходов из mempool.space формата
-                inputs = tx_data.get("vin", []) or []
-                outputs = tx_data.get("vout", []) or []
+            if tx_data:
+                return self._parse_blockstream_transaction(tx_data, 0)
 
-                # Use dict.fromkeys to preserve order while removing duplicates
-                from_addresses = list(dict.fromkeys(
-                    (inp.get("prevout") or {}).get("scriptpubkey_address", "")
-                    for inp in inputs
-                    if inp and (inp.get("prevout") or {}).get("scriptpubkey_address")
-                ))
-                to_addresses = list(dict.fromkeys(
-                    out.get("scriptpubkey_address", "")
-                    for out in outputs
-                    if out and out.get("scriptpubkey_address")
-                ))
-
-                # Сумма выходов в сатоши
-                output_total = sum((out.get("value", 0) or 0) for out in outputs if out)
-                value_btc = output_total / 100_000_000
-                value_usd = value_btc * self._btc_price
-
-                # Время подтверждения
-                timestamp = None
-                status = tx_data.get("status", {}) or {}
-                block_time = status.get("block_time")
-                if block_time:
-                    timestamp = datetime.fromtimestamp(block_time)
-
-                return BitcoinTransaction(
-                    tx_hash=tx_hash,
-                    from_addresses=from_addresses,
-                    to_addresses=to_addresses,
-                    value_btc=value_btc,
-                    value_usd=value_usd,
-                    timestamp=timestamp,
-                    block_height=status.get("block_height"),
-                )
+            return None
 
         except Exception as e:
-            logger.error(f"Transaction details error: {e}")
+            logger.error(
+                "Ошибка при получении деталей транзакции",
+                tx_hash=tx_hash,
+                error=str(e),
+            )
             return None
 
     async def get_address_transactions(
@@ -330,70 +576,37 @@ class BitcoinTracker:
             list[BitcoinTransaction]: Список транзакций
         """
         try:
-            session = await self._get_session()
+            await self._update_btc_price()
 
+            # Пробуем mempool.space
             url = f"{MEMPOOL_API_URL}/address/{address}/txs"
+            data = await self._make_api_request(url)
 
-            async with session.get(
-                url, timeout=aiohttp.ClientTimeout(total=15)
-            ) as response:
-                if response.status != 200:
-                    return []
+            if not data:
+                # Пробуем blockstream.info
+                url = f"{BLOCKSTREAM_API_URL}/address/{address}/txs"
+                data = await self._make_api_request(url)
 
-                data = await response.json()
+            if not data:
+                return []
 
-                if not data:
-                    return []
+            transactions = []
+            min_value_btc = self.min_value_usd / self._btc_price
 
-                transactions = []
-                for tx_data in data[:limit]:
-                    if tx_data is None:
-                        continue
+            for tx_data in data[:limit * 2]:
+                if tx_data is None:
+                    continue
 
-                    # Получаем адреса входов и выходов
-                    inputs = tx_data.get("vin", []) or []
-                    outputs = tx_data.get("vout", []) or []
+                tx = self._parse_mempool_transaction(tx_data, min_value_btc)
+                if tx:
+                    transactions.append(tx)
 
-                    from_addresses = list(dict.fromkeys(
-                        (inp.get("prevout") or {}).get("scriptpubkey_address", "")
-                        for inp in inputs
-                        if inp and (inp.get("prevout") or {}).get("scriptpubkey_address")
-                    ))
-                    to_addresses = list(dict.fromkeys(
-                        out.get("scriptpubkey_address", "")
-                        for out in outputs
-                        if out and out.get("scriptpubkey_address")
-                    ))
-
-                    # Сумма выходов в сатоши
-                    output_total = sum((out.get("value", 0) or 0) for out in outputs if out)
-                    value_btc = output_total / 100_000_000
-                    value_usd = value_btc * self._btc_price
-
-                    if value_usd < self.min_value_usd:
-                        continue
-
-                    # Время подтверждения
-                    timestamp = None
-                    status = tx_data.get("status", {}) or {}
-                    block_time = status.get("block_time")
-                    if block_time:
-                        timestamp = datetime.fromtimestamp(block_time)
-
-                    transactions.append(
-                        BitcoinTransaction(
-                            tx_hash=tx_data.get("txid", ""),
-                            from_addresses=from_addresses,
-                            to_addresses=to_addresses,
-                            value_btc=value_btc,
-                            value_usd=value_usd,
-                            timestamp=timestamp,
-                            block_height=status.get("block_height"),
-                        )
-                    )
-
-                return transactions
+            return self._deduplicate_and_sort(transactions, limit)
 
         except Exception as e:
-            logger.error(f"Address transactions error: {e}")
+            logger.error(
+                "Ошибка при получении транзакций адреса",
+                address=address,
+                error=str(e),
+            )
             return []

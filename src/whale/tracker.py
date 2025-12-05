@@ -2,7 +2,16 @@
 Gheezy Crypto - Трекер китов
 
 Отслеживание крупных транзакций китов на Ethereum, BSC и Bitcoin.
-Использует Etherscan, BscScan и Blockchair API (все работают в России).
+Использует несколько источников данных с приоритетом:
+- Etherscan/BscScan API (если есть ключи)
+- Blockscout API (бесплатный)
+- Публичные RPC ноды
+- mempool.space / blockstream.info для Bitcoin
+
+Особенности:
+- Кэширование цен криптовалют
+- Retry логика с exponential backoff
+- Fallback на демо-данные (опционально, с предупреждением)
 """
 
 import asyncio
@@ -123,16 +132,25 @@ class WhaleTracker:
     Трекер крупных транзакций китов на нескольких блокчейнах.
 
     Отслеживает большие переводы на Ethereum, BSC и Bitcoin.
-    Использует API которые работают в России без VPN:
-    - Etherscan API для Ethereum
-    - BscScan API для BSC
-    - Blockchair API для Bitcoin (без ключа, 30 req/min)
+
+    Источники данных (в порядке приоритета):
+    - Ethereum: Etherscan API → Blockscout API → Публичные RPC
+    - BSC: BscScan API → Публичные RPC
+    - Bitcoin: mempool.space → blockstream.info
+
+    Все источники работают в России без VPN.
+
+    Настройки:
+    - WHALE_MIN_TRANSACTION: минимальная сумма транзакции в USD
+    - WHALE_USE_DEMO_DATA: использовать демо-данные если API недоступны
+    - WHALE_BLOCKS_TO_ANALYZE: количество блоков для анализа
     """
 
     def __init__(self):
         """Инициализация трекера."""
         self.min_transaction = settings.whale_min_transaction
         self.check_interval = getattr(settings, "whale_check_interval", 60)
+        self.use_demo_data = getattr(settings, "whale_use_demo_data", False)
 
         # Инициализация трекеров для каждого блокчейна
         self._eth_tracker = EthereumTracker()
@@ -143,6 +161,15 @@ class WhaleTracker:
         self._last_transactions: list[WhaleTransaction] = []
         self._running = False
         self._task: Optional[asyncio.Task] = None
+
+        logger.info(
+            "WhaleTracker инициализирован",
+            min_transaction_usd=self.min_transaction,
+            check_interval=self.check_interval,
+            use_demo_data=self.use_demo_data,
+            etherscan_key="настроен" if settings.etherscan_api_key else "не настроен",
+            bscscan_key="настроен" if settings.bscscan_api_key else "не настроен",
+        )
 
     async def close(self) -> None:
         """Закрытие всех HTTP сессий."""
@@ -161,15 +188,16 @@ class WhaleTracker:
     async def start(self) -> None:
         """Запуск периодического мониторинга."""
         if self._running:
-            logger.warning("Whale tracker already running")
+            logger.warning("Whale tracker уже запущен")
             return
 
         self._running = True
         self._task = asyncio.create_task(self._monitoring_loop())
         logger.info(
-            "Whale tracker started",
+            "Whale tracker запущен",
             interval=self.check_interval,
             min_usd=self.min_transaction,
+            demo_mode=self.use_demo_data,
         )
 
     async def stop(self) -> None:
@@ -181,7 +209,7 @@ class WhaleTracker:
                 await self._task
             except asyncio.CancelledError:
                 pass
-        logger.info("Whale tracker stopped")
+        logger.info("Whale tracker остановлен")
 
     async def _monitoring_loop(self) -> None:
         """Цикл мониторинга транзакций."""
@@ -190,11 +218,17 @@ class WhaleTracker:
                 transactions = await self.get_all_transactions()
                 self._last_transactions = transactions
                 logger.info(
-                    "Whale check completed",
+                    "Проверка китов завершена",
                     total=len(transactions),
+                    eth=len([t for t in transactions if t.blockchain == "Ethereum"]),
+                    bsc=len([t for t in transactions if t.blockchain == "BSC"]),
+                    btc=len([t for t in transactions if t.blockchain == "Bitcoin"]),
                 )
             except Exception as e:
-                logger.error(f"Monitoring error: {e}")
+                logger.error(
+                    "Ошибка мониторинга",
+                    error=str(e),
+                )
 
             await asyncio.sleep(self.check_interval)
 
@@ -231,10 +265,17 @@ class WhaleTracker:
                     )
                 )
 
+            logger.debug(
+                "Получены ETH транзакции",
+                count=len(transactions),
+            )
             return transactions
 
         except Exception as e:
-            logger.error(f"Ethereum tracker error: {e}")
+            logger.error(
+                "Ошибка Ethereum трекера",
+                error=str(e),
+            )
             return []
 
     async def get_bsc_transactions(
@@ -270,10 +311,17 @@ class WhaleTracker:
                     )
                 )
 
+            logger.debug(
+                "Получены BSC транзакции",
+                count=len(transactions),
+            )
             return transactions
 
         except Exception as e:
-            logger.error(f"BSC tracker error: {e}")
+            logger.error(
+                "Ошибка BSC трекера",
+                error=str(e),
+            )
             return []
 
     async def get_bitcoin_transactions(
@@ -309,10 +357,17 @@ class WhaleTracker:
                     )
                 )
 
+            logger.debug(
+                "Получены BTC транзакции",
+                count=len(transactions),
+            )
             return transactions
 
         except Exception as e:
-            logger.error(f"Bitcoin tracker error: {e}")
+            logger.error(
+                "Ошибка Bitcoin трекера",
+                error=str(e),
+            )
             return []
 
     async def get_all_transactions(
@@ -321,6 +376,9 @@ class WhaleTracker:
     ) -> list[WhaleTransaction]:
         """
         Получение транзакций со всех блокчейнов.
+
+        Если реальные данные недоступны и включен режим демо-данных,
+        возвращает демо-транзакции с предупреждением.
 
         Args:
             limit: Максимальное количество транзакций на блокчейн
@@ -343,7 +401,19 @@ class WhaleTracker:
             if isinstance(result, list):
                 all_transactions.extend(result)
             elif isinstance(result, Exception):
-                logger.error(f"Transaction fetch error: {result}")
+                logger.error(
+                    "Ошибка получения транзакций",
+                    error=str(result),
+                )
+
+        # Если нет реальных данных и включен демо-режим
+        if not all_transactions and self.use_demo_data:
+            logger.warning(
+                "⚠️ ВНИМАНИЕ: Используются демо-данные! "
+                "Реальные API недоступны или не настроены. "
+                "Установите WHALE_USE_DEMO_DATA=false для отключения."
+            )
+            return await self._get_demo_transactions()
 
         # Сортируем по времени
         all_transactions.sort(

@@ -105,12 +105,24 @@ class Settings(BaseSettings):
 
     # Whale Tracker
     whale_min_transaction: int = Field(
-        default=100000,
+        default=50000,
         description="Минимальная сумма транзакции для отслеживания (USD)",
     )
     whale_check_interval: int = Field(
         default=60,
         description="Интервал проверки транзакций китов (секунды)",
+    )
+    whale_use_demo_data: bool = Field(
+        default=False,
+        description="Использовать демо-данные вместо реальных API",
+    )
+    whale_blocks_to_analyze: int = Field(
+        default=200,
+        description="Количество блоков для анализа (больше = больше транзакций)",
+    )
+    whale_price_cache_ttl: int = Field(
+        default=300,
+        description="Время кэширования цен криптовалют (секунды)",
     )
 
     # Сигналы
