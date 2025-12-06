@@ -156,8 +156,8 @@ class EthereumTracker:
         # Use API key rotation for rate limits
         self.api_key = get_next_api_key()
         self.min_value_usd = settings.whale_min_transaction
-        self.blocks_to_analyze = getattr(settings, "whale_blocks_to_analyze", 80)  # Reduced from 200
-        self.price_cache_ttl = getattr(settings, "whale_price_cache_ttl", 300)
+        self.blocks_to_analyze = 80  # Fixed value, not from settings
+        self.price_cache_ttl = 600  # Increased from 300 to reduce CoinGecko rate limit issues
         self._session: Optional[aiohttp.ClientSession] = None
         self._eth_price: float = 2000.0  # Дефолтная цена ETH
         self._price_last_update: float = 0  # Время последнего обновления цены

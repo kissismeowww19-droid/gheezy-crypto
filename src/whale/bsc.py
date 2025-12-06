@@ -147,7 +147,7 @@ class BSCTracker:
         """
         self.min_value_usd = settings.whale_min_transaction
         self.blocks_to_analyze = getattr(settings, "whale_blocks_to_analyze", 200)
-        self.price_cache_ttl = getattr(settings, "whale_price_cache_ttl", 300)
+        self.price_cache_ttl = 600  # Increased from 300 to reduce CoinGecko rate limit issues
         self._session: Optional[aiohttp.ClientSession] = None
         self._bnb_price: float = 300.0  # Дефолтная цена BNB
         self._price_last_update: float = 0  # Время последнего обновления цены
@@ -385,10 +385,11 @@ class BSCTracker:
                                 blocks_data[block_num] = block_data
                                 # Cache the block
                                 self._cache_block(block_num, block_data)
-                else:
-                    # Fallback: sequential requests if batch fails
-                    logger.debug("BSC: Batch failed, using sequential requests")
-                    for block_num in uncached_blocks[:5]:  # Limit to 5 blocks
+                
+                # Fallback: sequential requests if batch fails
+                if not batch_response:
+                    logger.debug("BSC: Batch failed, using sequential fallback")
+                    for block_num in uncached_blocks[:5]:  # Only 5 blocks
                         try:
                             block_response = await self._provider.make_request(
                                 method="eth_getBlockByNumber",
@@ -401,8 +402,8 @@ class BSCTracker:
                                     blocks_data[block_num] = block_data
                                     self._cache_block(block_num, block_data)
                         except Exception as e:
-                            logger.debug(f"BSC: Failed to fetch block {block_num}: {e}")
-                        await asyncio.sleep(0.2)  # Small delay between requests
+                            logger.debug(f"BSC: Sequential block {block_num} failed: {e}")
+                        await asyncio.sleep(0.3)
 
             # Process all blocks
             for block_num in block_numbers:
