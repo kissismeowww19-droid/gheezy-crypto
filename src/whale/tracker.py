@@ -1,20 +1,21 @@
 """
 Gheezy Crypto - Трекер китов
 
-Отслеживание крупных транзакций китов на 5 блокчейнах:
+Отслеживание крупных транзакций китов на 6 блокчейнах:
 - Ethereum (Etherscan V2)
 - Bitcoin (mempool.space - no key needed)
+- BSC (Blockscout - FREE, no API key needed!)
 - Arbitrum (Etherscan V2)
-- Polygon (Etherscan V2)
+- Polygon (Etherscan V2 with delay)
 - Avalanche (Snowtrace - no key needed)
 
 Removed chains (API issues):
-- BSC (chainid=56 requires paid Etherscan plan)
 - Base (chainid=8453 requires paid Etherscan plan)
 - TON (complex API)
 - SOL (Solscan returns 404)
 
 Использует несколько источников данных с приоритетом:
+- Blockscout API для BSC (бесплатный, без ключа)
 - Etherscan V2 API (один ключ для ETH, Arbitrum, Polygon)
 - Snowtrace API (бесплатный для Avalanche)
 - mempool.space для Bitcoin
@@ -42,6 +43,7 @@ from config import settings
 from database.whale_db import init_whale_db, save_transaction
 from whale.ethereum import EthereumTracker
 from whale.bitcoin import BitcoinTracker
+from whale.bsc import BSCTracker
 # New chain trackers using Etherscan V2
 from whale.arbitrum import ArbitrumTracker
 from whale.polygon import PolygonTracker
@@ -228,6 +230,7 @@ class WhaleTracker:
         # Using Etherscan V2 API (one key for ETH, Arbitrum, Polygon)
         self._eth_tracker = EthereumTracker()
         self._btc_tracker = BitcoinTracker()  # mempool.space - no key needed
+        self._bsc_tracker = BSCTracker()  # Blockscout - FREE, no API key needed!
 
         # Etherscan V2 supported chains
         self._arb_tracker = ArbitrumTracker()
@@ -251,7 +254,7 @@ class WhaleTracker:
             check_interval=self.check_interval,
             use_demo_data=self.use_demo_data,
             etherscan_key="настроен" if settings.etherscan_api_key else "не настроен",
-            networks=["ETH", "BTC", "ARB", "POLYGON", "AVAX"],
+            networks=["ETH", "BTC", "BSC", "ARB", "POLYGON", "AVAX"],
             database="SQLite",
             defi_tracking="enabled",
         )
@@ -269,6 +272,7 @@ class WhaleTracker:
         # Закрываем трекеры
         await self._eth_tracker.close()
         await self._btc_tracker.close()
+        await self._bsc_tracker.close()
         await self._arb_tracker.close()
         await self._polygon_tracker.close()
         await self._avax_tracker.close()
@@ -376,6 +380,7 @@ class WhaleTracker:
                     saved=saved_count,
                     eth=len([t for t in transactions if t.blockchain == "Ethereum"]),
                     btc=len([t for t in transactions if t.blockchain == "Bitcoin"]),
+                    bsc=len([t for t in transactions if t.blockchain == "BSC"]),
                     arb=len([t for t in transactions if t.blockchain == "Arbitrum"]),
                     polygon=len([t for t in transactions if t.blockchain == "Polygon"]),
                     avax=len([t for t in transactions if t.blockchain == "Avalanche"]),
@@ -439,16 +444,46 @@ class WhaleTracker:
         limit: int = 20,
     ) -> list[WhaleTransaction]:
         """
-        BSC removed - requires paid API.
+        Получение крупных BNB транзакций на BSC (Blockscout - FREE!).
 
         Args:
             limit: Максимальное количество транзакций
 
         Returns:
-            list[WhaleTransaction]: Empty list (BSC disabled)
+            list[WhaleTransaction]: Список транзакций
         """
-        logger.debug("BSC трекер отключен - требуется платный API")
-        return []
+        try:
+            bsc_txs = await self._bsc_tracker.get_large_transactions(limit=limit)
+
+            transactions = []
+            for tx in bsc_txs:
+                transactions.append(
+                    WhaleTransaction(
+                        tx_hash=tx.tx_hash,
+                        blockchain="BSC",
+                        token_symbol=tx.token_symbol,
+                        amount=tx.value_bnb,
+                        amount_usd=tx.value_usd,
+                        from_address=tx.from_address,
+                        to_address=tx.to_address,
+                        from_label=tx.from_label,
+                        to_label=tx.to_label,
+                        timestamp=tx.timestamp,
+                    )
+                )
+
+            logger.debug(
+                "Получены BSC транзакции",
+                count=len(transactions),
+            )
+            return transactions
+
+        except Exception as e:
+            logger.error(
+                "Ошибка BSC трекера",
+                error=str(e),
+            )
+            return []
 
     async def get_bitcoin_transactions(
         self,
@@ -710,17 +745,17 @@ class WhaleTracker:
         limit: int = 20,
     ) -> list[WhaleTransaction]:
         """
-        Получение транзакций со всех работающих блокчейнов (5 сетей).
+        Получение транзакций со всех работающих блокчейнов (6 сетей).
 
         Working chains:
         - BTC (mempool.space - no key needed)
         - ETH (Etherscan V2)
+        - BSC (Blockscout - FREE, no API key needed!)
         - Arbitrum (Etherscan V2)
-        - Polygon (Etherscan V2)
+        - Polygon (Etherscan V2 with delay)
         - AVAX (Snowtrace - no key needed)
 
         Removed chains:
-        - BSC (requires paid API)
         - Base (requires paid API)
         - TON (complex API)
         - SOL (Solscan 404)
@@ -734,12 +769,13 @@ class WhaleTracker:
         # Запускаем все запросы параллельно (только работающие сети)
         eth_task = self.get_ethereum_transactions(limit=limit)
         btc_task = self.get_bitcoin_transactions(limit=limit)
+        bsc_task = self.get_bsc_transactions(limit=limit)
         arb_task = self.get_arbitrum_transactions(limit=limit)
         polygon_task = self.get_polygon_transactions(limit=limit)
         avax_task = self.get_avalanche_transactions(limit=limit)
 
         results = await asyncio.gather(
-            eth_task, btc_task, arb_task, polygon_task, avax_task,
+            eth_task, btc_task, bsc_task, arb_task, polygon_task, avax_task,
             return_exceptions=True
         )
 
@@ -835,6 +871,7 @@ class WhaleTracker:
 
         eth_count = len([tx for tx in transactions if tx.blockchain == "Ethereum"])
         btc_count = len([tx for tx in transactions if tx.blockchain == "Bitcoin"])
+        bsc_count = len([tx for tx in transactions if tx.blockchain == "BSC"])
         arb_count = len([tx for tx in transactions if tx.blockchain == "Arbitrum"])
         polygon_count = len([tx for tx in transactions if tx.blockchain == "Polygon"])
         avax_count = len([tx for tx in transactions if tx.blockchain == "Avalanche"])
@@ -845,7 +882,7 @@ class WhaleTracker:
             "exchange_withdrawals": withdrawals,
             "total_volume_usd": total_volume,
             "eth_transactions": eth_count,
-            "bsc_transactions": 0,  # Disabled
+            "bsc_transactions": bsc_count,  # Re-enabled with Blockscout
             "btc_transactions": btc_count,
             "sol_transactions": 0,  # Disabled
             "ton_transactions": 0,  # Disabled
@@ -930,6 +967,7 @@ class WhaleTracker:
         network_map = {
             "Ethereum": "ETH",
             "Bitcoin": "BTC",
+            "BSC": "BSC",
             "Arbitrum": "ARB",
             "Polygon": "POLYGON",
             "Avalanche": "AVAX",

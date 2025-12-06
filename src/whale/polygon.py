@@ -49,6 +49,11 @@ PUBLIC_POLYGON_RPC_URLS = [
 # ===== Минимальный порог для китов =====
 MIN_WHALE_MATIC = 100_000
 
+# ===== Initial delay to avoid Etherscan V2 rate limit collision =====
+# Polygon starts 2 seconds after other Etherscan V2 chains (ETH, Arbitrum)
+# to prevent hitting 3 req/sec rate limit when all chains start simultaneously
+POLYGON_STARTUP_DELAY_SECONDS = 2
+
 # ===== Известные адреса Polygon =====
 POLYGON_EXCHANGES: dict[str, str] = {
     # Binance
@@ -238,6 +243,12 @@ class PolygonTracker:
         Returns:
             list[PolygonTransaction]: Список транзакций
         """
+        # Add initial delay to avoid rate limit collision with other chains
+        # Etherscan V2 has 3 req/sec rate limit shared across ETH, Arbitrum, and Polygon.
+        # Without this delay, all three chains start simultaneously and exceed the limit.
+        # 2-second delay ensures Polygon starts after ETH/Arbitrum finish initial requests.
+        await asyncio.sleep(POLYGON_STARTUP_DELAY_SECONDS)
+        
         await self._update_matic_price()
 
         # Пробуем Etherscan V2 API (один ключ для всех EVM сетей)
