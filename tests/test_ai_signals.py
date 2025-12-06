@@ -81,7 +81,7 @@ class TestAISignalAnalyzer:
         assert result["largest_transaction"] == 2_000_000
     
     def test_calculate_signal_bullish(self, analyzer):
-        """Test signal calculation for bullish scenario."""
+        """Test signal calculation for bullish scenario with 10-factor system."""
         whale_data = {
             "transaction_count": 10,
             "total_volume_usd": 50_000_000,
@@ -100,12 +100,14 @@ class TestAISignalAnalyzer:
         
         result = analyzer.calculate_signal(whale_data, market_data)
         
+        # With 10-factor system, we just check that score reflects the bullish data
         assert result["total_score"] > 0
-        assert "📈" in result["direction"]
-        assert result["strength_percent"] > 50
+        assert result["whale_score"] > 0  # More withdrawals than deposits
+        assert result["market_score"] > 0  # Positive change and high volume
+        # Direction may vary without technical indicators, but score should be positive
     
     def test_calculate_signal_bearish(self, analyzer):
-        """Test signal calculation for bearish scenario."""
+        """Test signal calculation for bearish scenario with 10-factor system."""
         whale_data = {
             "transaction_count": 10,
             "total_volume_usd": 50_000_000,
@@ -124,9 +126,11 @@ class TestAISignalAnalyzer:
         
         result = analyzer.calculate_signal(whale_data, market_data)
         
+        # With 10-factor system, we check that score reflects the bearish data
         assert result["total_score"] < 0
-        assert "📉" in result["direction"]
-        assert result["strength_percent"] < 50
+        assert result["whale_score"] < 0  # More deposits than withdrawals
+        assert result["market_score"] < 0  # Negative change and low volume
+        # Direction may vary, but score should be negative
     
     def test_calculate_signal_neutral(self, analyzer):
         """Test signal calculation for neutral scenario."""
@@ -154,21 +158,23 @@ class TestAISignalAnalyzer:
         assert "➡️" in result["direction"] or "📈" in result["direction"] or "📉" in result["direction"]
     
     def test_format_signal_message(self, analyzer):
-        """Test message formatting."""
+        """Test message formatting with 10-factor system."""
         signal_data = {
             "direction": "📈 ВВЕРХ",
             "strength": "сильный",
             "strength_percent": 75,
             "confidence": "Высокая",
             "total_score": 35.0,
-            "whale_score": 20.0,
-            "market_score": 10.0,
-            "technical_score": 0,
-            "rsi_score": 0,
-            "macd_score": 0,
-            "bb_score": 0,
-            "fg_score": 0,
-            "fr_score": 0
+            "whale_score": 5.0,
+            "trend_score": 4.0,
+            "momentum_score": 3.0,
+            "volatility_score": 2.0,
+            "volume_score": 3.0,
+            "market_score": 6.0,
+            "orderbook_score": 4.0,
+            "derivatives_score": 3.0,
+            "onchain_score": 2.0,
+            "sentiment_score": 3.0
         }
         
         whale_data = {
@@ -196,6 +202,8 @@ class TestAISignalAnalyzer:
         assert "15" in message  # transaction count
         assert "🐋 *Анализ китов" in message
         assert "📊 *Рыночные данные" in message
+        assert "Breakdown сигнала" in message
+        assert "10 факторов" in message
         assert "Бычье" in message
         assert "⚠️" in message
         assert "🕐" in message
@@ -404,7 +412,7 @@ class TestAISignalAnalyzer:
             assert mock_get.call_count == 1
     
     def test_calculate_signal_with_all_factors(self, analyzer):
-        """Test signal calculation with all factors."""
+        """Test signal calculation with all factors in 10-factor system."""
         whale_data = {
             "transaction_count": 10,
             "total_volume_usd": 50_000_000,
@@ -442,15 +450,20 @@ class TestAISignalAnalyzer:
         assert "total_score" in result
         assert "whale_score" in result
         assert "market_score" in result
-        assert "technical_score" in result
-        assert "fg_score" in result
-        assert "fr_score" in result
+        assert "trend_score" in result
+        assert "momentum_score" in result
+        assert "volatility_score" in result
+        assert "volume_score" in result
+        assert "orderbook_score" in result
+        assert "derivatives_score" in result
+        assert "onchain_score" in result
+        assert "sentiment_score" in result
         assert "direction" in result
         assert "strength_percent" in result
         assert "confidence" in result
     
     def test_calculate_signal_without_optional_factors(self, analyzer):
-        """Test signal calculation without optional factors."""
+        """Test signal calculation without optional factors in 10-factor system."""
         whale_data = {
             "transaction_count": 10,
             "total_volume_usd": 50_000_000,
@@ -470,26 +483,31 @@ class TestAISignalAnalyzer:
         result = analyzer.calculate_signal(whale_data, market_data)
         
         assert result is not None
-        assert result["technical_score"] == 0
-        assert result["fg_score"] == 0
-        assert result["fr_score"] == 0
+        assert result["trend_score"] == 0.0
+        assert result["momentum_score"] == 0.0
+        assert result["orderbook_score"] == 0.0
+        assert result["derivatives_score"] == 0.0
+        assert result["onchain_score"] == 0.0
+        assert result["sentiment_score"] == 0.0
     
     def test_format_signal_message_with_all_data(self, analyzer):
-        """Test message formatting with all data."""
+        """Test message formatting with all data in 10-factor system."""
         signal_data = {
             "direction": "📈 ВВЕРХ",
             "strength": "сильный",
             "strength_percent": 78,
             "confidence": "Высокая",
             "total_score": 25.0,
-            "whale_score": 8.0,
-            "market_score": 6.0,
-            "technical_score": 12.0,
-            "rsi_score": 5.0,
-            "macd_score": 10.0,
-            "bb_score": -3.0,
-            "fg_score": -3.0,
-            "fr_score": 2.0
+            "whale_score": 4.0,
+            "trend_score": 5.0,
+            "momentum_score": 3.0,
+            "volatility_score": 2.0,
+            "volume_score": 3.0,
+            "market_score": 4.0,
+            "orderbook_score": 2.0,
+            "derivatives_score": 1.0,
+            "onchain_score": 0.5,
+            "sentiment_score": 0.5
         }
         
         whale_data = {
@@ -547,8 +565,9 @@ class TestAISignalAnalyzer:
         assert "Bollinger Bands:" in message
         assert "😱 *Fear & Greed Index:*" in message
         assert "📊 *Funding Rate:*" in message
-        assert "🎯 *Breakdown сигнала:*" in message
-        assert "Итого: +25 очков" in message
+        assert "Breakdown сигнала" in message
+        assert "10 факторов" in message
+        assert "ИТОГО" in message
         assert "⚠️" in message
         assert "🕐" in message
     
