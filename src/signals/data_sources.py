@@ -50,6 +50,9 @@ class DataSourceManager:
         "ETH": "ETHUSDT",
     }
     
+    # Threshold for "large" trade in USD
+    LARGE_TRADE_THRESHOLD_USD = 100000
+    
     def __init__(self):
         """Initialize data source manager."""
         self._cache = {}
@@ -265,25 +268,26 @@ class DataSourceManager:
                         large_buys = 0
                         large_sells = 0
                         
-                        # Порог для "крупной" сделки (в USD)
-                        large_threshold = 100000
-                        
                         for trade in trades:
                             price = float(trade.get("price", 0))
                             size = float(trade.get("size", 0))
-                            side = trade.get("side", "")  # "Buy" или "Sell"
+                            side = trade.get("side", "")
+                            
+                            # Skip invalid trades
+                            if price <= 0 or size <= 0 or not side:
+                                continue
                             
                             volume_usd = price * size
                             
                             if side == "Buy":
                                 buy_volume += size
                                 buy_count += 1
-                                if volume_usd >= large_threshold:
+                                if volume_usd >= self.LARGE_TRADE_THRESHOLD_USD:
                                     large_buys += 1
                             elif side == "Sell":
                                 sell_volume += size
                                 sell_count += 1
-                                if volume_usd >= large_threshold:
+                                if volume_usd >= self.LARGE_TRADE_THRESHOLD_USD:
                                     large_sells += 1
                         
                         result = {
