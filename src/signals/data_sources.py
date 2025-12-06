@@ -289,6 +289,9 @@ class DataSourceManager:
                                 sell_count += 1
                                 if volume_usd >= self.LARGE_TRADE_THRESHOLD_USD:
                                     large_sells += 1
+                            else:
+                                # Log unexpected side values for debugging
+                                logger.debug(f"Unexpected trade side value: {side} for {symbol}")
                         
                         result = {
                             "buy_volume": round(buy_volume, 4),
