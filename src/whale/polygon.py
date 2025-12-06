@@ -59,35 +59,26 @@ POLYGON_EXCHANGES: dict[str, str] = {
     # Binance
     "0xf977814e90da44bfa03b6295a0616a897441acec": "Binance",
     "0x28c6c06298d514db089934071355e5743bf21d60": "Binance Hot",
-
     # Coinbase
     "0xa9d1e08c7793af67e9d92fe308d5697fb81d3e43": "Coinbase",
-
     # OKX
     "0x6cc5f688a315f3dc28a7781717a9a798a59fda7b": "OKX",
-
     # Polygon Bridge
     "0x40ec5b33f54e0e8a33a975908c5ba1c14e5bbbdf": "Polygon Bridge",
     "0xa0c68c638235ee32657e8f720a23cec1bfc77c77": "Polygon Bridge 2",
-
     # QuickSwap
     "0xa5e0829caced8ffdd4de3c43696c57f7d7a678ff": "QuickSwap Router",
     "0xf5b509bb0909a69b1c207e495f687a596c168e12": "QuickSwap Factory",
-
     # Uniswap
     "0xe592427a0aece92de3edee1f18e0157c05861564": "Uniswap V3 Router",
     "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45": "Uniswap V3 Router 2",
-
     # SushiSwap
     "0x1b02da8cb0d097eb8d57a175b88c7d8b47997506": "SushiSwap Router",
-
     # Aave
     "0x8dff5e27ea6b7ac08ebfdf9eb090f32ee9a30fcf": "Aave V2 Polygon",
     "0x794a61358d6845594f94dc1db02a252b5b4814ad": "Aave V3 Polygon",
-
     # Curve
     "0x445fe580ef8d70ff569ab36e80c647af338db351": "Curve Polygon",
-
     # Balancer
     "0xba12222222228d8ba445958a75a0704d566bf2c8": "Balancer Vault",
 }
@@ -218,9 +209,7 @@ class PolygonTracker:
         timeout = aiohttp.ClientTimeout(total=15)
 
         if json_data:
-            async with session.post(
-                url, json=json_data, timeout=timeout
-            ) as response:
+            async with session.post(url, json=json_data, timeout=timeout) as response:
                 if response.status == 200:
                     return await response.json()
                 return None
@@ -248,7 +237,7 @@ class PolygonTracker:
         # Without this delay, all three chains start simultaneously and exceed the limit.
         # 2-second delay ensures Polygon starts after ETH/Arbitrum finish initial requests.
         await asyncio.sleep(POLYGON_STARTUP_DELAY_SECONDS)
-        
+
         await self._update_matic_price()
 
         # Пробуем Etherscan V2 API (один ключ для всех EVM сетей)
@@ -300,7 +289,7 @@ class PolygonTracker:
             for address in TRACKED_POLYGON_ADDRESSES[:num_addresses]:
                 # Get next API key for each request (rotation)
                 api_key = get_next_api_key() or self.api_key
-                
+
                 params = {
                     "module": "account",
                     "action": "txlist",
@@ -322,7 +311,9 @@ class PolygonTracker:
                             status=data.get("status"),
                             message=data.get("message"),
                             result=str(data.get("result", ""))[:200],
-                            address=address[:10] + "..." if len(address) > 10 else address,
+                            address=address[:10] + "..."
+                            if len(address) > 10
+                            else address,
                         )
                     continue
 
@@ -353,7 +344,7 @@ class PolygonTracker:
                         )
                     )
 
-                await asyncio.sleep(0.35)  # Rate limit: 3 req/sec per key
+                await asyncio.sleep(0.5)  # Rate limit: 3 req/sec per key
 
             return self._deduplicate_and_sort(transactions, limit)
 
