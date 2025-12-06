@@ -33,6 +33,19 @@ class AISignalAnalyzer:
     MAX_SCORE = 80   # Максимальный возможный score
     SCORE_RANGE = MAX_SCORE - MIN_SCORE  # Полный диапазон score (160)
     
+    # Новые константы для расширенного анализа
+    CACHE_TTL_PRICE_HISTORY = 300  # 5 минут
+    CACHE_TTL_FEAR_GREED = 1800  # 30 минут
+    CACHE_TTL_FUNDING_RATE = 300  # 5 минут
+    MIN_PRICE_POINTS = 30  # Минимум точек для индикаторов
+    
+    # Веса для нового алгоритма
+    NEW_WHALE_WEIGHT = 25
+    NEW_MARKET_WEIGHT = 20
+    NEW_TECHNICAL_WEIGHT = 35
+    NEW_FG_WEIGHT = 10
+    NEW_FR_WEIGHT = 10
+    
     def __init__(self, whale_tracker):
         """
         Инициализация анализатора.
@@ -199,8 +212,8 @@ class AISignalAnalyzer:
         """
         cache_key = f"price_history_{symbol}_{days}"
         
-        # Проверяем кэш (TTL: 5 минут = 300 секунд)
-        cached_data = self._get_cache(cache_key, 300)
+        # Проверяем кэш
+        cached_data = self._get_cache(cache_key, self.CACHE_TTL_PRICE_HISTORY)
         if cached_data is not None:
             return cached_data
         
@@ -248,7 +261,7 @@ class AISignalAnalyzer:
             # Получаем исторические данные
             prices = await self.get_price_history(symbol, days=1)
             
-            if not prices or len(prices) < 30:
+            if not prices or len(prices) < self.MIN_PRICE_POINTS:
                 logger.warning(f"Insufficient price data for technical indicators: {symbol}")
                 return None
             
@@ -305,8 +318,8 @@ class AISignalAnalyzer:
         """
         cache_key = "fear_greed_index"
         
-        # Проверяем кэш (TTL: 30 минут = 1800 секунд)
-        cached_data = self._get_cache(cache_key, 1800)
+        # Проверяем кэш
+        cached_data = self._get_cache(cache_key, self.CACHE_TTL_FEAR_GREED)
         if cached_data is not None:
             return cached_data
         
@@ -345,8 +358,8 @@ class AISignalAnalyzer:
         """
         cache_key = f"funding_rate_{symbol}"
         
-        # Проверяем кэш (TTL: 5 минут = 300 секунд)
-        cached_data = self._get_cache(cache_key, 300)
+        # Проверяем кэш
+        cached_data = self._get_cache(cache_key, self.CACHE_TTL_FUNDING_RATE)
         if cached_data is not None:
             return cached_data
         
@@ -432,7 +445,7 @@ class AISignalAnalyzer:
             whale_score = (
                 (whale_data["withdrawals"] - whale_data["deposits"]) 
                 / total_exchange_txs
-                * 25  # Вес 25%
+                * self.NEW_WHALE_WEIGHT
             )
         
         # Market score (максимум ±20)
@@ -508,10 +521,13 @@ class AISignalAnalyzer:
                 fr_score = -10  # Longs paying shorts - bearish
             else:
                 # Градиент в диапазоне -0.01 до 0.05
+                # Нормализуем: 0.02% это нейтрально (0 очков)
                 if rate_percent < 0.02:
-                    fr_score = (0.02 - rate_percent) / 0.03 * 5
+                    # От -0.01 до 0.02: от +10 до 0
+                    fr_score = (0.02 - rate_percent) / 0.03 * 10
                 else:
-                    fr_score = (0.02 - rate_percent) / 0.03 * 5
+                    # От 0.02 до 0.05: от 0 до -10
+                    fr_score = (0.02 - rate_percent) / 0.03 * 10
         
         # Total score
         total_score = whale_score + market_score + technical_score + fg_score + fr_score
@@ -539,6 +555,8 @@ class AISignalAnalyzer:
             confidence = "Низкая"
         
         # Расчёт силы сигнала в процентах (0-100%)
+        # Максимальный возможный score: 25+35+20+10+10 = 100
+        # Минимальный возможный score: -100
         # Нормализуем score от -100 до +100 в диапазон 0-100%
         strength_percent = min(max((total_score + 100) / 200 * 100, 0), 100)
         
@@ -741,25 +759,26 @@ class AISignalAnalyzer:
         text += "━━━━━━━━━━━━━━━━━━━━\n\n"
         
         # Breakdown сигнала
-        text += "🎯 *Breakdown сигнала:*\n"
-        text += f"├─ 🐋 Киты: {signal_data['whale_score']:+.0f}\n"
+        breakdown_lines = []
+        breakdown_lines.append(f"🐋 Киты: {signal_data['whale_score']:+.0f}")
         
         if technical_data:
-            text += f"├─ 📈 Техника: {signal_data['technical_score']:+.0f}\n"
+            breakdown_lines.append(f"📈 Техника: {signal_data['technical_score']:+.0f}")
         
-        text += f"├─ 📊 Рынок: {signal_data['market_score']:+.0f}\n"
+        breakdown_lines.append(f"📊 Рынок: {signal_data['market_score']:+.0f}")
         
         if fear_greed:
-            text += f"├─ 😱 F&G: {signal_data['fg_score']:+.0f}\n"
+            breakdown_lines.append(f"😱 F&G: {signal_data['fg_score']:+.0f}")
         
         if funding_rate:
-            text += f"└─ 💰 Funding: {signal_data['fr_score']:+.0f}\n"
-        else:
-            # Последний элемент меняется
-            text = text.rstrip('\n')
-            if text.endswith('├─'):
-                text = text[:-2] + '└─' + text[-2:]
-            text += "\n"
+            breakdown_lines.append(f"💰 Funding: {signal_data['fr_score']:+.0f}")
+        
+        text += "🎯 *Breakdown сигнала:*\n"
+        for i, line in enumerate(breakdown_lines):
+            if i == len(breakdown_lines) - 1:
+                text += f"└─ {line}\n"
+            else:
+                text += f"├─ {line}\n"
         
         text += "━━━━━━━━━━━━━━━━━━━━\n"
         text += f"*Итого: {signal_data['total_score']:+.0f} очков*\n\n"
