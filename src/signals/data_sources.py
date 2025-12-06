@@ -50,9 +50,6 @@ class DataSourceManager:
         "ETH": "ETHUSDT",
     }
     
-    # Bybit API field names
-    BYBIT_VOLUME_FIELD = "v"  # Volume field in trade data
-    
     def __init__(self):
         """Initialize data source manager."""
         self._cache = {}
@@ -246,15 +243,17 @@ class DataSourceManager:
                 "limit": 500
             }
             
-            timeout = aiohttp.ClientTimeout(total=5)
+            timeout = aiohttp.ClientTimeout(total=10)
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, params=params, timeout=timeout) as response:
                     if response.status == 200:
                         data = await response.json()
                         
-                        # Bybit V5 API structure: result.list
-                        result_data = data.get("result", {})
-                        trades = result_data.get("list", [])
+                        if data.get("retCode") != 0:
+                            logger.warning(f"Bybit trades error: {data.get('retMsg')}")
+                            return None
+                        
+                        trades = data.get("result", {}).get("list", [])
                         
                         if not trades:
                             return None
@@ -266,29 +265,30 @@ class DataSourceManager:
                         large_buys = 0
                         large_sells = 0
                         
-                        # Calculate average trade size for "large" threshold
-                        volumes = [float(t[self.BYBIT_VOLUME_FIELD]) for t in trades]
-                        avg_volume = sum(volumes) / len(volumes)
-                        large_threshold = avg_volume * 3  # 3x average is "large"
+                        # Порог для "крупной" сделки (в USD)
+                        large_threshold = 100000
                         
                         for trade in trades:
-                            qty = float(trade[self.BYBIT_VOLUME_FIELD])
-                            side = trade["S"]  # "Buy" or "Sell"
+                            price = float(trade.get("price", 0))
+                            size = float(trade.get("size", 0))
+                            side = trade.get("side", "")  # "Buy" или "Sell"
                             
-                            if side == "Sell":
-                                sell_volume += qty
-                                sell_count += 1
-                                if qty > large_threshold:
-                                    large_sells += 1
-                            else:  # "Buy"
-                                buy_volume += qty
+                            volume_usd = price * size
+                            
+                            if side == "Buy":
+                                buy_volume += size
                                 buy_count += 1
-                                if qty > large_threshold:
+                                if volume_usd >= large_threshold:
                                     large_buys += 1
+                            elif side == "Sell":
+                                sell_volume += size
+                                sell_count += 1
+                                if volume_usd >= large_threshold:
+                                    large_sells += 1
                         
                         result = {
-                            "buy_volume": round(buy_volume, 2),
-                            "sell_volume": round(sell_volume, 2),
+                            "buy_volume": round(buy_volume, 4),
+                            "sell_volume": round(sell_volume, 4),
                             "buy_count": buy_count,
                             "sell_count": sell_count,
                             "large_buys": large_buys,

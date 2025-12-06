@@ -458,6 +458,8 @@ class EthereumTracker:
             "apikey": api_key,
         }
 
+        # Apply rate limiter before Etherscan API request
+        await self._rate_limiter.acquire()
         data = await self._make_api_request(ETHERSCAN_API_URL, params=params)
         if not data or data.get("status") != "1" or not data.get("result"):
             # Log detailed error for debugging
@@ -763,6 +765,9 @@ class EthereumTracker:
             return []
 
         try:
+            # Apply rate limiter before Etherscan API request
+            await self._rate_limiter.acquire()
+            
             params = {
                 "module": "account",
                 "action": "tokentx",
