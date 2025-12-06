@@ -34,6 +34,30 @@ from whale.api_keys import get_next_api_key
 
 logger = structlog.get_logger()
 
+
+class EtherscanRateLimiter:
+    """Rate limiter для Etherscan API (max 3 req/sec)."""
+    
+    def __init__(self, calls_per_second: float = 2.5):
+        """
+        Initialize rate limiter.
+        
+        Args:
+            calls_per_second: Maximum calls per second (default 2.5 for safety margin)
+        """
+        self.min_interval = 1.0 / calls_per_second  # 400ms между запросами
+        self.last_call = 0
+        self._lock = asyncio.Lock()
+    
+    async def acquire(self):
+        """Acquire rate limit token, waiting if necessary."""
+        async with self._lock:
+            now = time.time()
+            elapsed = now - self.last_call
+            if elapsed < self.min_interval:
+                await asyncio.sleep(self.min_interval - elapsed)
+            self.last_call = time.time()
+
 # ===== API URLs =====
 # Etherscan API V2 URL with chainid=1 for Ethereum
 ETHERSCAN_API_URL = "https://api.etherscan.io/v2/api?chainid=1"
@@ -161,6 +185,7 @@ class EthereumTracker:
         self._session: Optional[aiohttp.ClientSession] = None
         self._eth_price: float = 2000.0  # Дефолтная цена ETH
         self._price_last_update: float = 0  # Время последнего обновления цены
+        self._rate_limiter = EtherscanRateLimiter(calls_per_second=2.5)  # Rate limiter for Etherscan API
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Получение HTTP сессии."""
@@ -345,6 +370,9 @@ class EthereumTracker:
             return []
 
         try:
+            # Apply rate limiter for block number request
+            await self._rate_limiter.acquire()
+            
             # Получаем последний блок
             params_block = {
                 "module": "proxy",
@@ -367,13 +395,16 @@ class EthereumTracker:
                 blocks_count=self.blocks_to_analyze,
             )
 
-            # Sequential requests with delay to avoid rate limits (3 req/sec)
+            # Sequential requests with rate limiter to avoid rate limits (2.5 req/sec)
             # Reduced from 10 to 8 addresses for performance optimization
             # Адреса отсортированы по важности (крупнейшие биржи первые)
             transactions = []
             for address in TRACKED_EXCHANGE_ADDRESSES[:8]:
                 # Get next API key for each request (rotation)
                 api_key = get_next_api_key() or self.api_key
+                
+                # Apply rate limiter before each request
+                await self._rate_limiter.acquire()
                 
                 try:
                     result = await self._fetch_address_transactions(
@@ -383,8 +414,6 @@ class EthereumTracker:
                         transactions.extend(result)
                 except Exception as e:
                     logger.debug(f"Ошибка при получении транзакций: {e}")
-                # Rate limit: 3 req/sec per key, add 0.35s delay between requests
-                await asyncio.sleep(0.35)
 
             # Удаляем дубликаты и сортируем
             return self._deduplicate_and_sort(transactions, limit)
