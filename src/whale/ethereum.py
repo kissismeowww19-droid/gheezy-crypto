@@ -36,7 +36,7 @@ logger = structlog.get_logger()
 
 
 class EtherscanRateLimiter:
-    """Rate limiter для Etherscan API (max 3 req/sec)."""
+    """Rate limiter для Etherscan API (default 2.5 req/sec for safety margin)."""
     
     def __init__(self, calls_per_second: float = 2.5):
         """
@@ -45,7 +45,7 @@ class EtherscanRateLimiter:
         Args:
             calls_per_second: Maximum calls per second (default 2.5 for safety margin)
         """
-        self.min_interval = 1.0 / calls_per_second  # 400ms между запросами
+        self.min_interval = 1.0 / calls_per_second
         self.last_call = 0
         self._lock = asyncio.Lock()
     
