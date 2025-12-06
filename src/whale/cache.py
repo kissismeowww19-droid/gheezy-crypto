@@ -27,9 +27,9 @@ class TransactionCache:
     """
     In-memory cache for transaction hashes.
     
-    Implements LRU-style cache with TTL expiration:
+    Implements FIFO cache with TTL expiration:
     - Stores txHash -> timestamp mapping
-    - Automatically removes old entries when size exceeds MAX_CACHE_SIZE
+    - Automatically removes old entries when size exceeds MAX_CACHE_SIZE (FIFO)
     - Removes expired entries (older than CACHE_TTL_SECONDS)
     """
     

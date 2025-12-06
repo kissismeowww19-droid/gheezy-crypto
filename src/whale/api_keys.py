@@ -5,10 +5,13 @@ Round-robin rotation for Etherscan V2 API keys to increase rate limits.
 Supports up to 3 API keys, providing 9 req/sec (3 keys × 3 req/sec each).
 
 Features:
-- Thread-safe key rotation
+- Round-robin key rotation (not thread-safe, use in async context)
 - Automatic fallback to single key if only one configured
 - Integration with rate limit handling
 - Retry logic for rate limit errors
+
+Note: This module uses global state and is designed for single-threaded
+async applications. For multi-threaded use, add locking mechanisms.
 """
 
 import asyncio
