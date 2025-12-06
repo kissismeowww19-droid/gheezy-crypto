@@ -301,170 +301,105 @@ class BSCTracker:
         min_value_bnb: float,
         limit: int,
     ) -> list[BSCTransaction]:
-        """
-        Получение транзакций через RPC с автоматической ротацией провайдеров.
-
-        Использует BSCProvider для выбора рабочего RPC endpoint.
-        Получает последние блоки и фильтрует крупные транзакции.
-        Использует batch requests для эффективной загрузки блоков.
-
-        Args:
-            min_value_bnb: Минимальная сумма в BNB
-            limit: Максимальное количество транзакций
-
-        Returns:
-            list[BSCTransaction]: Список транзакций
-        """
-        try:
-            # Get latest block number using provider rotation
-            block_data = await self._provider.make_request(
-                method="eth_blockNumber",
-                params=[],
-                timeout=5,
-            )
-
-            if not block_data or "result" not in block_data:
-                logger.debug("BSC: Failed to get block number")
-                return []
-
-            latest_block = int(block_data["result"], 16)
-            transactions = []
-
-            # BSC creates blocks every ~3 seconds
-            # Analyze recent blocks to capture more transactions
-            blocks_to_scan = BSC_BLOCKS_TO_ANALYZE
-
-            logger.debug(
-                "BSC: Analyzing blocks",
-                start=latest_block - blocks_to_scan + 1,
-                end=latest_block,
-                blocks_count=blocks_to_scan,
-            )
-
-            # Collect block numbers to fetch
-            block_numbers = list(
-                range(latest_block, max(latest_block - blocks_to_scan, 0), -1)
-            )
-
-            # Check cache and collect uncached block numbers
-            blocks_data = {}
-            uncached_blocks = []
-
-            for block_num in block_numbers:
-                cached_block = self._get_block_from_cache(block_num)
-                if cached_block:
-                    blocks_data[block_num] = cached_block
-                else:
-                    uncached_blocks.append(block_num)
-
-            # Fetch uncached blocks using batch request
-            if uncached_blocks:
-                logger.debug(
-                    "BSC: Fetching uncached blocks",
-                    count=len(uncached_blocks),
+        """Get transactions via RPC with simple sequential requests (no batch)."""
+        
+        # List of public RPC endpoints
+        rpc_endpoints = [
+            "https://bsc-dataseed1.binance.org",
+            "https://bsc-dataseed2.binance.org",
+            "https://bsc-dataseed3.binance.org",
+            "https://bsc-dataseed4.binance.org",
+            "https://rpc.ankr.com/bsc",
+        ]
+        
+        session = await self._get_session()
+        
+        for rpc_url in rpc_endpoints:
+            try:
+                # Get latest block number
+                response = await session.post(
+                    rpc_url,
+                    json={
+                        "jsonrpc": "2.0",
+                        "method": "eth_blockNumber",
+                        "params": [],
+                        "id": 1
+                    },
+                    timeout=aiohttp.ClientTimeout(total=5)
                 )
-
-                # Prepare batch requests
-                batch_requests = [
-                    ("eth_getBlockByNumber", [hex(num), True])
-                    for num in uncached_blocks
-                ]
-
-                # Make batch request
-                batch_response = await self._provider.make_batch_request(
-                    batch_requests,
-                    timeout=10,
-                )
-
-                if batch_response:
-                    for i, response in enumerate(batch_response):
-                        if response and "result" in response:
-                            block_data = response["result"]
-                            if block_data and "transactions" in block_data:
-                                block_num = uncached_blocks[i]
-                                blocks_data[block_num] = block_data
-                                # Cache the block
-                                self._cache_block(block_num, block_data)
                 
-                # Fallback: sequential requests if batch fails
-                if not batch_response:
-                    logger.debug("BSC: Batch failed, using sequential fallback")
-                    for block_num in uncached_blocks[:5]:  # Only 5 blocks
-                        try:
-                            block_response = await self._provider.make_request(
-                                method="eth_getBlockByNumber",
-                                params=[hex(block_num), True],
-                                timeout=3,
-                            )
-                            if block_response and "result" in block_response:
-                                block_data = block_response["result"]
-                                if block_data and "transactions" in block_data:
-                                    blocks_data[block_num] = block_data
-                                    self._cache_block(block_num, block_data)
-                        except Exception as e:
-                            logger.debug(f"BSC: Sequential block {block_num} failed: {e}")
-                        await asyncio.sleep(0.3)
-
-            # Process all blocks
-            for block_num in block_numbers:
-                block = blocks_data.get(block_num)
-
-                if not block:
+                if response.status != 200:
                     continue
-
-                block_timestamp = int(block.get("timestamp", "0x0"), 16)
-
-                for tx in block.get("transactions", []):
-                    if isinstance(tx, str):  # Only hash, not full transaction
-                        continue
-
-                    value_hex = tx.get("value", "0x0")
-                    value_wei = int(value_hex, 16)
-                    value_bnb = value_wei / 10**18
-                    value_usd = value_bnb * self._bnb_price
-
-                    # Filter by minimum value
-                    if value_bnb < min_value_bnb:
-                        continue
-
+                    
+                data = await response.json()
+                latest_block = int(data["result"], 16)
+                
+                transactions = []
+                
+                # Fetch only 3 blocks (simple, no batch)
+                for block_num in range(latest_block, latest_block - 3, -1):
                     try:
-                        timestamp = datetime.fromtimestamp(
-                            block_timestamp, tz=timezone.utc
+                        block_response = await session.post(
+                            rpc_url,
+                            json={
+                                "jsonrpc": "2.0",
+                                "method": "eth_getBlockByNumber",
+                                "params": [hex(block_num), True],
+                                "id": 1
+                            },
+                            timeout=aiohttp.ClientTimeout(total=3)
                         )
-                    except (ValueError, OSError):
-                        timestamp = datetime.now(timezone.utc)
-
-                    transactions.append(
-                        BSCTransaction(
-                            tx_hash=tx.get("hash", ""),
-                            from_address=tx.get("from", ""),
-                            to_address=tx.get("to", "") or "",
-                            value_bnb=value_bnb,
-                            value_usd=value_usd,
-                            token_symbol="BNB",
-                            timestamp=timestamp,
-                            block_number=block_num,
-                        )
-                    )
-
-                # Stop if we have enough transactions
-                if len(transactions) >= limit * TRANSACTION_BUFFER_MULTIPLIER:
-                    break
-
-            if transactions:
-                logger.debug(
-                    "BSC: Found transactions",
-                    count=len(transactions),
-                )
-
-            return self._deduplicate_and_sort(transactions, limit)
-
-        except Exception as e:
-            logger.warning(
-                "BSC RPC error",
-                error=str(e),
-            )
-            return []
+                        
+                        if block_response.status == 200:
+                            block_data = await block_response.json()
+                            block = block_data.get("result", {})
+                            
+                            if block and "transactions" in block:
+                                for tx in block["transactions"]:
+                                    value_wei = int(tx.get("value", "0x0"), 16)
+                                    value_bnb = value_wei / 10**18
+                                    
+                                    if value_bnb >= min_value_bnb:
+                                        value_usd = value_bnb * self._bnb_price
+                                        
+                                        # Parse timestamp
+                                        try:
+                                            block_timestamp = int(block.get("timestamp", "0x0"), 16)
+                                            timestamp = datetime.fromtimestamp(
+                                                block_timestamp, tz=timezone.utc
+                                            )
+                                        except (ValueError, OSError):
+                                            timestamp = datetime.now(timezone.utc)
+                                        
+                                        transactions.append(
+                                            BSCTransaction(
+                                                tx_hash=tx.get("hash", ""),
+                                                from_address=tx.get("from", ""),
+                                                to_address=tx.get("to", "") or "",
+                                                value_bnb=value_bnb,
+                                                value_usd=value_usd,
+                                                token_symbol="BNB",
+                                                timestamp=timestamp,
+                                                block_number=block_num,
+                                            )
+                                        )
+                        
+                        await asyncio.sleep(0.3)  # Small delay between blocks
+                        
+                    except Exception as e:
+                        logger.debug(f"BSC: Failed to fetch block {block_num}: {e}")
+                        continue
+                
+                if transactions:
+                    logger.info(f"BSC: Got {len(transactions)} transactions via {rpc_url}")
+                    return self._deduplicate_and_sort(transactions, limit)
+                    
+            except Exception as e:
+                logger.debug(f"BSC RPC {rpc_url} failed: {e}")
+                continue
+        
+        logger.warning("BSC: All RPC endpoints failed")
+        return []
 
     def _get_block_from_cache(self, block_num: int) -> Optional[dict]:
         """

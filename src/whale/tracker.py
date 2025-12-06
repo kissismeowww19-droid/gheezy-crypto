@@ -87,15 +87,15 @@ logger = structlog.get_logger()
 # Network priority order (fastest first)
 NETWORK_PRIORITY = ["btc", "avax", "bsc", "eth", "arb", "polygon", "ton"]
 
-# Timeouts per network
+# Timeouts per network (optimized for hybrid parallel approach)
 NETWORK_TIMEOUTS = {
-    "btc": 8,
-    "avax": 10,
-    "bsc": 10,
-    "eth": 12,
+    "btc": 5,
+    "avax": 5,
+    "bsc": 8,
+    "eth": 10,
     "arb": 10,
-    "polygon": 10,
-    "ton": 12,
+    "polygon": 8,
+    "ton": 8,
 }
 
 
@@ -817,48 +817,36 @@ class WhaleTracker:
         Returns:
             list[WhaleTransaction]: Список всех транзакций (без дубликатов)
         """
-        # Sequential processing with priorities and timeouts
+        # Hybrid parallel approach: run ALL networks in parallel with individual timeouts
         all_transactions = []
-
-        # Map network names to their corresponding methods
-        network_methods = {
-            "btc": self.get_bitcoin_transactions,
-            "avax": self.get_avalanche_transactions,
-            "bsc": self.get_bsc_transactions,
-            "eth": self.get_ethereum_transactions,
-            "arb": self.get_arbitrum_transactions,
-            "polygon": self.get_polygon_transactions,
-            "ton": self.get_ton_transactions,
-        }
-
-        for network in NETWORK_PRIORITY:
+        
+        # Helper to fetch with timeout
+        async def fetch_with_timeout(name: str, coro, timeout: int):
             try:
-                # Get the method for this network
-                method = network_methods.get(network)
-                if not method:
-                    continue
-
-                # Execute with timeout
-                result = await asyncio.wait_for(
-                    method(limit=limit),
-                    timeout=NETWORK_TIMEOUTS[network]
-                )
-
-                if isinstance(result, list):
-                    all_transactions.extend(result)
-
+                return await asyncio.wait_for(coro, timeout=timeout)
             except asyncio.TimeoutError:
-                logger.warning(f"{network.upper()} timeout, skipping")
+                logger.warning(f"{name} timeout, skipping")
+                return []
             except Exception as e:
-                logger.error(
-                    "Ошибка получения транзакций",
-                    network=network,
-                    error=str(e),
-                )
-
-            # Pause between networks to avoid rate limits
-            if network != "ton":
-                await asyncio.sleep(0.3)
+                logger.error(f"{name} error: {e}")
+                return []
+        
+        # All networks in parallel!
+        results = await asyncio.gather(
+            fetch_with_timeout("BTC", self.get_bitcoin_transactions(limit), NETWORK_TIMEOUTS["btc"]),
+            fetch_with_timeout("AVAX", self.get_avalanche_transactions(limit), NETWORK_TIMEOUTS["avax"]),
+            fetch_with_timeout("BSC", self.get_bsc_transactions(limit), NETWORK_TIMEOUTS["bsc"]),
+            fetch_with_timeout("ETH", self.get_ethereum_transactions(limit), NETWORK_TIMEOUTS["eth"]),
+            fetch_with_timeout("ARB", self.get_arbitrum_transactions(limit), NETWORK_TIMEOUTS["arb"]),
+            fetch_with_timeout("POLYGON", self.get_polygon_transactions(limit), NETWORK_TIMEOUTS["polygon"]),
+            fetch_with_timeout("TON", self.get_ton_transactions(limit), NETWORK_TIMEOUTS["ton"]),
+            return_exceptions=True
+        )
+        
+        # Collect results
+        for result in results:
+            if isinstance(result, list):
+                all_transactions.extend(result)
 
         # Фильтруем дубликаты с помощью кеша
         unique_transactions = []

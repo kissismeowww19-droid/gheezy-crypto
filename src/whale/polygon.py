@@ -234,20 +234,10 @@ class PolygonTracker:
         """
         await self._update_matic_price()
 
-        # Skip Etherscan V2 (causes rate limit issues with ETH/ARB)
-        # Go directly to Polygonscan API
-        logger.debug("Polygon: Getting data via Polygonscan API")
-        transactions = await self._get_from_polygonscan(limit)
-        if transactions:
-            logger.info(
-                "Polygon: Данные получены через Polygonscan",
-                count=len(transactions),
-            )
-            return transactions
-
-        # Fallback to RPC
-        logger.debug("Polygon: Fallback to RPC")
-        transactions = await self._get_from_rpc(limit)
+        # Skip Etherscan V2 and Polygonscan (rate limits)
+        # Go directly to RPC
+        logger.debug("Polygon: Getting data via RPC")
+        transactions = await self._get_from_rpc(self.min_value_usd / self._matic_price, limit)
         if transactions:
             logger.info(
                 "Polygon: Данные получены через RPC",
@@ -405,12 +395,13 @@ class PolygonTracker:
 
     async def _get_from_rpc(
         self,
+        min_value_matic: float,
         limit: int,
     ) -> list[PolygonTransaction]:
         """Резервное получение через публичные RPC ноды."""
         for rpc_url in PUBLIC_POLYGON_RPC_URLS:
             try:
-                transactions = await self._get_from_single_rpc(rpc_url, limit)
+                transactions = await self._get_from_single_rpc(rpc_url, min_value_matic, limit)
                 if transactions:
                     return transactions
             except Exception as e:
@@ -422,6 +413,7 @@ class PolygonTracker:
     async def _get_from_single_rpc(
         self,
         rpc_url: str,
+        min_value_matic: float,
         limit: int,
     ) -> list[PolygonTransaction]:
         """Получение транзакций через конкретную RPC ноду."""
@@ -439,8 +431,8 @@ class PolygonTracker:
         latest_block = int(data["result"], 16)
         transactions = []
 
-        # Polygon блоки очень быстрые, смотрим меньше блоков для надежности
-        for block_num in range(latest_block, max(latest_block - 5, 0), -1):
+        # Polygon блоки очень быстрые, смотрим только 3 блока для надежности
+        for block_num in range(latest_block, max(latest_block - 3, 0), -1):
             block_request = {
                 "jsonrpc": "2.0",
                 "method": "eth_getBlockByNumber",
@@ -467,7 +459,7 @@ class PolygonTracker:
                 value_matic = value_wei / 10**18
                 value_usd = value_matic * self._matic_price
 
-                if value_matic < self.min_value_matic:
+                if value_matic < min_value_matic:
                     continue
 
                 try:
