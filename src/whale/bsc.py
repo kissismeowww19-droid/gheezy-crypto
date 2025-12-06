@@ -31,7 +31,7 @@ from tenacity import (
 
 from config import settings
 from whale.known_wallets import get_bsc_wallet_label
-from whale.api_keys import get_next_api_key, make_request_with_rate_limit
+from whale.api_keys import get_next_api_key
 
 logger = structlog.get_logger()
 
@@ -788,7 +788,7 @@ class BSCTracker:
                 "apikey": self.api_key,
             }
 
-            data = await self._make_api_request(BSCSCAN_API_URL, params=params)
+            data = await self._make_api_request(ETHERSCAN_V2_BSC_URL, params=params)
             if not data or data.get("status") != "1" or not data.get("result"):
                 return []
 

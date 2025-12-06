@@ -14,7 +14,7 @@ from typing import Optional
 import structlog
 
 # Import API key rotation from centralized module
-from whale.api_keys import get_next_api_key, init_api_keys
+from whale.api_keys import get_next_api_key
 
 logger = structlog.get_logger()
 
