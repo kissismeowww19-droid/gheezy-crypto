@@ -293,10 +293,10 @@ async def test_batch_request_success(bsc_provider, mock_aiohttp_session):
 
 @pytest.mark.asyncio
 async def test_batch_request_empty_list(bsc_provider):
-    """Test batch request with empty list."""
+    """Test batch request with empty list returns empty list."""
     result = await bsc_provider.make_batch_request([])
-    # Empty batch should return empty list or None
-    assert result is None or result == []
+    # Empty batch should return empty list
+    assert result == []
 
 
 if __name__ == "__main__":

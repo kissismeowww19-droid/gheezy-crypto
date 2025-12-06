@@ -336,6 +336,11 @@ class BSCProvider:
         Returns:
             list: List of JSON-RPC responses, or None if all attempts fail
         """
+        # Handle empty request list
+        if not requests:
+            logger.debug("BSC: Empty batch request, skipping")
+            return []
+        
         # Build batch request
         batch_request = [
             {
