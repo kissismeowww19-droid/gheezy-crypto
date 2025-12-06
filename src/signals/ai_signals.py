@@ -84,8 +84,8 @@ class AISignalAnalyzer:
             "ETH": "ethereum",
         }
         
-        # Маппинг для Binance Futures
-        self.binance_mapping = {
+        # Маппинг для Bybit
+        self.bybit_mapping = {
             "BTC": "BTCUSDT",
             "ETH": "ETHUSDT",
         }
@@ -504,8 +504,8 @@ class AISignalAnalyzer:
     
     async def get_funding_rate(self, symbol: str) -> Optional[Dict]:
         """
-        Получение Funding Rate с Binance.
-        API: https://fapi.binance.com/fapi/v1/fundingRate?symbol=BTCUSDT&limit=1
+        Получение Funding Rate с Bybit.
+        API: https://api.bybit.com/v5/market/funding/history?category=linear&symbol=BTCUSDT&limit=1
         
         Returns:
             Dict: {"rate": 0.0001, "rate_percent": 0.01}
@@ -518,14 +518,15 @@ class AISignalAnalyzer:
             return cached_data
         
         try:
-            binance_symbol = self.binance_mapping.get(symbol)
-            if not binance_symbol:
+            bybit_symbol = self.bybit_mapping.get(symbol)
+            if not bybit_symbol:
                 logger.warning(f"Unknown symbol for funding rate: {symbol}")
                 return None
             
-            url = "https://fapi.binance.com/fapi/v1/fundingRate"
+            url = "https://api.bybit.com/v5/market/funding/history"
             params = {
-                "symbol": binance_symbol,
+                "category": "linear",
+                "symbol": bybit_symbol,
                 "limit": 1
             }
             
@@ -534,9 +535,12 @@ class AISignalAnalyzer:
                 async with session.get(url, params=params, timeout=timeout) as response:
                     if response.status == 200:
                         data = await response.json()
+                        result_data = data.get("result", {})
+                        funding_list = result_data.get("list", [])
                         
-                        if data and len(data) > 0:
-                            funding_rate = float(data[0].get("fundingRate", 0))
+                        if funding_list and len(funding_list) > 0:
+                            latest_funding = funding_list[0]
+                            funding_rate = float(latest_funding.get("fundingRate", 0))
                             rate_percent = funding_rate * 100
                             
                             result = {
@@ -917,6 +921,122 @@ class AISignalAnalyzer:
             # Gradient
             return (50 - fg_value) / 5
     
+    def count_consensus(self, scores: Dict) -> Dict:
+        """
+        Подсчёт консенсуса факторов.
+        
+        Args:
+            scores: Dictionary containing all factor scores
+        
+        Returns:
+            Dict: {
+                "bullish_count": 7,
+                "bearish_count": 2,
+                "neutral_count": 1,
+                "consensus": "bullish"
+            }
+        """
+        bullish = 0
+        bearish = 0
+        neutral = 0
+        
+        for key, value in scores.items():
+            if key.endswith("_score"):
+                if value > 1:
+                    bullish += 1
+                elif value < -1:
+                    bearish += 1
+                else:
+                    neutral += 1
+        
+        if bullish > bearish:
+            consensus = "bullish"
+        elif bearish > bullish:
+            consensus = "bearish"
+        else:
+            consensus = "neutral"
+        
+        return {
+            "bullish_count": bullish,
+            "bearish_count": bearish,
+            "neutral_count": neutral,
+            "consensus": consensus
+        }
+    
+    def calculate_probability(self, 
+        total_score: float,
+        data_sources_count: int,
+        consensus_count: int,
+        total_factors: int = 10
+    ) -> Dict:
+        """
+        Расчёт вероятности исполнения сигнала.
+        
+        Args:
+            total_score: Итоговый score (-100 to +100)
+            data_sources_count: Сколько источников данных доступно
+            consensus_count: Сколько факторов указывают в одном направлении
+            total_factors: Всего факторов (10)
+        
+        Returns:
+            Dict: {
+                "probability": 72,  # Вероятность в %
+                "direction": "up",  # up/down
+                "confidence": "high",  # high/medium/low
+                "data_quality": 0.8  # Качество данных (0-1)
+            }
+        
+        Формула:
+        1. Base probability = 50% (нейтральный рынок)
+        2. Score adjustment = total_score * 0.3 (макс ±30%)
+        3. Data quality bonus = (sources/10) * 10% (макс +10%)
+        4. Consensus bonus = (consensus/10) * 10% (макс +10%)
+        
+        Max probability = 50 + 30 + 10 + 10 = 100%
+        Min probability = 50 - 30 = 20%
+        """
+        # Base probability
+        base = 50.0
+        
+        # Score adjustment (±30%)
+        score_adj = (total_score / 100) * 30
+        
+        # Data quality (0-10%)
+        data_quality = data_sources_count / 10
+        data_bonus = data_quality * 10
+        
+        # Consensus bonus (0-10%)
+        consensus_ratio = consensus_count / total_factors
+        consensus_bonus = consensus_ratio * 10
+        
+        # Direction and probability calculation
+        if total_score > 0:
+            direction = "up"
+            # For bullish: higher score = higher probability of going up
+            probability = base + abs(score_adj) + data_bonus + consensus_bonus
+        else:
+            direction = "down"
+            # For bearish: more negative score = higher probability of going down
+            probability = base + abs(score_adj) + data_bonus + consensus_bonus
+        
+        # Clamp to 20-95% (never 100% certain)
+        probability = max(20, min(95, probability))
+        
+        # Confidence level
+        if probability >= 75 or probability <= 25:
+            confidence = "high"
+        elif probability >= 60 or probability <= 40:
+            confidence = "medium"
+        else:
+            confidence = "low"
+        
+        return {
+            "probability": round(probability),
+            "direction": direction,
+            "confidence": confidence,
+            "data_quality": round(data_quality, 2)
+        }
+    
     def calculate_signal(self, whale_data: Dict, market_data: Dict, technical_data: Optional[Dict] = None, 
                         fear_greed: Optional[Dict] = None, funding_rate: Optional[Dict] = None,
                         order_book: Optional[Dict] = None, trades: Optional[Dict] = None,
@@ -990,6 +1110,43 @@ class AISignalAnalyzer:
             sentiment_score * self.SENTIMENT_WEIGHT
         ) * self.SCORE_SCALE_FACTOR  # Scale to -100 to +100
         
+        # Count consensus
+        all_scores = {
+            "whale_score": whale_score,
+            "trend_score": trend_score,
+            "momentum_score": momentum_score,
+            "volatility_score": volatility_score,
+            "volume_score": volume_score,
+            "market_score": market_score,
+            "orderbook_score": orderbook_score,
+            "derivatives_score": derivatives_score,
+            "onchain_score": onchain_score,
+            "sentiment_score": sentiment_score,
+        }
+        consensus_data = self.count_consensus(all_scores)
+        
+        # Count available data sources
+        data_sources_available = sum([
+            whale_data is not None and whale_data.get("transaction_count", 0) > 0,
+            market_data is not None,
+            technical_data is not None,
+            fear_greed is not None,
+            funding_rate is not None,
+            order_book is not None,
+            trades is not None,
+            futures_data is not None,
+            onchain_data is not None,
+            exchange_flows is not None,
+        ])
+        
+        # Calculate probability
+        probability_data = self.calculate_probability(
+            total_score=total_score,
+            data_sources_count=data_sources_available,
+            consensus_count=consensus_data["bullish_count"] if total_score > 0 else consensus_data["bearish_count"],
+            total_factors=10
+        )
+        
         # Determine direction and strength
         if total_score > 20:
             direction = "📈 ВВЕРХ"
@@ -1031,6 +1188,17 @@ class AISignalAnalyzer:
             "derivatives_score": round(derivatives_score, 2),
             "onchain_score": round(onchain_score, 2),
             "sentiment_score": round(sentiment_score, 2),
+            # Add probability data
+            "probability": probability_data["probability"],
+            "probability_direction": probability_data["direction"],
+            "probability_confidence": probability_data["confidence"],
+            "data_quality": probability_data["data_quality"],
+            # Add consensus data
+            "bullish_count": consensus_data["bullish_count"],
+            "bearish_count": consensus_data["bearish_count"],
+            "neutral_count": consensus_data["neutral_count"],
+            "consensus": consensus_data["consensus"],
+            "data_sources_count": data_sources_available,
         }
     
     def format_signal_message(
@@ -1101,9 +1269,28 @@ class AISignalAnalyzer:
         
         # Формируем сообщение
         text = f"🤖 *AI СИГНАЛ: {symbol}*\n\n"
-        text += f"⏰ Прогноз на 1 час: {signal_data['direction']}\n"
-        text += f"💪 Сила сигнала: {signal_data['strength_percent']}%\n"
-        text += f"📊 Уверенность: {signal_data['confidence']}\n\n"
+        
+        # Determine direction emoji
+        direction_emoji = "📈" if signal_data['probability_direction'] == "up" else "📉"
+        direction_text = "ВВЕРХ" if signal_data['probability_direction'] == "up" else "ВНИЗ"
+        
+        text += f"⏰ Прогноз на 1 час: {direction_emoji} {direction_text}\n"
+        text += f"🎯 Вероятность: {signal_data['probability']}%\n"
+        
+        # Map confidence
+        confidence_map = {
+            "high": "Высокая",
+            "medium": "Средняя",
+            "low": "Низкая"
+        }
+        confidence_text = confidence_map.get(signal_data['probability_confidence'], signal_data['probability_confidence'])
+        text += f"📊 Уверенность: {confidence_text}\n"
+        
+        # Add consensus information
+        consensus_count = signal_data.get('bullish_count', 0) if signal_data['probability_direction'] == "up" else signal_data.get('bearish_count', 0)
+        consensus_text = "бычьи" if signal_data['probability_direction'] == "up" else "медвежьи"
+        text += f"✅ Консенсус: {consensus_count}/10 факторов {consensus_text}\n"
+        text += f"📡 Данные: {signal_data.get('data_sources_count', 0)}/10 источников\n\n"
         text += "━━━━━━━━━━━━━━━━━━━━\n\n"
         
         # Анализ китов
@@ -1278,9 +1465,22 @@ class AISignalAnalyzer:
         text += f"└─ 😱 Sentiment ({self.SENTIMENT_WEIGHT:.0%}): {signal_data['sentiment_score']:+.1f}\n\n"
         
         text += "━━━━━━━━━━━━━━━━━━━━\n"
-        text += f"*📊 ИТОГО: {signal_data['total_score']:+.1f} / 100 очков*\n"
-        text += f"*💪 Сила сигнала: {signal_data['strength_percent']}%*\n\n"
+        text += f"*📊 ИТОГО: {signal_data['total_score']:+.1f} / 100 очков*\n\n"
         text += "━━━━━━━━━━━━━━━━━━━━\n\n"
+        
+        # ИТОГ с вероятностями
+        text += "🎯 *ИТОГ:*\n"
+        if signal_data['probability_direction'] == "up":
+            prob_up = signal_data['probability']
+            prob_down = 100 - prob_up
+        else:
+            prob_down = signal_data['probability']
+            prob_up = 100 - prob_down
+        
+        text += f"├─ Вероятность роста: {prob_up}%\n"
+        text += f"├─ Вероятность падения: {prob_down}%\n"
+        text += f"├─ Качество данных: {int(signal_data['data_quality'] * 100)}%\n"
+        text += f"└─ Консенсус факторов: {signal_data.get('bullish_count', 0)}/{signal_data.get('bearish_count', 0)}/{signal_data.get('neutral_count', 0)} (↑/↓/→)\n\n"
         
         # Предупреждение
         text += "⚠️ _Не является финансовым советом.\n"
@@ -1313,7 +1513,7 @@ class AISignalAnalyzer:
             )
         
         try:
-            binance_symbol = self.binance_mapping.get(symbol, f"{symbol}USDT")
+            bybit_symbol = self.bybit_mapping.get(symbol, f"{symbol}USDT")
             
             # Gather all data sources in parallel
             logger.info(f"Gathering all data sources for {symbol}...")
@@ -1325,7 +1525,7 @@ class AISignalAnalyzer:
             
             # Gather external data sources
             external_data_task = self.data_source_manager.gather_all_data(
-                self.whale_tracker, symbol, binance_symbol
+                self.whale_tracker, symbol, bybit_symbol
             )
             
             # Wait for all tasks

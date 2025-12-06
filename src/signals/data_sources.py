@@ -5,8 +5,8 @@ Data Sources for AI Signals.
 1. WhaleTracker (existing)
 2. CoinGecko market_chart (existing)
 3. CryptoCompare OHLCV
-4. Binance Spot (Order Book + Trades)
-5. Binance Futures (OI + Long/Short)
+4. Bybit Spot (Order Book + Trades)
+5. Bybit Futures (OI + Long/Short)
 6. Alternative.me Fear & Greed (existing)
 7. Blockchain.info On-Chain
 8. Exchange Flows from WhaleTracker
@@ -38,11 +38,20 @@ class DataSourceManager:
     
     # Rate limits (requests per minute)
     RATE_LIMITS = {
-        "binance": 1200,
+        "bybit": 600,
         "coingecko": 10,
         "cryptocompare": 100,
         "blockchain_info": 30,
     }
+    
+    # Bybit symbol mapping
+    BYBIT_MAPPING = {
+        "BTC": "BTCUSDT",
+        "ETH": "ETHUSDT",
+    }
+    
+    # Bybit API field names
+    BYBIT_VOLUME_FIELD = "v"  # Volume field in trade data
     
     def __init__(self):
         """Initialize data source manager."""
@@ -123,8 +132,8 @@ class DataSourceManager:
     
     async def get_order_book_analysis(self, symbol: str) -> Optional[Dict]:
         """
-        Analyze Order Book from Binance.
-        API: https://api.binance.com/api/v3/depth
+        Analyze Order Book from Bybit.
+        API: https://api.bybit.com/v5/market/orderbook?category=spot&symbol=BTCUSDT&limit=50
         
         Args:
             symbol: BTCUSDT, ETHUSDT, etc.
@@ -135,8 +144,10 @@ class DataSourceManager:
                 "ask_volume": 120.3,
                 "imbalance": 0.11,
                 "spread": 0.01,
-                "support_level": 97500,
-                "resistance_level": 98500
+                "top_bid": 97500,
+                "top_ask": 97510,
+                "support_level": 97000,
+                "resistance_level": 98000
             }
         """
         cache_key = f"order_book_{symbol}"
@@ -145,10 +156,11 @@ class DataSourceManager:
             return cached_data
         
         try:
-            url = "https://api.binance.com/api/v3/depth"
+            url = "https://api.bybit.com/v5/market/orderbook"
             params = {
+                "category": "spot",
                 "symbol": symbol,
-                "limit": 100
+                "limit": 50
             }
             
             timeout = aiohttp.ClientTimeout(total=5)
@@ -157,13 +169,15 @@ class DataSourceManager:
                     if response.status == 200:
                         data = await response.json()
                         
-                        bids = data.get("bids", [])
-                        asks = data.get("asks", [])
+                        # Bybit V5 API structure: result.b (bids) and result.a (asks)
+                        result_data = data.get("result", {})
+                        bids = result_data.get("b", [])
+                        asks = result_data.get("a", [])
                         
                         if not bids or not asks:
                             return None
                         
-                        # Calculate volumes
+                        # Calculate volumes (Bybit format: [price, quantity])
                         bid_volume = sum(float(b[1]) for b in bids)
                         ask_volume = sum(float(a[1]) for a in asks)
                         
@@ -172,19 +186,21 @@ class DataSourceManager:
                         imbalance = (bid_volume - ask_volume) / total_volume if total_volume > 0 else 0
                         
                         # Calculate spread
-                        best_bid = float(bids[0][0])
-                        best_ask = float(asks[0][0])
-                        spread = ((best_ask - best_bid) / best_bid) * 100
+                        top_bid = float(bids[0][0])
+                        top_ask = float(asks[0][0])
+                        spread = ((top_ask - top_bid) / top_bid) * 100
                         
                         # Find support and resistance levels (weighted by volume)
-                        support_level = best_bid
-                        resistance_level = best_ask
+                        support_level = top_bid
+                        resistance_level = top_ask
                         
                         result = {
                             "bid_volume": round(bid_volume, 2),
                             "ask_volume": round(ask_volume, 2),
                             "imbalance": round(imbalance, 4),
                             "spread": round(spread, 4),
+                            "top_bid": top_bid,
+                            "top_ask": top_ask,
                             "support_level": support_level,
                             "resistance_level": resistance_level
                         }
@@ -201,8 +217,8 @@ class DataSourceManager:
     
     async def get_recent_trades_analysis(self, symbol: str) -> Optional[Dict]:
         """
-        Analyze recent trades from Binance.
-        API: https://api.binance.com/api/v3/trades
+        Analyze recent trades from Bybit.
+        API: https://api.bybit.com/v5/market/recent-trade?category=spot&symbol=BTCUSDT&limit=500
         
         Args:
             symbol: BTCUSDT, ETHUSDT, etc.
@@ -223,8 +239,9 @@ class DataSourceManager:
             return cached_data
         
         try:
-            url = "https://api.binance.com/api/v3/trades"
+            url = "https://api.bybit.com/v5/market/recent-trade"
             params = {
+                "category": "spot",
                 "symbol": symbol,
                 "limit": 500
             }
@@ -233,7 +250,11 @@ class DataSourceManager:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, params=params, timeout=timeout) as response:
                     if response.status == 200:
-                        trades = await response.json()
+                        data = await response.json()
+                        
+                        # Bybit V5 API structure: result.list
+                        result_data = data.get("result", {})
+                        trades = result_data.get("list", [])
                         
                         if not trades:
                             return None
@@ -246,22 +267,20 @@ class DataSourceManager:
                         large_sells = 0
                         
                         # Calculate average trade size for "large" threshold
-                        volumes = [float(t["qty"]) for t in trades]
+                        volumes = [float(t[self.BYBIT_VOLUME_FIELD]) for t in trades]
                         avg_volume = sum(volumes) / len(volumes)
                         large_threshold = avg_volume * 3  # 3x average is "large"
                         
                         for trade in trades:
-                            qty = float(trade["qty"])
-                            is_buyer_maker = trade["isBuyerMaker"]
+                            qty = float(trade[self.BYBIT_VOLUME_FIELD])
+                            side = trade["S"]  # "Buy" or "Sell"
                             
-                            if is_buyer_maker:
-                                # Buyer is maker = sell order filled = sell
+                            if side == "Sell":
                                 sell_volume += qty
                                 sell_count += 1
                                 if qty > large_threshold:
                                     large_sells += 1
-                            else:
-                                # Buyer is taker = buy order filled = buy
+                            else:  # "Buy"
                                 buy_volume += qty
                                 buy_count += 1
                                 if qty > large_threshold:
@@ -288,20 +307,21 @@ class DataSourceManager:
     
     async def get_futures_data(self, symbol: str) -> Optional[Dict]:
         """
-        Get futures data from Binance.
+        Get futures data from Bybit.
         APIs:
-        - Open Interest: https://fapi.binance.com/fapi/v1/openInterest
-        - Long/Short Ratio: https://fapi.binance.com/futures/data/globalLongShortAccountRatio
+        - Open Interest: https://api.bybit.com/v5/market/open-interest?category=linear&symbol=BTCUSDT&intervalTime=1h
+        - Long/Short Ratio: https://api.bybit.com/v5/market/account-ratio?category=linear&symbol=BTCUSDT&period=1h
         
         Args:
             symbol: BTCUSDT, ETHUSDT, etc.
             
         Returns:
             Dict: {
-                "open_interest": 4500000000,
+                "open_interest": 450000000,
                 "open_interest_change": 2.5,
-                "long_short_ratio": 1.25,
-                "top_trader_long_ratio": 55.2
+                "long_ratio": 55.2,
+                "short_ratio": 44.8,
+                "long_short_ratio": 1.23
             }
         """
         cache_key = f"futures_{symbol}"
@@ -311,12 +331,17 @@ class DataSourceManager:
         
         try:
             # Get Open Interest
-            oi_url = "https://fapi.binance.com/fapi/v1/openInterest"
-            oi_params = {"symbol": symbol}
+            oi_url = "https://api.bybit.com/v5/market/open-interest"
+            oi_params = {
+                "category": "linear",
+                "symbol": symbol,
+                "intervalTime": "1h"
+            }
             
             # Get Long/Short Ratio
-            ls_url = "https://fapi.binance.com/futures/data/globalLongShortAccountRatio"
+            ls_url = "https://api.bybit.com/v5/market/account-ratio"
             ls_params = {
+                "category": "linear",
                 "symbol": symbol,
                 "period": "1h",
                 "limit": 2
@@ -335,9 +360,26 @@ class DataSourceManager:
                 # Process Open Interest
                 if isinstance(oi_response, aiohttp.ClientResponse) and oi_response.status == 200:
                     oi_data = await oi_response.json()
-                    oi_value = float(oi_data.get("openInterest", 0))
-                    result["open_interest"] = oi_value
-                    result["open_interest_change"] = 0.0  # Would need historical data
+                    oi_result = oi_data.get("result", {})
+                    oi_list = oi_result.get("list", [])
+                    if oi_list and len(oi_list) > 0:
+                        latest_oi = oi_list[0]
+                        oi_value = float(latest_oi.get("openInterest", 0))
+                        result["open_interest"] = oi_value
+                        
+                        # Calculate change if we have multiple data points
+                        if len(oi_list) > 1:
+                            prev_oi = float(oi_list[1].get("openInterest", 0))
+                            if prev_oi > 0:
+                                oi_change = ((oi_value - prev_oi) / prev_oi) * 100
+                                result["open_interest_change"] = round(oi_change, 2)
+                            else:
+                                result["open_interest_change"] = 0.0
+                        else:
+                            result["open_interest_change"] = 0.0
+                    else:
+                        result["open_interest"] = 0.0
+                        result["open_interest_change"] = 0.0
                 else:
                     logger.warning(f"Failed to fetch OI for {symbol}")
                     result["open_interest"] = 0.0
@@ -346,31 +388,216 @@ class DataSourceManager:
                 # Process Long/Short Ratio
                 if isinstance(ls_response, aiohttp.ClientResponse) and ls_response.status == 200:
                     ls_data = await ls_response.json()
-                    if ls_data and len(ls_data) > 0:
-                        latest_ratio_data = ls_data[0]
-                        long_ratio = float(latest_ratio_data.get("longAccount", 0.5))
-                        short_ratio = float(latest_ratio_data.get("shortAccount", 0.5))
+                    ls_result = ls_data.get("result", {})
+                    ls_list = ls_result.get("list", [])
+                    if ls_list and len(ls_list) > 0:
+                        latest_ratio_data = ls_list[0]
+                        # Bybit returns buyRatio and sellRatio
+                        long_ratio = float(latest_ratio_data.get("buyRatio", 0.5))
+                        short_ratio = float(latest_ratio_data.get("sellRatio", 0.5))
                         
                         if short_ratio > 0:
                             ls_ratio = long_ratio / short_ratio
                         else:
                             ls_ratio = 1.0
                         
+                        result["long_ratio"] = round(long_ratio * 100, 1)
+                        result["short_ratio"] = round(short_ratio * 100, 1)
                         result["long_short_ratio"] = round(ls_ratio, 2)
-                        result["top_trader_long_ratio"] = round(long_ratio * 100, 1)
                     else:
+                        result["long_ratio"] = 50.0
+                        result["short_ratio"] = 50.0
                         result["long_short_ratio"] = 1.0
-                        result["top_trader_long_ratio"] = 50.0
                 else:
                     logger.warning(f"Failed to fetch L/S ratio for {symbol}")
+                    result["long_ratio"] = 50.0
+                    result["short_ratio"] = 50.0
                     result["long_short_ratio"] = 1.0
-                    result["top_trader_long_ratio"] = 50.0
                 
                 self._set_cache(cache_key, result)
                 logger.info(f"Fetched futures data for {symbol}")
                 return result
         except Exception as e:
             logger.error(f"Error getting futures data for {symbol}: {e}")
+            return None
+    
+    async def get_open_interest(self, symbol: str) -> Optional[Dict]:
+        """
+        Get Open Interest from Bybit.
+        API: https://api.bybit.com/v5/market/open-interest?category=linear&symbol=BTCUSDT&intervalTime=1h
+        
+        Args:
+            symbol: BTCUSDT, ETHUSDT, etc.
+            
+        Returns:
+            Dict: {
+                "open_interest": 450000000,  # in USD
+                "open_interest_change": 2.5  # % change
+            }
+        """
+        cache_key = f"open_interest_{symbol}"
+        cached_data = self._get_cache(cache_key, self.CACHE_TTL["futures"])
+        if cached_data is not None:
+            return cached_data
+        
+        try:
+            url = "https://api.bybit.com/v5/market/open-interest"
+            params = {
+                "category": "linear",
+                "symbol": symbol,
+                "intervalTime": "1h"
+            }
+            
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params, timeout=timeout) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        result_data = data.get("result", {})
+                        oi_list = result_data.get("list", [])
+                        
+                        if oi_list and len(oi_list) > 0:
+                            latest_oi = oi_list[0]
+                            oi_value = float(latest_oi.get("openInterest", 0))
+                            
+                            # Calculate change if we have multiple data points
+                            oi_change = 0.0
+                            if len(oi_list) > 1:
+                                prev_oi = float(oi_list[1].get("openInterest", 0))
+                                if prev_oi > 0:
+                                    oi_change = ((oi_value - prev_oi) / prev_oi) * 100
+                            
+                            result = {
+                                "open_interest": oi_value,
+                                "open_interest_change": round(oi_change, 2)
+                            }
+                            
+                            self._set_cache(cache_key, result)
+                            logger.info(f"Fetched open interest for {symbol}")
+                            return result
+                    
+                    logger.warning(f"Failed to fetch open interest for {symbol}: {response.status}")
+                    return None
+        except Exception as e:
+            logger.error(f"Error getting open interest for {symbol}: {e}")
+            return None
+    
+    async def get_funding_rate(self, symbol: str) -> Optional[Dict]:
+        """
+        Get Funding Rate from Bybit.
+        API: https://api.bybit.com/v5/market/funding/history?category=linear&symbol=BTCUSDT&limit=1
+        
+        Args:
+            symbol: BTCUSDT, ETHUSDT, etc.
+            
+        Returns:
+            Dict: {
+                "rate": 0.0001,
+                "rate_percent": 0.01
+            }
+        """
+        cache_key = f"funding_rate_{symbol}"
+        cached_data = self._get_cache(cache_key, self.CACHE_TTL["futures"])
+        if cached_data is not None:
+            return cached_data
+        
+        try:
+            url = "https://api.bybit.com/v5/market/funding/history"
+            params = {
+                "category": "linear",
+                "symbol": symbol,
+                "limit": 1
+            }
+            
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params, timeout=timeout) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        result_data = data.get("result", {})
+                        funding_list = result_data.get("list", [])
+                        
+                        if funding_list and len(funding_list) > 0:
+                            latest_funding = funding_list[0]
+                            funding_rate = float(latest_funding.get("fundingRate", 0))
+                            rate_percent = funding_rate * 100
+                            
+                            result = {
+                                "rate": funding_rate,
+                                "rate_percent": rate_percent
+                            }
+                            
+                            self._set_cache(cache_key, result)
+                            logger.info(f"Fetched funding rate for {symbol}: {rate_percent:.4f}%")
+                            return result
+                    
+                    logger.warning(f"Failed to fetch funding rate for {symbol}: {response.status}")
+                    return None
+        except Exception as e:
+            logger.error(f"Error getting funding rate for {symbol}: {e}")
+            return None
+    
+    async def get_long_short_ratio(self, symbol: str) -> Optional[Dict]:
+        """
+        Get Long/Short Ratio from Bybit.
+        API: https://api.bybit.com/v5/market/account-ratio?category=linear&symbol=BTCUSDT&period=1h
+        
+        Args:
+            symbol: BTCUSDT, ETHUSDT, etc.
+            
+        Returns:
+            Dict: {
+                "long_ratio": 55.2,
+                "short_ratio": 44.8,
+                "long_short_ratio": 1.23
+            }
+        """
+        cache_key = f"long_short_ratio_{symbol}"
+        cached_data = self._get_cache(cache_key, self.CACHE_TTL["futures"])
+        if cached_data is not None:
+            return cached_data
+        
+        try:
+            url = "https://api.bybit.com/v5/market/account-ratio"
+            params = {
+                "category": "linear",
+                "symbol": symbol,
+                "period": "1h",
+                "limit": 1
+            }
+            
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params, timeout=timeout) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        result_data = data.get("result", {})
+                        ratio_list = result_data.get("list", [])
+                        
+                        if ratio_list and len(ratio_list) > 0:
+                            latest_ratio = ratio_list[0]
+                            long_ratio = float(latest_ratio.get("buyRatio", 0.5))
+                            short_ratio = float(latest_ratio.get("sellRatio", 0.5))
+                            
+                            if short_ratio > 0:
+                                ls_ratio = long_ratio / short_ratio
+                            else:
+                                ls_ratio = 1.0
+                            
+                            result = {
+                                "long_ratio": round(long_ratio * 100, 1),
+                                "short_ratio": round(short_ratio * 100, 1),
+                                "long_short_ratio": round(ls_ratio, 2)
+                            }
+                            
+                            self._set_cache(cache_key, result)
+                            logger.info(f"Fetched long/short ratio for {symbol}")
+                            return result
+                    
+                    logger.warning(f"Failed to fetch long/short ratio for {symbol}: {response.status}")
+                    return None
+        except Exception as e:
+            logger.error(f"Error getting long/short ratio for {symbol}: {e}")
             return None
     
     async def get_btc_onchain_data(self) -> Optional[Dict]:
@@ -533,19 +760,23 @@ class DataSourceManager:
             logger.error(f"Error getting exchange flows for {symbol}: {e}")
             return None
     
-    async def gather_all_data(self, whale_tracker, symbol: str, binance_symbol: str) -> Dict:
+    async def gather_all_data(self, whale_tracker, symbol: str, bybit_symbol: str = None) -> Dict:
         """
         Gather all data sources in parallel.
         
         Args:
             whale_tracker: WhaleTracker instance
             symbol: Coin symbol (BTC, ETH)
-            binance_symbol: Binance symbol (BTCUSDT, ETHUSDT)
+            bybit_symbol: Bybit symbol (BTCUSDT, ETHUSDT), auto-mapped if not provided
             
         Returns:
             Dict with all data sources
         """
         try:
+            # Auto-map symbol if not provided
+            if bybit_symbol is None:
+                bybit_symbol = self.BYBIT_MAPPING.get(symbol, f"{symbol}USDT")
+            
             # Gather all data sources in parallel
             # Create coroutine for on-chain data (BTC only) or return None
             async def get_onchain_if_btc():
@@ -555,9 +786,9 @@ class DataSourceManager:
             
             results = await asyncio.gather(
                 self.get_ohlcv_data(symbol),
-                self.get_order_book_analysis(binance_symbol),
-                self.get_recent_trades_analysis(binance_symbol),
-                self.get_futures_data(binance_symbol),
+                self.get_order_book_analysis(bybit_symbol),
+                self.get_recent_trades_analysis(bybit_symbol),
+                self.get_futures_data(bybit_symbol),
                 get_onchain_if_btc(),
                 self.get_exchange_flows(whale_tracker, symbol),
                 return_exceptions=True
