@@ -164,6 +164,7 @@ def user_friendly_to_raw(address: str) -> str:
 
 class TransactionType(str, Enum):
     """Типы транзакций."""
+
     DEPOSIT = "DEPOSIT"
     WITHDRAWAL = "WITHDRAWAL"
     EXCHANGE_TRANSFER = "EXCHANGE_TRANSFER"
@@ -177,44 +178,33 @@ TON_EXCHANGES: dict[str, str] = {
     # Binance
     "EQCjk1hh952vWaE9bRguaBGGjIh58TlDaxOqXkI_7D2-SJ6I": "Binance",
     "EQDvJkkZlTjBsn9kXQlkZcJb4_3jgD75HbjVv8w8tshO4KhI": "Binance Hot",
-
     # OKX - valid address format
     "EQBfAN7LfaUYgXZNw5Wc7GBgkEX2yhuJ5ka95J1JJwXiD4sO": "OKX",
     "EQCuPm-skZKcMv7cUeDCf6wZZ3dZMxHJ_8KnZkh_lsS_kARI": "OKX Hot",
-
     # Bybit
     "EQDzd8aeBou6Vj3csxe8Lh6CtACwpf-3VgbHsLdFH5swaGFQ": "Bybit",
     "EQDD8dqOzaj4zUK6ziJOo_G2lx6qf1TEktTRkFJ7T1c_fPQb": "Bybit Hot",
-
     # KuCoin
     "EQBDanbCeUqI4_v-xrnAN0_I2wRvEIaLg1a4ecR7_8NZI6SG": "KuCoin",
-
     # Gate.io
     "EQA2kCVNwVsil2EM2mB0SkXytxCqWj4gBYqPNbZXPT39_xIO": "Gate.io",
-
     # MEXC
     "EQCD39VS5jcptHL8vMjEXrzGaRcCVYto7HUn4bpAOg8xqB2N": "MEXC",
-
     # Crypto.com
     "EQC9_fZ4z9G5hfE7eQiWp5rMvQwvLv-BmxCm1p9Fq4rPF8XJ": "Crypto.com",
-
     # DEX - STON.fi
     "EQB3ncyBUTjZUA5EnFKR5_EnOMI9V1tTEAAPaiU71gc4TiUt": "STON.fi",
     "EQBsGx9ArADUrREB34W-ghgsCgBShvfUr4Jk5a4MQxpD7JFX": "STON.fi Router",
     "EQARULUYsmJq1RiZ-YiH-IJLcAZUVkVff-KBPwEmmaQGH6aC": "STON.fi Pool",
-
     # DEX - DeDust
     "EQBfBWT7X2BHg9tXAxzhz2aKvn6xHy_CUv4qkBJ9pwxvQ3Ff": "DeDust",
     "EQDa4VOnTYlLvDJ0gZjNYm5PXfSmmtL6Vs6A_CZEtXCNICq_": "DeDust Vault",
-
     # Fragment
     "EQBAjaOyi2wGWlk-EDkSabqqnF-MrrwMadnwqrurKpkla9nE": "Fragment",
     "EQCD39VS5jcptHL8vMjEXrzGaRcCVYto7HUn4bpAOg8xqFRA": "Fragment Auction",
-
     # Getgems (NFT)
     "EQDrLq-X6jKZNHAScgghh0h1iog3StK71zn8dcmrOj8jPWRA": "Getgems",
     "EQCjk1hh952vWaE9bRguaBGGjIh58TlDaxOqXkI_7D2JMaTH": "Getgems Marketplace",
-
     # Wallet Apps
     "EQBvW8Z5huBkMJYdnfAEM5JqTNkuWX3diqYENkWsIL0XggGG": "Wallet App",
     "EQBTGfs1SVsdtwmQRqDeZZLkzA2DdPFW-G7x53bK0FdY2PLQ": "Tonkeeper",
@@ -258,7 +248,13 @@ def is_ton_exchange_address(address: str) -> bool:
     if label is None:
         return False
     exchange_keywords = [
-        "binance", "okx", "bybit", "kucoin", "gate", "mexc", "crypto.com"
+        "binance",
+        "okx",
+        "bybit",
+        "kucoin",
+        "gate",
+        "mexc",
+        "crypto.com",
     ]
     label_lower = label.lower()
     return any(keyword in label_lower for keyword in exchange_keywords)
@@ -521,7 +517,7 @@ class TONTracker:
             transactions = []
 
             # Проверяем транзакции известных адресов
-            for address in list(TON_EXCHANGES.keys())[:3]:
+            for address in list(TON_EXCHANGES.keys())[:8]:
                 txs = await self._fetch_address_transactions_toncenter_v3(
                     address, min_value_ton
                 )
@@ -600,7 +596,11 @@ class TONTracker:
                 # Время
                 try:
                     utime = tx.get("now", 0) or tx.get("utime", 0)
-                    timestamp = datetime.fromtimestamp(utime, tz=timezone.utc) if utime else None
+                    timestamp = (
+                        datetime.fromtimestamp(utime, tz=timezone.utc)
+                        if utime
+                        else None
+                    )
                 except (ValueError, OSError):
                     timestamp = datetime.now(timezone.utc)
 
@@ -646,7 +646,7 @@ class TONTracker:
 
             # Проверяем транзакции известных адресов
             # Уменьшаем количество адресов для снижения rate limit ошибок
-            for address in list(TON_EXCHANGES.keys())[:5]:
+            for address in list(TON_EXCHANGES.keys())[:8]:
                 txs = await self._fetch_address_transactions_toncenter(
                     address, min_value_ton
                 )
@@ -730,7 +730,11 @@ class TONTracker:
                 # Время
                 try:
                     utime = tx.get("utime", 0)
-                    timestamp = datetime.fromtimestamp(utime, tz=timezone.utc) if utime else None
+                    timestamp = (
+                        datetime.fromtimestamp(utime, tz=timezone.utc)
+                        if utime
+                        else None
+                    )
                 except (ValueError, OSError):
                     timestamp = datetime.now(timezone.utc)
 
@@ -775,7 +779,7 @@ class TONTracker:
             transactions = []
 
             # Проверяем транзакции известных адресов
-            for address in list(TON_EXCHANGES.keys())[:5]:
+            for address in list(TON_EXCHANGES.keys())[:8]:
                 txs = await self._fetch_address_transactions_tonapi(
                     address, min_value_ton
                 )
@@ -849,7 +853,11 @@ class TONTracker:
 
                 try:
                     utime = tx.get("utime", 0)
-                    timestamp = datetime.fromtimestamp(utime, tz=timezone.utc) if utime else None
+                    timestamp = (
+                        datetime.fromtimestamp(utime, tz=timezone.utc)
+                        if utime
+                        else None
+                    )
                 except (ValueError, OSError):
                     timestamp = datetime.now(timezone.utc)
 
@@ -879,7 +887,7 @@ class TONTracker:
     ) -> list[TONTransaction]:
         """
         DEPRECATED: ORBS Network endpoint removed (returns 404).
-        
+
         This method is kept for backward compatibility but always returns empty list.
 
         Args:
@@ -899,7 +907,7 @@ class TONTracker:
     ) -> list[TONTransaction]:
         """
         DEPRECATED: ORBS Network endpoint removed (returns 404).
-        
+
         This method is kept for backward compatibility but always returns empty list.
 
         Args:
@@ -979,7 +987,7 @@ class TONTracker:
                 symbol = jetton.get("symbol", "JETTON")
 
                 amount = int(transfer.get("amount", 0))
-                value = amount / (10 ** decimals)
+                value = amount / (10**decimals)
 
                 # Для стейблкоинов цена = 1 USD
                 if symbol.upper() in ("USDT", "USDC"):

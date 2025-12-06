@@ -151,10 +151,10 @@ class BSCTracker:
         self._session: Optional[aiohttp.ClientSession] = None
         self._bnb_price: float = 300.0  # Дефолтная цена BNB
         self._price_last_update: float = 0  # Время последнего обновления цены
-        
+
         # BSC RPC provider with rotation
         self._provider = BSCProvider()
-        
+
         # Block cache: block_number -> block_data
         self._block_cache: dict[int, tuple[dict, float]] = {}
         self._block_cache_ttl = BLOCK_CACHE_TTL
@@ -243,9 +243,7 @@ class BSCTracker:
         timeout = aiohttp.ClientTimeout(total=15)
 
         if json_data:
-            async with session.post(
-                url, json=json_data, timeout=timeout
-            ) as response:
+            async with session.post(url, json=json_data, timeout=timeout) as response:
                 if response.status == 200:
                     return await response.json()
                 logger.warning(
@@ -287,7 +285,7 @@ class BSCTracker:
         # Use RPC with automatic provider rotation
         logger.debug("BSC: Getting data via RPC with provider rotation")
         transactions = await self._get_from_rpc_with_rotation(min_value_bnb, limit)
-        
+
         if transactions:
             logger.info(
                 "BSC: Data obtained via RPC",
@@ -324,7 +322,7 @@ class BSCTracker:
                 params=[],
                 timeout=5,
             )
-            
+
             if not block_data or "result" not in block_data:
                 logger.debug("BSC: Failed to get block number")
                 return []
@@ -344,42 +342,40 @@ class BSCTracker:
             )
 
             # Collect block numbers to fetch
-            block_numbers = list(range(
-                latest_block,
-                max(latest_block - blocks_to_scan, 0),
-                -1
-            ))
-            
+            block_numbers = list(
+                range(latest_block, max(latest_block - blocks_to_scan, 0), -1)
+            )
+
             # Check cache and collect uncached block numbers
             blocks_data = {}
             uncached_blocks = []
-            
+
             for block_num in block_numbers:
-                cached_block = await self._get_block_from_cache(block_num)
+                cached_block = self._get_block_from_cache(block_num)
                 if cached_block:
                     blocks_data[block_num] = cached_block
                 else:
                     uncached_blocks.append(block_num)
-            
+
             # Fetch uncached blocks using batch request
             if uncached_blocks:
                 logger.debug(
                     "BSC: Fetching uncached blocks",
                     count=len(uncached_blocks),
                 )
-                
+
                 # Prepare batch requests
                 batch_requests = [
                     ("eth_getBlockByNumber", [hex(num), True])
                     for num in uncached_blocks
                 ]
-                
+
                 # Make batch request
                 batch_response = await self._provider.make_batch_request(
                     batch_requests,
                     timeout=10,
                 )
-                
+
                 if batch_response:
                     for i, response in enumerate(batch_response):
                         if response and "result" in response:
@@ -393,7 +389,7 @@ class BSCTracker:
             # Process all blocks
             for block_num in block_numbers:
                 block = blocks_data.get(block_num)
-                
+
                 if not block:
                     continue
 
@@ -413,7 +409,9 @@ class BSCTracker:
                         continue
 
                     try:
-                        timestamp = datetime.fromtimestamp(block_timestamp, tz=timezone.utc)
+                        timestamp = datetime.fromtimestamp(
+                            block_timestamp, tz=timezone.utc
+                        )
                     except (ValueError, OSError):
                         timestamp = datetime.now(timezone.utc)
 
@@ -460,7 +458,7 @@ class BSCTracker:
             dict: Block data or None if not cached or expired
         """
         current_time = time.time()
-        
+
         # Check cache
         if block_num in self._block_cache:
             block_data, cache_time = self._block_cache[block_num]
@@ -469,9 +467,9 @@ class BSCTracker:
             else:
                 # Remove expired cache entry
                 del self._block_cache[block_num]
-        
+
         return None
-    
+
     def _cache_block(self, block_num: int, block_data: dict) -> None:
         """
         Cache block data.
@@ -481,10 +479,10 @@ class BSCTracker:
             block_data: Block data to cache
         """
         current_time = time.time()
-        
+
         # Cache the block data
         self._block_cache[block_num] = (block_data, current_time)
-        
+
         # Clean old cache entries if cache is too large
         if len(self._block_cache) > BLOCK_CACHE_MAX_SIZE:
             # Remove oldest entries
@@ -503,7 +501,7 @@ class BSCTracker:
             dict: Block data or None if unavailable
         """
         current_time = time.time()
-        
+
         # Check cache
         if block_num in self._block_cache:
             block_data, cache_time = self._block_cache[block_num]
@@ -512,31 +510,31 @@ class BSCTracker:
             else:
                 # Remove expired cache entry
                 del self._block_cache[block_num]
-        
+
         # Fetch block data via RPC
         block_response = await self._provider.make_request(
             method="eth_getBlockByNumber",
             params=[hex(block_num), True],  # True = include transactions
             timeout=5,
         )
-        
+
         if not block_response or "result" not in block_response:
             return None
-        
+
         block_data = block_response["result"]
         if not block_data or "transactions" not in block_data:
             return None
-        
+
         # Cache the block data
         self._block_cache[block_num] = (block_data, current_time)
-        
+
         # Clean old cache entries if cache is too large
         if len(self._block_cache) > BLOCK_CACHE_MAX_SIZE:
             # Remove oldest entries
             oldest_blocks = sorted(self._block_cache.keys())[:BLOCK_CACHE_CLEANUP_SIZE]
             for old_block in oldest_blocks:
                 del self._block_cache[old_block]
-        
+
         return block_data
 
     def _deduplicate_and_sort(
@@ -577,7 +575,7 @@ class BSCTracker:
     ) -> list[BSCTransaction]:
         """
         Получение крупных BEP-20 транзакций.
-        
+
         NOTE: This method is deprecated as it requires Etherscan V2 API
         which needs a paid plan for BSC. BEP-20 tracking is not currently
         supported without an API key.
