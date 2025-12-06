@@ -932,6 +932,7 @@ class WhaleTracker:
         arb_count = len([tx for tx in transactions if tx.blockchain == "Arbitrum"])
         polygon_count = len([tx for tx in transactions if tx.blockchain == "Polygon"])
         avax_count = len([tx for tx in transactions if tx.blockchain == "Avalanche"])
+        ton_count = len([tx for tx in transactions if tx.blockchain == "TON"])
 
         return {
             "total_transactions": len(transactions),
@@ -942,7 +943,7 @@ class WhaleTracker:
             "bsc_transactions": bsc_count,  # Re-enabled with Blockscout
             "btc_transactions": btc_count,
             "sol_transactions": 0,  # Disabled
-            "ton_transactions": 0,  # Disabled
+            "ton_transactions": ton_count,  # Enabled
             "arb_transactions": arb_count,
             "polygon_transactions": polygon_count,
             "avax_transactions": avax_count,
@@ -1028,6 +1029,7 @@ class WhaleTracker:
             "Arbitrum": "ARB",
             "Polygon": "POLYGON",
             "Avalanche": "AVAX",
+            "TON": "TON",
         }
 
         for network_name, network_key in network_map.items():

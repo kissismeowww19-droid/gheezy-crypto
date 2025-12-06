@@ -75,7 +75,9 @@ class WhaleStats:
                 "BTC": NetworkStats(network="BTC", emoji="🟠"),
                 "ETH": NetworkStats(network="ETH", emoji="🔷"),
                 "BSC": NetworkStats(network="BSC", emoji="🟡"),
-                "SOL": NetworkStats(network="SOL", emoji="🟣"),
+                "ARB": NetworkStats(network="ARB", emoji="🔵"),
+                "POLYGON": NetworkStats(network="POLYGON", emoji="🟣"),
+                "AVAX": NetworkStats(network="AVAX", emoji="🔺"),
                 "TON": NetworkStats(network="TON", emoji="💎"),
             }
 
