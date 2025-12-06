@@ -1,16 +1,17 @@
 """
 Gheezy Crypto - BSC Whale Tracker
 
-Отслеживание крупных транзакций на Binance Smart Chain через Ankr RPC и BscScan API.
+Отслеживание крупных транзакций на Binance Smart Chain через Etherscan V2 API.
 Поддерживает резервные источники данных через публичные RPC ноды.
 Работает в России без VPN.
 
 Возможности:
-- Ankr RPC (основной, бесплатный, без регистрации)
-- BscScan API (резервный, требуется API ключ)
+- Etherscan V2 API с chainid=56 (основной, требуется API ключ)
+- Ротация 3 API ключей для увеличения rate limit до 9 req/sec
 - Публичные RPC ноды для работы без ключа
 - Кэширование цен криптовалют
 - Retry логика с exponential backoff
+- Rate limit handling с задержками
 """
 
 import asyncio
@@ -30,22 +31,19 @@ from tenacity import (
 
 from config import settings
 from whale.known_wallets import get_bsc_wallet_label
+from whale.api_keys import get_next_api_key
 
 logger = structlog.get_logger()
 
-# ===== Ankr RPC (основной, бесплатный) =====
-ANKR_BSC_RPC = "https://rpc.ankr.com/bsc"
-
-# BscScan API V2 URL with chainid=56 for BSC (резервный)
-# Using Etherscan API V2 format: https://docs.etherscan.io/v2-migration
-BSCSCAN_API_URL = "https://api.etherscan.io/v2/api?chainid=56"
+# ===== Etherscan V2 API URL for BSC (chainid=56) =====
+# Now the primary method - Etherscan V2 supports BSC with paid plan
+ETHERSCAN_V2_BSC_URL = "https://api.etherscan.io/v2/api?chainid=56"
 
 # Fallback: Direct BscScan API (api.bscscan.com)
 BSCSCAN_DIRECT_API_URL = "https://api.bscscan.com/api"
 
-# Blockscout BSC API URL (бесплатный, FREE, no API key required!)
-# Real Blockscout API endpoint
-BLOCKSCOUT_BSC_API_URL = "https://blockscout.com/bsc/mainnet/api"
+# ===== Ankr RPC (резервный, бесплатный) =====
+ANKR_BSC_RPC = "https://rpc.ankr.com/bsc"
 
 # ===== Публичные RPC URL для BSC (с приоритетом Binance официальных) =====
 # Binance official dataseed servers are most reliable
@@ -163,9 +161,10 @@ class BSCTracker:
         Инициализация трекера.
 
         Args:
-            api_key: API ключ Etherscan (опционально)
+            api_key: API ключ Etherscan V2 (опционально, используется ротация если не указан)
         """
-        self.api_key = api_key or getattr(settings, "bscscan_api_key", "")
+        # Use API key rotation by default
+        self.api_key = api_key or get_next_api_key()
         self.min_value_usd = settings.whale_min_transaction
         self.blocks_to_analyze = getattr(settings, "whale_blocks_to_analyze", 200)
         self.price_cache_ttl = getattr(settings, "whale_price_cache_ttl", 300)
@@ -286,10 +285,9 @@ class BSCTracker:
         Получение крупных BNB транзакций.
 
         Использует несколько источников данных:
-        1. Blockscout BSC API (FREE, no API key required!)
-        2. Binance dataseed RPC (основной, бесплатный, без регистрации)
-        3. BscScan API (api.bscscan.com) если есть ключ
-        4. Ankr RPC (резервный)
+        1. Etherscan V2 API с chainid=56 (основной, ротация ключей)
+        2. Binance dataseed RPC (резервный, бесплатный)
+        3. Ankr RPC (резервный)
 
         Args:
             limit: Максимальное количество транзакций
@@ -300,15 +298,17 @@ class BSCTracker:
         await self._update_bnb_price()
         min_value_bnb = self.min_value_usd / self._bnb_price
 
-        # 1. Пробуем Blockscout BSC API (FREE, no key required!)
-        logger.debug("BSC: Пробуем получить данные через Blockscout (FREE)")
-        transactions = await self._get_from_blockscout(min_value_bnb, limit)
-        if transactions:
-            logger.info(
-                "BSC: Данные получены через Blockscout (FREE)",
-                count=len(transactions),
-            )
-            return transactions
+        # 1. Пробуем Etherscan V2 API (основной метод с ротацией ключей)
+        if self.api_key:
+            logger.debug("BSC: Пробуем получить данные через Etherscan V2 API")
+            transactions = await self._get_from_etherscan_v2(min_value_bnb, limit)
+            if transactions:
+                logger.info(
+                    "Данные получены через Etherscan V2",
+                    chain="bsc",
+                    count=len(transactions),
+                )
+                return transactions
 
         # 2. Пробуем публичные RPC (Binance dataseed - наиболее надежные)
         logger.debug("BSC: Пробуем получить данные через Binance RPC")
@@ -320,18 +320,7 @@ class BSCTracker:
             )
             return transactions
 
-        # 3. Пробуем BscScan API если есть ключ
-        if self.api_key:
-            logger.debug("BSC: Пробуем получить данные через BscScan API")
-            transactions = await self._get_from_bscscan(min_value_bnb, limit)
-            if transactions:
-                logger.info(
-                    "BSC: Данные получены через BscScan API",
-                    count=len(transactions),
-                )
-                return transactions
-
-        # 4. Резервный вариант через Ankr RPC
+        # 3. Резервный вариант через Ankr RPC
         logger.debug("BSC: Пробуем получить данные через Ankr RPC")
         transactions = await self._get_from_ankr_rpc(min_value_bnb, limit)
         if transactions:
@@ -461,15 +450,15 @@ class BSCTracker:
             )
             return []
 
-    async def _get_from_bscscan(
+    async def _get_from_etherscan_v2(
         self,
         min_value_bnb: float,
         limit: int,
     ) -> list[BSCTransaction]:
         """
-        Получение транзакций через BscScan API.
-
-        Tries Etherscan API V2 first, then falls back to direct BscScan API.
+        Получение транзакций через Etherscan V2 API с chainid=56.
+        
+        Использует ротацию API ключей и rate limit handling.
 
         Args:
             min_value_bnb: Минимальная сумма в BNB
@@ -481,181 +470,82 @@ class BSCTracker:
         if not self.api_key:
             return []
 
-        # Try Etherscan V2 API first, then fallback to direct BscScan API
-        api_urls = [BSCSCAN_API_URL, BSCSCAN_DIRECT_API_URL]
-
-        for api_url in api_urls:
-            try:
-                # Получаем последний блок
-                params_block = {
-                    "module": "proxy",
-                    "action": "eth_blockNumber",
-                    "apikey": self.api_key,
-                }
-
-                data = await self._make_api_request(api_url, params=params_block)
-                if not data or "result" not in data:
-                    logger.debug(f"Не удалось получить номер блока через {api_url}")
-                    continue
-
-                # Check for API error message in result
-                result = data.get("result", "")
-                if isinstance(result, str) and not result.startswith("0x"):
-                    logger.debug(f"API вернул ошибку: {result[:100]}")
-                    continue
-
-                latest_block = int(result, 16)
-                # BSC блоки быстрее, смотрим больше блоков
-                start_block = latest_block - (self.blocks_to_analyze * 2)
-
-                logger.debug(
-                    "Анализируем блоки BSC",
-                    start=start_block,
-                    end=latest_block,
-                    blocks_count=self.blocks_to_analyze * 2,
-                    api_url=api_url,
-                )
-
-                # Параллельные запросы к адресам бирж
-                # Ограничиваем до 10 адресов для соблюдения rate limits BscScan API
-                tasks = []
-                for address in TRACKED_BSC_ADDRESSES[:10]:
-                    tasks.append(
-                        self._fetch_address_transactions(
-                            address, start_block, latest_block, min_value_bnb, api_url
-                        )
-                    )
-
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-
-                # Собираем все транзакции
-                transactions = []
-                for result in results:
-                    if isinstance(result, list):
-                        transactions.extend(result)
-                    elif isinstance(result, Exception):
-                        logger.debug(f"Ошибка при получении транзакций: {result}")
-
-                if transactions:
-                    logger.info(f"Данные BSC получены через {api_url}")
-                    return self._deduplicate_and_sort(transactions, limit)
-
-            except Exception as e:
-                logger.debug(
-                    f"Ошибка BscScan API ({api_url})",
-                    error=str(e),
-                )
-                continue
-
-        logger.warning("Не удалось получить данные через BscScan API")
-        return []
-
-    async def _get_from_blockscout(
-        self,
-        min_value_bnb: float,
-        limit: int,
-    ) -> list[BSCTransaction]:
-        """
-        Получение транзакций через Blockscout BSC API (FREE, no API key!).
-
-        Uses blockscout.com/bsc/mainnet/api - completely free, no registration.
-
-        Args:
-            min_value_bnb: Минимальная сумма в BNB
-            limit: Максимальное количество транзакций
-
-        Returns:
-            list[BSCTransaction]: Список транзакций
-        """
         try:
-            # Blockscout BSC API - FREE, no API key required!
-            api_url = BLOCKSCOUT_BSC_API_URL
-            
+            # Получаем последний блок
+            params_block = {
+                "module": "proxy",
+                "action": "eth_blockNumber",
+                "apikey": self.api_key,
+            }
+
+            data = await self._make_api_request(ETHERSCAN_V2_BSC_URL, params=params_block)
+            if not data or "result" not in data:
+                logger.debug("BSC: Не удалось получить номер блока через Etherscan V2")
+                return []
+
+            # Check for API error message in result
+            result = data.get("result", "")
+            if isinstance(result, str) and not result.startswith("0x"):
+                logger.debug(f"BSC: API вернул ошибку: {result[:100]}")
+                return []
+
+            latest_block = int(result, 16)
+            # BSC блоки быстрее, смотрим больше блоков
+            start_block = latest_block - (self.blocks_to_analyze * 2)
+
+            logger.debug(
+                "BSC: Анализируем блоки через Etherscan V2",
+                start=start_block,
+                end=latest_block,
+                blocks_count=self.blocks_to_analyze * 2,
+            )
+
+            # Sequential requests with 0.35s delay to respect rate limits
+            # Ограничиваем до 10 адресов для эффективности
             transactions = []
-            
-            # Query transactions from known addresses
-            # Using 5 addresses balances coverage vs performance.
-            # Blockscout is free with no strict rate limits, but we limit
-            # to 5 addresses to avoid overloading the service and keep response time reasonable.
-            for address in TRACKED_BSC_ADDRESSES[:5]:
-                params = {
-                    "module": "account",
-                    "action": "txlist",
-                    "address": address,
-                    "page": 1,
-                    "offset": 20,
-                    "sort": "desc",
-                }
+            for address in TRACKED_BSC_ADDRESSES[:10]:
+                # Get next API key for each request (rotation)
+                api_key = get_next_api_key() or self.api_key
                 
-                txs_data = await self._make_api_request(api_url, params=params)
-                if not txs_data or txs_data.get("status") != "1":
-                    logger.debug(
-                        "Blockscout: не удалось получить транзакции",
-                        address=address[:12],
+                try:
+                    result = await self._fetch_address_transactions_v2(
+                        address, start_block, latest_block, min_value_bnb, api_key
                     )
-                    await asyncio.sleep(0.5)  # Small delay between addresses
-                    continue
+                    if result:
+                        transactions.extend(result)
+                except Exception as e:
+                    logger.debug(f"BSC: Ошибка при получении транзакций: {e}")
                 
-                for tx in txs_data.get("result", []):
-                    value_wei = int(tx.get("value", 0))
-                    value_bnb = value_wei / 10**18
-                    value_usd = value_bnb * self._bnb_price
-                    
-                    if value_bnb < min_value_bnb:
-                        continue
-                    
-                    try:
-                        timestamp = datetime.fromtimestamp(
-                            int(tx.get("timeStamp", 0)), tz=timezone.utc
-                        )
-                    except (ValueError, OSError):
-                        timestamp = datetime.now(timezone.utc)
-                    
-                    transactions.append(
-                        BSCTransaction(
-                            tx_hash=tx.get("hash", ""),
-                            from_address=tx.get("from", ""),
-                            to_address=tx.get("to", ""),
-                            value_bnb=value_bnb,
-                            value_usd=value_usd,
-                            token_symbol="BNB",
-                            timestamp=timestamp,
-                            block_number=int(tx.get("blockNumber", 0)),
-                        )
-                    )
-                    
-                    if len(transactions) >= limit * 2:
-                        break
-                
-                # Small delay between addresses to be polite
-                await asyncio.sleep(0.5)
-            
+                # Rate limit: 3 req/sec per key, use 0.35s delay
+                await asyncio.sleep(0.35)
+
+            # Удаляем дубликаты и сортируем
             return self._deduplicate_and_sort(transactions, limit)
-        
+
         except Exception as e:
-            logger.warning(
-                "Ошибка Blockscout BSC API",
+            logger.debug(
+                "BSC: Ошибка Etherscan V2 API",
                 error=str(e),
             )
             return []
 
-    async def _fetch_address_transactions(
+    async def _fetch_address_transactions_v2(
         self,
         address: str,
         start_block: int,
         end_block: int,
         min_value_bnb: float,
-        api_url: str = BSCSCAN_DIRECT_API_URL,
+        api_key: str,
     ) -> list[BSCTransaction]:
         """
-        Получение транзакций для конкретного адреса.
+        Получение транзакций для конкретного адреса через Etherscan V2.
 
         Args:
             address: Адрес кошелька
             start_block: Начальный блок
             end_block: Конечный блок
             min_value_bnb: Минимальная сумма в BNB
-            api_url: URL API для запроса
+            api_key: API ключ для запроса
 
         Returns:
             list[BSCTransaction]: Список транзакций
@@ -669,11 +559,21 @@ class BSCTracker:
             "page": 1,
             "offset": 100,
             "sort": "desc",
-            "apikey": self.api_key,
+            "apikey": api_key,
         }
 
-        data = await self._make_api_request(api_url, params=params)
+        data = await self._make_api_request(ETHERSCAN_V2_BSC_URL, params=params)
         if not data or data.get("status") != "1" or not data.get("result"):
+            # Log detailed error for debugging rate limits
+            if data and data.get("status") != "1":
+                message = data.get("message", "")
+                result_str = str(data.get("result", ""))
+                if "rate limit" in message.lower() or "rate limit" in result_str.lower():
+                    logger.warning(
+                        "BSC: Rate limit hit on Etherscan V2",
+                        message=message,
+                        result=result_str[:100],
+                    )
             return []
 
         transactions = []
@@ -888,7 +788,7 @@ class BSCTracker:
                 "apikey": self.api_key,
             }
 
-            data = await self._make_api_request(BSCSCAN_API_URL, params=params)
+            data = await self._make_api_request(ETHERSCAN_V2_BSC_URL, params=params)
             if not data or data.get("status") != "1" or not data.get("result"):
                 return []
 

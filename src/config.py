@@ -68,7 +68,15 @@ class Settings(BaseSettings):
     )
     etherscan_api_key: str = Field(
         default="",
-        description="API ключ Etherscan",
+        description="API ключ Etherscan V2 (primary)",
+    )
+    etherscan_api_key_2: str = Field(
+        default="",
+        description="API ключ Etherscan V2 (secondary, optional)",
+    )
+    etherscan_api_key_3: str = Field(
+        default="",
+        description="API ключ Etherscan V2 (tertiary, optional)",
     )
     bscscan_api_key: str = Field(
         default="",

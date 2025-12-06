@@ -30,13 +30,13 @@ from tenacity import (
 
 from config import settings
 from whale.known_wallets import get_ethereum_wallet_label
-from whale.etherscan_v2 import get_etherscan_key, get_etherscan_v2_url
+from whale.api_keys import get_next_api_key
 
 logger = structlog.get_logger()
 
 # ===== API URLs =====
 # Etherscan API V2 URL with chainid=1 for Ethereum
-ETHERSCAN_API_URL = get_etherscan_v2_url("eth") or "https://api.etherscan.io/v2/api?chainid=1"
+ETHERSCAN_API_URL = "https://api.etherscan.io/v2/api?chainid=1"
 
 # Blockscout API URL (бесплатный, без ключа)
 BLOCKSCOUT_API_URL = "https://eth.blockscout.com/api/v2"
@@ -154,7 +154,7 @@ class EthereumTracker:
     def __init__(self):
         """Инициализация трекера."""
         # Use API key rotation for rate limits
-        self.api_key = get_etherscan_key() or settings.etherscan_api_key
+        self.api_key = get_next_api_key()
         self.min_value_usd = settings.whale_min_transaction
         self.blocks_to_analyze = getattr(settings, "whale_blocks_to_analyze", 200)
         self.price_cache_ttl = getattr(settings, "whale_price_cache_ttl", 300)
@@ -372,16 +372,19 @@ class EthereumTracker:
             # Адреса отсортированы по важности (крупнейшие биржи первые)
             transactions = []
             for address in TRACKED_EXCHANGE_ADDRESSES[:10]:
+                # Get next API key for each request (rotation)
+                api_key = get_next_api_key() or self.api_key
+                
                 try:
                     result = await self._fetch_address_transactions(
-                        address, start_block, latest_block, min_value_eth
+                        address, start_block, latest_block, min_value_eth, api_key
                     )
                     if result:
                         transactions.extend(result)
                 except Exception as e:
                     logger.debug(f"Ошибка при получении транзакций: {e}")
-                # Rate limit: 3 req/sec, add 0.4s delay between requests
-                await asyncio.sleep(0.4)
+                # Rate limit: 3 req/sec per key, add 0.35s delay between requests
+                await asyncio.sleep(0.35)
 
             # Удаляем дубликаты и сортируем
             return self._deduplicate_and_sort(transactions, limit)
@@ -399,6 +402,7 @@ class EthereumTracker:
         start_block: int,
         end_block: int,
         min_value_eth: float,
+        api_key: str,
     ) -> list[EthereumTransaction]:
         """
         Получение транзакций для конкретного адреса.
@@ -408,6 +412,7 @@ class EthereumTracker:
             start_block: Начальный блок
             end_block: Конечный блок
             min_value_eth: Минимальная сумма в ETH
+            api_key: API ключ для запроса
 
         Returns:
             list[EthereumTransaction]: Список транзакций
@@ -421,7 +426,7 @@ class EthereumTracker:
             "page": 1,
             "offset": 100,
             "sort": "desc",
-            "apikey": self.api_key,
+            "apikey": api_key,
         }
 
         data = await self._make_api_request(ETHERSCAN_API_URL, params=params)
