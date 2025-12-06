@@ -6,6 +6,7 @@ This module provides a resilient RPC provider for Binance Smart Chain that:
 - Performs health checks with timeout
 - Automatically fails over to the next provider
 - Caches the last working provider for efficiency
+- Rate limits requests to prevent RPC overload
 """
 
 import asyncio
@@ -16,6 +17,33 @@ import aiohttp
 import structlog
 
 logger = structlog.get_logger()
+
+
+class BSCRateLimiter:
+    """
+    Rate limiter for BSC RPC requests.
+    
+    Ensures a minimum delay between consecutive RPC calls to prevent
+    overloading public RPC endpoints.
+    """
+    
+    def __init__(self, delay: float = 0.5):
+        """
+        Initialize rate limiter.
+        
+        Args:
+            delay: Minimum delay in seconds between calls (default: 0.5s = 2 req/sec)
+        """
+        self.delay = delay
+        self.last_call = 0.0
+    
+    async def wait(self):
+        """Wait if necessary to maintain rate limit."""
+        now = time.time()
+        wait_time = self.delay - (now - self.last_call)
+        if wait_time > 0:
+            await asyncio.sleep(wait_time)
+        self.last_call = time.time()
 
 
 class BSCProvider:
@@ -29,21 +57,29 @@ class BSCProvider:
     def __init__(self):
         """Initialize BSC provider with list of free public RPC endpoints."""
         self.providers = [
-            # Best reliability (official + high-quality public)
-            "https://bsc-dataseed1.binance.org",  # Official Binance
-            "https://bsc-dataseed2.binance.org",  # Official Binance backup
-            "https://rpc.ankr.com/bsc",           # Best - no rate limit, 150k/month
-            "https://bsc-dataseed1.defibit.io",   # DefiLlama
-            "https://bsc.publicnode.com",         # Public Node
-            "https://binance.llamarpc.com",       # Llama RPC
-            "https://bsc-dataseed2.defibit.io",   # DefiLlama backup
-            "https://bscrpc.com",                 # Fast alternative
+            # Official Binance (most reliable)
+            "https://bsc-dataseed1.binance.org",
+            "https://bsc-dataseed2.binance.org",
+            "https://bsc-dataseed3.binance.org",
+            "https://bsc-dataseed4.binance.org",
+            
+            # Community RPCs
+            "https://bsc.publicnode.com",
+            "https://binance.llamarpc.com",
+            "https://bsc-dataseed1.defibit.io",
+            "https://bsc-dataseed1.ninicoin.io",
+            
+            # Ankr (backup)
+            "https://rpc.ankr.com/bsc",
         ]
         self.current_index = 0
         self.last_working_provider: Optional[str] = None
         self.last_check_time: float = 0
         self.cache_duration = 300  # Cache working provider for 5 minutes
         self._session: Optional[aiohttp.ClientSession] = None
+        
+        # Rate limiter to prevent RPC overload (500ms delay = 2 req/sec max)
+        self.rate_limiter = BSCRateLimiter(delay=0.5)
     
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create HTTP session."""
@@ -205,6 +241,9 @@ class BSCProvider:
         }
         
         for attempt in range(max_retries):
+            # Apply rate limiting before each request
+            await self.rate_limiter.wait()
+            
             provider = await self.get_working_provider()
             
             if not provider:
@@ -273,6 +312,113 @@ class BSCProvider:
         logger.warning(
             "All BSC RPC attempts failed",
             method=method,
+            max_retries=max_retries,
+        )
+        return None
+    
+    async def make_batch_request(
+        self,
+        requests: list[tuple[str, list]],
+        timeout: int = 10,
+        max_retries: int = 3,
+    ) -> Optional[list]:
+        """
+        Make multiple RPC requests in a single batch.
+        
+        This is more efficient than individual requests as it reduces
+        the number of HTTP connections and overall latency.
+        
+        Args:
+            requests: List of (method, params) tuples
+            timeout: Request timeout in seconds
+            max_retries: Maximum number of retry attempts
+        
+        Returns:
+            list: List of JSON-RPC responses, or None if all attempts fail
+        """
+        # Build batch request
+        batch_request = [
+            {
+                "jsonrpc": "2.0",
+                "method": method,
+                "params": params,
+                "id": i,
+            }
+            for i, (method, params) in enumerate(requests)
+        ]
+        
+        for attempt in range(max_retries):
+            # Apply rate limiting before each request
+            await self.rate_limiter.wait()
+            
+            provider = await self.get_working_provider()
+            
+            if not provider:
+                logger.warning(
+                    "No working BSC provider available for batch",
+                    attempt=attempt + 1,
+                    max_retries=max_retries,
+                )
+                await asyncio.sleep(2 ** attempt)
+                continue
+            
+            try:
+                session = await self._get_session()
+                client_timeout = aiohttp.ClientTimeout(total=timeout)
+                
+                async with session.post(
+                    provider,
+                    json=batch_request,
+                    timeout=client_timeout,
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        # Batch response should be a list
+                        if isinstance(data, list):
+                            return data
+                        
+                        logger.debug(
+                            "BSC RPC batch error response",
+                            provider=provider,
+                            error=data.get("error") if isinstance(data, dict) else "Invalid response format",
+                        )
+                    else:
+                        logger.debug(
+                            "BSC RPC batch bad status",
+                            provider=provider,
+                            status=response.status,
+                        )
+            
+            except asyncio.TimeoutError:
+                logger.debug(
+                    "BSC RPC batch timeout",
+                    provider=provider,
+                    timeout=timeout,
+                )
+            except aiohttp.ClientError as e:
+                logger.debug(
+                    "BSC RPC batch client error",
+                    provider=provider,
+                    error=str(e),
+                )
+            except Exception as e:
+                logger.warning(
+                    "Unexpected BSC RPC batch error",
+                    provider=provider,
+                    error=str(e),
+                )
+            
+            # Mark provider as failed and try next one
+            self.invalidate_cache()
+            
+            # Wait before retrying with exponential backoff
+            if attempt < max_retries - 1:
+                await asyncio.sleep(2 ** attempt)
+        
+        logger.warning(
+            "All BSC RPC batch attempts failed",
+            requests_count=len(requests),
             max_retries=max_retries,
         )
         return None
