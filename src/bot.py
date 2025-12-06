@@ -17,6 +17,7 @@ from aiogram.enums import ParseMode
 from config import settings
 from api_manager import get_coin_price as get_price_multi_api, get_api_stats
 from whale.tracker import WhaleTracker as RealWhaleTracker
+from signals.ai_signals import AISignalAnalyzer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -39,6 +40,7 @@ class DeFiAggregator:
 signal_analyzer = SignalAnalyzer()
 defi_aggregator = DeFiAggregator()
 whale_tracker = RealWhaleTracker()
+ai_signal_analyzer = AISignalAnalyzer(whale_tracker)
 
 
 COINS = {
@@ -326,14 +328,6 @@ def get_signals_keyboard() -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton(text="₿ BTC", callback_data="signal_btc"),
             InlineKeyboardButton(text="⟠ ETH", callback_data="signal_eth"),
-        ],
-        [
-            InlineKeyboardButton(text="🟣 SOL", callback_data="signal_sol"),
-            InlineKeyboardButton(text="💎 TON", callback_data="signal_ton"),
-        ],
-        [
-            InlineKeyboardButton(text="💧 XRP", callback_data="signal_xrp"),
-            InlineKeyboardButton(text="🐕 DOGE", callback_data="signal_doge"),
         ],
         [
             InlineKeyboardButton(text="🔙 Назад", callback_data="menu_back"),
@@ -1259,12 +1253,13 @@ async def callback_price_coin(callback: CallbackQuery):
 async def callback_signals(callback: CallbackQuery):
     text = "🎯 *AI Сигналы*\n\n"
     text = text + "Анализ на основе:\n\n"
-    text = text + "• RSI (14 периодов)\n"
-    text = text + "• MACD\n"
-    text = text + "• Bollinger Bands\n"
-    text = text + "• MA 50/200\n\n"
-    text = text + "📊 _Точность: 73%_\n\n"
-    text = text + "👇 Выбери монету:"
+    text = text + "• Данные трекера китов\n"
+    text = text + "• Депозиты vs выводы с бирж\n"
+    text = text + "• Рыночные данные\n"
+    text = text + "• Объём торгов\n\n"
+    text = text + "🔮 _Прогноз на ближайший час_\n\n"
+    text = text + "👇 Выбери монету:\n\n"
+    text = text + "🔜 _Скоро новые монеты_"
     await callback.message.edit_text(text, reply_markup=get_signals_keyboard(), parse_mode=ParseMode.MARKDOWN)
     await callback. answer()
 
@@ -1273,6 +1268,22 @@ async def callback_signals(callback: CallbackQuery):
 async def callback_signal_coin(callback: CallbackQuery):
     symbol = callback.data.replace("signal_", ""). upper()
     
+    # Показываем индикатор загрузки
+    await callback.answer("⏳ Анализирую данные...")
+    await callback.message.edit_text("⏳ *Анализирую данные...*\n\nПодождите несколько секунд", parse_mode=ParseMode.MARKDOWN)
+    
+    # Получаем AI сигнал
+    try:
+        signal_text = await ai_signal_analyzer.analyze_coin(symbol)
+    except Exception as e:
+        logger.error(f"Error analyzing {symbol}: {e}", exc_info=True)
+        signal_text = (
+            "❌ *Ошибка анализа*\n\n"
+            f"Произошла ошибка при анализе {symbol}.\n"
+            "Попробуйте позже."
+        )
+    
+    # Клавиатура с кнопками
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="💰 Цена", callback_data="price_" + symbol. lower()),
@@ -1284,22 +1295,7 @@ async def callback_signal_coin(callback: CallbackQuery):
         ],
     ])
     
-    text = "🎯 *AI Сигнал: " + symbol + "*\n\n"
-    text = text + "📊 *Технический анализ:*\n\n"
-    text = text + "📈 RSI (14): *58.3* — нейтрально\n"
-    text = text + "📊 MACD: *бычий* — кроссовер вверх\n"
-    text = text + "📉 Bollinger: *середина* — низкая волатильность\n"
-    text = text + "🔄 MA 50/200: *выше* — бычий тренд\n\n"
-    text = text + "🤖 *Рекомендация:*\n\n"
-    text = text + "✅ *HOLD* (Держать)\n\n"
-    text = text + "⚠️ *Риск-менеджмент:*\n\n"
-    text = text + "• Позиция: 2-3% портфеля\n"
-    text = text + "• Stop-Loss: -5%\n"
-    text = text + "• Take-Profit: +10-15%\n\n"
-    text = text + "📊 _Точность AI: 73%_"
-    
-    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
-    await callback.answer()
+    await callback.message.edit_text(signal_text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
 
 
 @router.callback_query(lambda c: c.data == "menu_market")
