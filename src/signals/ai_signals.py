@@ -1009,13 +1009,15 @@ class AISignalAnalyzer:
         consensus_ratio = consensus_count / total_factors
         consensus_bonus = consensus_ratio * 10
         
-        # Direction
+        # Direction and probability calculation
         if total_score > 0:
             direction = "up"
-            probability = base + score_adj + data_bonus + consensus_bonus
+            # For bullish: higher score = higher probability of going up
+            probability = base + abs(score_adj) + data_bonus + consensus_bonus
         else:
             direction = "down"
-            probability = base - score_adj + data_bonus + consensus_bonus
+            # For bearish: more negative score = higher probability of going down
+            probability = base + abs(score_adj) + data_bonus + consensus_bonus
         
         # Clamp to 20-95% (never 100% certain)
         probability = max(20, min(95, probability))

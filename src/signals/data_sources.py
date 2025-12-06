@@ -50,6 +50,9 @@ class DataSourceManager:
         "ETH": "ETHUSDT",
     }
     
+    # Bybit API field names
+    BYBIT_VOLUME_FIELD = "v"  # Volume field in trade data
+    
     def __init__(self):
         """Initialize data source manager."""
         self._cache = {}
@@ -264,12 +267,12 @@ class DataSourceManager:
                         large_sells = 0
                         
                         # Calculate average trade size for "large" threshold
-                        volumes = [float(t["v"]) for t in trades]
+                        volumes = [float(t[self.BYBIT_VOLUME_FIELD]) for t in trades]
                         avg_volume = sum(volumes) / len(volumes)
                         large_threshold = avg_volume * 3  # 3x average is "large"
                         
                         for trade in trades:
-                            qty = float(trade["v"])
+                            qty = float(trade[self.BYBIT_VOLUME_FIELD])
                             side = trade["S"]  # "Buy" or "Sell"
                             
                             if side == "Sell":
