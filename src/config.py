@@ -82,6 +82,10 @@ class Settings(BaseSettings):
         default="",
         description="API ключ BscScan",
     )
+    ton_api_key: str = Field(
+        default="",
+        description="API ключ TON Console",
+    )
 
     # Настройки приложения
     app_name: str = Field(

@@ -1,17 +1,17 @@
 """
 Gheezy Crypto - Трекер китов
 
-Отслеживание крупных транзакций китов на 6 блокчейнах:
+Отслеживание крупных транзакций китов на 7 блокчейнах:
 - Ethereum (Etherscan V2)
 - Bitcoin (mempool.space - no key needed)
 - BSC (Etherscan V2 with chainid=56)
 - Arbitrum (Etherscan V2)
 - Polygon (Etherscan V2 with delay)
 - Avalanche (Snowtrace - no key needed)
+- TON (TON Center API - no key needed)
 
 Removed chains (API issues):
 - Base (chainid=8453 requires paid Etherscan plan)
-- TON (complex API)
 - SOL (Solscan returns 404)
 
 Использует несколько источников данных с приоритетом:
@@ -50,6 +50,8 @@ from whale.arbitrum import ArbitrumTracker
 from whale.polygon import PolygonTracker
 from whale.avalanche import AvalancheTracker
 # Base chain removed - requires paid Etherscan plan
+# TON tracker
+from whale.ton import TONTracker
 # DeFi tracker
 from whale.defi import DeFiTracker
 # Transaction cache
@@ -243,6 +245,9 @@ class WhaleTracker:
         self._polygon_tracker = PolygonTracker()
         self._avax_tracker = AvalancheTracker()  # Snowtrace - no key needed
         # Base chain removed - requires paid Etherscan plan
+        
+        # TON tracker
+        self._ton_tracker = TONTracker()
 
         # DeFi трекер
         self._defi_tracker = DeFiTracker()
@@ -260,7 +265,7 @@ class WhaleTracker:
             check_interval=self.check_interval,
             use_demo_data=self.use_demo_data,
             etherscan_key="настроен" if settings.etherscan_api_key else "не настроен",
-            networks=["ETH", "BTC", "BSC", "ARB", "POLYGON", "AVAX"],
+            networks=["ETH", "BTC", "BSC", "ARB", "POLYGON", "AVAX", "TON"],
             database="SQLite",
             defi_tracking="enabled",
             tx_cache="enabled",
@@ -284,6 +289,7 @@ class WhaleTracker:
         await self._polygon_tracker.close()
         await self._avax_tracker.close()
         # Base tracker removed
+        await self._ton_tracker.close()
 
         # Закрываем DeFi трекер
         await self._defi_tracker.close()
@@ -559,16 +565,40 @@ class WhaleTracker:
         limit: int = 20,
     ) -> list[WhaleTransaction]:
         """
-        TON removed - complex API.
+        Получение крупных TON транзакций через TON Center API.
 
         Args:
             limit: Максимальное количество транзакций
 
         Returns:
-            list[WhaleTransaction]: Empty list (TON disabled)
+            list[WhaleTransaction]: Список транзакций
         """
-        logger.debug("TON трекер отключен - сложный API")
-        return []
+        try:
+            ton_transactions = await self._ton_tracker.get_large_transactions(limit=limit)
+            
+            # Конвертируем TON транзакции в WhaleTransaction
+            whale_transactions = []
+            for tx in ton_transactions:
+                whale_tx = WhaleTransaction(
+                    tx_hash=tx.tx_hash,
+                    blockchain="TON",
+                    from_address=tx.from_address,
+                    to_address=tx.to_address,
+                    amount=tx.value_ton,
+                    amount_usd=tx.value_usd,
+                    token_symbol=tx.token_symbol,
+                    timestamp=tx.timestamp,
+                )
+                whale_tx.tx_type = tx.tx_type
+                whale_transactions.append(whale_tx)
+            
+            return whale_transactions
+        except Exception as e:
+            logger.error(
+                "Ошибка получения TON транзакций",
+                error=str(e),
+            )
+            return []
 
     # ===== Новые сети (Arbitrum, Polygon, Avalanche, Base) =====
 
@@ -752,7 +782,7 @@ class WhaleTracker:
         limit: int = 20,
     ) -> list[WhaleTransaction]:
         """
-        Получение транзакций со всех работающих блокчейнов (6 сетей).
+        Получение транзакций со всех работающих блокчейнов (7 сетей).
 
         Working chains:
         - BTC (mempool.space - no key needed)
@@ -761,10 +791,10 @@ class WhaleTracker:
         - Arbitrum (Etherscan V2 with key rotation)
         - Polygon (Etherscan V2 with delay and key rotation)
         - AVAX (Snowtrace - no key needed)
+        - TON (TON Center API - no key needed)
 
         Removed chains:
         - Base (requires paid API)
-        - TON (complex API)
         - SOL (Solscan 404)
 
         Args:
@@ -780,9 +810,10 @@ class WhaleTracker:
         arb_task = self.get_arbitrum_transactions(limit=limit)
         polygon_task = self.get_polygon_transactions(limit=limit)
         avax_task = self.get_avalanche_transactions(limit=limit)
+        ton_task = self.get_ton_transactions(limit=limit)
 
         results = await asyncio.gather(
-            eth_task, btc_task, bsc_task, arb_task, polygon_task, avax_task,
+            eth_task, btc_task, bsc_task, arb_task, polygon_task, avax_task, ton_task,
             return_exceptions=True
         )
 
@@ -901,6 +932,7 @@ class WhaleTracker:
         arb_count = len([tx for tx in transactions if tx.blockchain == "Arbitrum"])
         polygon_count = len([tx for tx in transactions if tx.blockchain == "Polygon"])
         avax_count = len([tx for tx in transactions if tx.blockchain == "Avalanche"])
+        ton_count = len([tx for tx in transactions if tx.blockchain == "TON"])
 
         return {
             "total_transactions": len(transactions),
@@ -911,7 +943,7 @@ class WhaleTracker:
             "bsc_transactions": bsc_count,  # Re-enabled with Blockscout
             "btc_transactions": btc_count,
             "sol_transactions": 0,  # Disabled
-            "ton_transactions": 0,  # Disabled
+            "ton_transactions": ton_count,  # Enabled
             "arb_transactions": arb_count,
             "polygon_transactions": polygon_count,
             "avax_transactions": avax_count,
@@ -997,6 +1029,7 @@ class WhaleTracker:
             "Arbitrum": "ARB",
             "Polygon": "POLYGON",
             "Avalanche": "AVAX",
+            "TON": "TON",
         }
 
         for network_name, network_key in network_map.items():
