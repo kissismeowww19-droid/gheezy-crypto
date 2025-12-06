@@ -1356,22 +1356,22 @@ async def callback_defi(callback: CallbackQuery):
     await callback. answer()
 
 
-@router.callback_query(lambda c: c. data == "menu_whale")
+@router.callback_query(lambda c: c.data == "menu_whale")
 async def callback_whale(callback: CallbackQuery):
-    """Обработка callback для меню Whale Tracker."""
-    await callback.answer("⏳ Загружаю...")
-    await callback.message.edit_text("⏳ *Загружаю транзакции китов...*", parse_mode=ParseMode.MARKDOWN)
-
-    try:
-        whale_text = await whale_tracker.format_whale_message()
-        await callback.message.edit_text(whale_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
-    except Exception as e:
-        logger.error(f"Whale menu error: {e}")
-        await callback.message.edit_text(
-            "🐋 *Whale Tracker*\n\n❌ Ошибка загрузки данных.\n\nПопробуйте позже.",
-            reply_markup=get_whale_keyboard(),
-            parse_mode=ParseMode.MARKDOWN
-        )
+    """Обработка callback для меню Whale Tracker - показать меню выбора сети."""
+    text = (
+        "🐋 *Whale Tracker*\n\n"
+        "Выберите сеть для отслеживания:\n\n"
+        "• 🔷 ETH — Ethereum\n"
+        "• 🟡 BTC — Bitcoin\n"
+        "• 🔺 ARB — Arbitrum\n"
+        "• 🟣 Polygon — Polygon\n"
+        "• 🔴 AVAX — Avalanche\n"
+        "• 💎 TON — The Open Network\n\n"
+        "👇 Выберите сеть:"
+    )
+    await callback.message.edit_text(text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+    await callback.answer()
 
 
 @router.callback_query(lambda c: c.data == "menu_traders")

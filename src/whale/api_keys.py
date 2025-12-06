@@ -9,6 +9,7 @@ Features:
 - Automatic fallback to single key if only one configured
 - Integration with rate limit handling
 - Retry logic for rate limit errors
+- Rate limiter to stay under 3 req/sec per key
 
 Note: This module uses global state and is designed for single-threaded
 async applications. For multi-threaded use, add locking mechanisms.
@@ -16,6 +17,7 @@ async applications. For multi-threaded use, add locking mechanisms.
 
 import asyncio
 import itertools
+import time
 from typing import Optional
 import structlog
 
@@ -23,10 +25,74 @@ from config import settings
 
 logger = structlog.get_logger()
 
+
+class EtherscanRateLimiter:
+    """
+    Rate limiter for Etherscan API to stay under 3 req/sec limit.
+    
+    Uses a simple time-based approach to ensure at least delay_seconds
+    between consecutive calls. Set to 2 req/sec (0.5s delay) to stay
+    comfortably under the 3 req/sec limit with margin for safety.
+    """
+    
+    def __init__(self, calls_per_second: float = 2.0):
+        """
+        Initialize rate limiter.
+        
+        Args:
+            calls_per_second: Maximum calls per second (default 2 to stay under 3/sec limit)
+        """
+        self.delay = 1.0 / calls_per_second
+        self.last_call = 0.0
+        
+        logger.info(
+            "Etherscan rate limiter initialized",
+            calls_per_second=calls_per_second,
+            delay_seconds=self.delay,
+        )
+    
+    async def wait(self) -> None:
+        """
+        Wait if necessary to respect rate limit.
+        
+        Should be called before making an API request.
+        """
+        now = time.time()
+        time_since_last_call = now - self.last_call
+        
+        if time_since_last_call < self.delay:
+            wait_time = self.delay - time_since_last_call
+            logger.debug(
+                "Rate limit wait",
+                wait_seconds=round(wait_time, 3),
+            )
+            await asyncio.sleep(wait_time)
+        
+        self.last_call = time.time()
+
+
 # API key rotation state
 _api_keys: list[str] = []
 _key_cycle: Optional[itertools.cycle] = None
 _initialized = False
+
+# Global rate limiter instance
+_rate_limiter: Optional[EtherscanRateLimiter] = None
+
+
+def get_rate_limiter() -> EtherscanRateLimiter:
+    """
+    Get the global Etherscan rate limiter instance.
+    
+    Returns:
+        EtherscanRateLimiter: Global rate limiter
+    """
+    global _rate_limiter
+    
+    if _rate_limiter is None:
+        _rate_limiter = EtherscanRateLimiter(calls_per_second=2.0)
+    
+    return _rate_limiter
 
 
 def init_api_keys() -> None:
@@ -192,7 +258,8 @@ def reset_api_keys() -> None:
     
     Used for testing or re-initialization.
     """
-    global _api_keys, _key_cycle, _initialized
+    global _api_keys, _key_cycle, _initialized, _rate_limiter
     _api_keys = []
     _key_cycle = None
     _initialized = False
+    _rate_limiter = None

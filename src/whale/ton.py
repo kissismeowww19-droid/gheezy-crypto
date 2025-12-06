@@ -36,7 +36,7 @@ from config import settings
 logger = structlog.get_logger()
 
 # ===== API URLs =====
-# TON Center API v2 (бесплатный)
+# TON Center API v2 (бесплатный, primary)
 TONCENTER_API_URL = "https://toncenter.com/api/v2"
 
 # TON Center API v3 (новая версия)
@@ -45,11 +45,8 @@ TONCENTER_API_V3_URL = "https://toncenter.com/api/v3"
 # TON API (резервный)
 TONAPI_URL = "https://tonapi.io/v2"
 
-# ORBS Network fallback (бесплатный)
-ORBS_TON_API_URL = "https://ton.access.orbs.network/44A1c"
-
-# GetBlock TON API (дополнительный fallback)
-GETBLOCK_TON_API_URL = "https://go.getblock.io/ton/mainnet"
+# Note: ORBS Network endpoint removed - returns 404 errors
+# Note: GetBlock endpoint removed - requires API key
 
 # TON address constants
 # TON user-friendly address is 36 bytes: 1 byte flags + 1 byte workchain + 32 bytes address + 2 bytes CRC16
@@ -501,16 +498,7 @@ class TONTracker:
             )
             return transactions
 
-        # Пробуем ORBS Network (fallback)
-        logger.debug("Пробуем получить данные через ORBS Network")
-        transactions = await self._get_from_orbs(min_value_ton, limit)
-        if transactions:
-            logger.info(
-                "Данные получены через ORBS Network",
-                count=len(transactions),
-            )
-            return transactions
-
+        # Note: ORBS Network fallback removed - endpoint returns 404 errors
         logger.warning("Не удалось получить TON транзакции")
         return []
 
@@ -890,38 +878,19 @@ class TONTracker:
         limit: int,
     ) -> list[TONTransaction]:
         """
-        Получение транзакций через ORBS Network (fallback).
-
-        ORBS Network предоставляет бесплатный доступ к TON API.
+        DEPRECATED: ORBS Network endpoint removed (returns 404).
+        
+        This method is kept for backward compatibility but always returns empty list.
 
         Args:
             min_value_ton: Минимальная сумма в TON
             limit: Максимальное количество транзакций
 
         Returns:
-            list[TONTransaction]: Список транзакций
+            list[TONTransaction]: Empty list (ORBS endpoint disabled)
         """
-        try:
-            transactions = []
-
-            # Проверяем транзакции известных адресов
-            for address in list(TON_EXCHANGES.keys())[:3]:
-                txs = await self._fetch_address_transactions_orbs(
-                    address, min_value_ton
-                )
-                transactions.extend(txs)
-                if len(transactions) >= limit * 2:
-                    break
-                await asyncio.sleep(1.0)
-
-            return self._deduplicate_and_sort(transactions, limit)
-
-        except Exception as e:
-            logger.debug(
-                "Ошибка ORBS Network API",
-                error=str(e),
-            )
-            return []
+        logger.debug("ORBS Network endpoint disabled - returns 404 errors")
+        return []
 
     async def _fetch_address_transactions_orbs(
         self,
@@ -929,88 +898,19 @@ class TONTracker:
         min_value_ton: float,
     ) -> list[TONTransaction]:
         """
-        Получение транзакций для адреса через ORBS Network.
+        DEPRECATED: ORBS Network endpoint removed (returns 404).
+        
+        This method is kept for backward compatibility but always returns empty list.
 
         Args:
             address: Адрес кошелька
             min_value_ton: Минимальная сумма в TON
 
         Returns:
-            list[TONTransaction]: Список транзакций
+            list[TONTransaction]: Empty list (ORBS endpoint disabled)
         """
-        try:
-            # Validate address before making API call
-            if not is_valid_ton_address(address):
-                logger.debug(f"Skipping invalid TON address: {address}")
-                return []
-
-            # Конвертируем адрес в raw формат для API
-            raw_address = user_friendly_to_raw(address)
-
-            # ORBS Network uses JSON-RPC format similar to TON Center
-            url = f"{ORBS_TON_API_URL}/1/getTransactions"
-            params = {
-                "address": raw_address,
-                "limit": 10,
-            }
-
-            data = await self._make_api_request(url, params=params)
-            if not data or not data.get("ok"):
-                return []
-
-            transactions = []
-            result = data.get("result", [])
-
-            for tx in result:
-                if not isinstance(tx, dict):
-                    continue
-
-                # Получаем входящие сообщения
-                in_msg = tx.get("in_msg", {})
-                if not in_msg:
-                    continue
-
-                # Парсим сумму
-                value_nano = int(in_msg.get("value", 0) or 0)
-                value_ton = value_nano / 1_000_000_000
-
-                if value_ton < min_value_ton:
-                    continue
-
-                value_usd = value_ton * self._ton_price
-
-                # Адреса
-                from_addr = in_msg.get("source", "")
-                to_addr = in_msg.get("destination", "") or address
-
-                # Время
-                try:
-                    utime = tx.get("utime", 0)
-                    timestamp = datetime.fromtimestamp(utime, tz=timezone.utc) if utime else None
-                except (ValueError, OSError):
-                    timestamp = datetime.now(timezone.utc)
-
-                # Хэш транзакции
-                tx_hash = tx.get("transaction_id", {}).get("hash", "")
-
-                tx_obj = TONTransaction(
-                    tx_hash=tx_hash,
-                    from_address=from_addr,
-                    to_address=to_addr,
-                    value_ton=value_ton,
-                    value_usd=value_usd,
-                    token_symbol="TON",
-                    timestamp=timestamp,
-                    lt=tx.get("transaction_id", {}).get("lt"),
-                )
-                tx_obj.tx_type = tx_obj.get_transaction_type()
-                transactions.append(tx_obj)
-
-            return transactions
-
-        except Exception as e:
-            logger.debug(f"Ошибка при получении транзакций через ORBS Network: {e}")
-            return []
+        logger.debug("ORBS Network endpoint disabled - returns 404 errors")
+        return []
 
     def _deduplicate_and_sort(
         self,
