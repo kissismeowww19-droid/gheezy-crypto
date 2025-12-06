@@ -57,20 +57,16 @@ class BSCProvider:
     def __init__(self):
         """Initialize BSC provider with list of free public RPC endpoints."""
         self.providers = [
-            # Official Binance (most reliable)
+            # Ankr (best performance, primary)
+            "https://rpc.ankr.com/bsc",
+            
+            # Official Binance (reliable)
             "https://bsc-dataseed1.binance.org",
             "https://bsc-dataseed2.binance.org",
-            "https://bsc-dataseed3.binance.org",
-            "https://bsc-dataseed4.binance.org",
             
             # Community RPCs
-            "https://bsc.publicnode.com",
-            "https://binance.llamarpc.com",
             "https://bsc-dataseed1.defibit.io",
-            "https://bsc-dataseed1.ninicoin.io",
-            
-            # Ankr (backup)
-            "https://rpc.ankr.com/bsc",
+            "https://bsc.publicnode.com",
         ]
         self.current_index = 0
         self.last_working_provider: Optional[str] = None

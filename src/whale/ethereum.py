@@ -156,7 +156,7 @@ class EthereumTracker:
         # Use API key rotation for rate limits
         self.api_key = get_next_api_key()
         self.min_value_usd = settings.whale_min_transaction
-        self.blocks_to_analyze = getattr(settings, "whale_blocks_to_analyze", 200)
+        self.blocks_to_analyze = getattr(settings, "whale_blocks_to_analyze", 80)  # Reduced from 200
         self.price_cache_ttl = getattr(settings, "whale_price_cache_ttl", 300)
         self._session: Optional[aiohttp.ClientSession] = None
         self._eth_price: float = 2000.0  # Дефолтная цена ETH
@@ -368,10 +368,10 @@ class EthereumTracker:
             )
 
             # Sequential requests with delay to avoid rate limits (3 req/sec)
-            # Reduced from 15 to 10 addresses to minimize API calls while still covering major exchanges
+            # Reduced from 10 to 8 addresses for performance optimization
             # Адреса отсортированы по важности (крупнейшие биржи первые)
             transactions = []
-            for address in TRACKED_EXCHANGE_ADDRESSES[:10]:
+            for address in TRACKED_EXCHANGE_ADDRESSES[:8]:
                 # Get next API key for each request (rotation)
                 api_key = get_next_api_key() or self.api_key
                 

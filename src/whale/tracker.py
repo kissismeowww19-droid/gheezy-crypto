@@ -84,6 +84,20 @@ from database.whale_db import (
 
 logger = structlog.get_logger()
 
+# Network priority order (fastest first)
+NETWORK_PRIORITY = ["btc", "avax", "bsc", "eth", "arb", "polygon", "ton"]
+
+# Timeouts per network
+NETWORK_TIMEOUTS = {
+    "btc": 5,
+    "avax": 4,
+    "bsc": 5,
+    "eth": 6,
+    "arb": 5,
+    "polygon": 5,
+    "ton": 8,
+}
+
 
 class TransactionType(str, Enum):
     """Типы транзакций."""
@@ -803,29 +817,48 @@ class WhaleTracker:
         Returns:
             list[WhaleTransaction]: Список всех транзакций (без дубликатов)
         """
-        # Запускаем все запросы параллельно (только работающие сети)
-        eth_task = self.get_ethereum_transactions(limit=limit)
-        btc_task = self.get_bitcoin_transactions(limit=limit)
-        bsc_task = self.get_bsc_transactions(limit=limit)
-        arb_task = self.get_arbitrum_transactions(limit=limit)
-        polygon_task = self.get_polygon_transactions(limit=limit)
-        avax_task = self.get_avalanche_transactions(limit=limit)
-        ton_task = self.get_ton_transactions(limit=limit)
-
-        results = await asyncio.gather(
-            eth_task, btc_task, bsc_task, arb_task, polygon_task, avax_task, ton_task,
-            return_exceptions=True
-        )
-
+        # Sequential processing with priorities and timeouts
         all_transactions = []
-        for result in results:
-            if isinstance(result, list):
-                all_transactions.extend(result)
-            elif isinstance(result, Exception):
+
+        # Map network names to their corresponding methods
+        network_methods = {
+            "btc": self.get_bitcoin_transactions,
+            "avax": self.get_avalanche_transactions,
+            "bsc": self.get_bsc_transactions,
+            "eth": self.get_ethereum_transactions,
+            "arb": self.get_arbitrum_transactions,
+            "polygon": self.get_polygon_transactions,
+            "ton": self.get_ton_transactions,
+        }
+
+        for network in NETWORK_PRIORITY:
+            try:
+                # Get the method for this network
+                method = network_methods.get(network)
+                if not method:
+                    continue
+
+                # Execute with timeout
+                result = await asyncio.wait_for(
+                    method(limit=limit),
+                    timeout=NETWORK_TIMEOUTS[network]
+                )
+
+                if isinstance(result, list):
+                    all_transactions.extend(result)
+
+            except asyncio.TimeoutError:
+                logger.warning(f"{network.upper()} timeout, skipping")
+            except Exception as e:
                 logger.error(
                     "Ошибка получения транзакций",
-                    error=str(result),
+                    network=network,
+                    error=str(e),
                 )
+
+            # Pause between networks to avoid rate limits
+            if network != "ton":
+                await asyncio.sleep(0.3)
 
         # Фильтруем дубликаты с помощью кеша
         unique_transactions = []
