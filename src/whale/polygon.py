@@ -238,6 +238,11 @@ class PolygonTracker:
         Returns:
             list[PolygonTransaction]: Список транзакций
         """
+        # Add initial delay to avoid rate limit collision with other chains
+        # Polygon starts 2 seconds after other Etherscan V2 chains to prevent
+        # hitting 3 req/sec rate limit when all chains start simultaneously
+        await asyncio.sleep(2)
+        
         await self._update_matic_price()
 
         # Пробуем Etherscan V2 API (один ключ для всех EVM сетей)

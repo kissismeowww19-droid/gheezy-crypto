@@ -390,10 +390,11 @@ async def cmd_help(message: Message):
     text = text + "/market — обзор рынка\n"
     text = text + "/prices — все монеты (с пагинацией)\n"
     text = text + "/help — справка\n\n"
-    text = text + "*Команды Whale Tracker (5 сетей):*\n\n"
+    text = text + "*Команды Whale Tracker (6 сетей):*\n\n"
     text = text + "/whale — все крупные транзакции\n"
     text = text + "/whale btc — только Bitcoin\n"
     text = text + "/whale eth — только Ethereum\n"
+    text = text + "/whale bsc — только BSC (FREE!)\n"
     text = text + "/whale arb — только Arbitrum\n"
     text = text + "/whale polygon — только Polygon\n"
     text = text + "/whale avax — только Avalanche\n"
@@ -658,22 +659,25 @@ async def cmd_rune(message: Message):
 # ============================================
 
 def get_whale_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура для whale tracker с 5 сетями."""
+    """Клавиатура для whale tracker с 6 сетями."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="🟠 BTC", callback_data="whale_btc"),
             InlineKeyboardButton(text="🔷 ETH", callback_data="whale_eth"),
         ],
         [
+            InlineKeyboardButton(text="🟡 BSC", callback_data="whale_bsc"),
             InlineKeyboardButton(text="🔵 Arbitrum", callback_data="whale_arb"),
+        ],
+        [
             InlineKeyboardButton(text="🟣 Polygon", callback_data="whale_polygon"),
-        ],
-        [
             InlineKeyboardButton(text="🔺 Avalanche", callback_data="whale_avax"),
-            InlineKeyboardButton(text="📊 Статистика", callback_data="whale_stats"),
         ],
         [
+            InlineKeyboardButton(text="📊 Статистика", callback_data="whale_stats"),
             InlineKeyboardButton(text="🔄 Обновить", callback_data="whale_all"),
+        ],
+        [
             InlineKeyboardButton(text="🔙 Назад", callback_data="menu_back"),
         ],
     ])
@@ -700,8 +704,8 @@ async def cmd_whale(message: Message):
             "🐋 *Whale Tracker*\n\n"
             "✅ *Оповещения включены!*\n\n"
             "Вы будете получать уведомления о крупных\n"
-            "транзакциях на BTC, ETH, Arbitrum, Polygon\n"
-            "и Avalanche.\n\n"
+            "транзакциях на BTC, ETH, BSC, Arbitrum,\n"
+            "Polygon и Avalanche.\n\n"
             "Минимальная сумма: $100,000+"
         )
         new_msg = await message.answer(text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
@@ -756,19 +760,20 @@ async def cmd_whale(message: Message):
         return
 
     if subcommand in ("bsc", "bnb", "binance"):
-        # BSC removed - API requires paid plan
-        text = (
-            "🐋 *Whale Tracker - BSC*\n\n"
-            "⚠️ *Временно недоступно*\n\n"
-            "BSC требует платный API ключ.\n"
-            "Используйте другие сети:\n"
-            "• ETH (Etherscan V2)\n"
-            "• Arbitrum, Polygon, Base\n"
-            "• BTC (mempool.space)\n"
-            "• AVAX (Snowtrace)"
-        )
-        new_msg = await message.answer(text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
-        user_messages[chat_id] = new_msg.message_id
+        # BSC re-enabled with Blockscout (FREE!)
+        loading_msg = await message.answer("⏳ *Загружаю BSC транзакции...*", parse_mode=ParseMode.MARKDOWN)
+        user_messages[chat_id] = loading_msg.message_id
+
+        try:
+            whale_text = await whale_tracker.format_whale_message(blockchain="bsc")
+            await loading_msg.edit_text(whale_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+        except Exception as e:
+            logger.error(f"Whale BSC error: {e}")
+            await loading_msg.edit_text(
+                "🐋 *Whale Tracker - BSC*\n\n❌ Ошибка загрузки данных",
+                reply_markup=get_whale_keyboard(),
+                parse_mode=ParseMode.MARKDOWN
+            )
         return
 
     if subcommand in ("btc", "bitcoin"):
@@ -981,19 +986,20 @@ async def callback_whale_eth(callback: CallbackQuery):
 
 @router.callback_query(lambda c: c.data == "whale_bsc")
 async def callback_whale_bsc(callback: CallbackQuery):
-    """BSC removed - requires paid API."""
-    await callback.answer("BSC временно недоступен")
-    text = (
-        "🐋 *Whale Tracker - BSC*\n\n"
-        "⚠️ *Временно недоступно*\n\n"
-        "BSC требует платный API ключ.\n"
-        "Используйте другие сети:\n"
-        "• ETH (Etherscan V2)\n"
-        "• Arbitrum, Polygon, Base\n"
-        "• BTC (mempool.space)\n"
-        "• AVAX (Snowtrace)"
-    )
-    await callback.message.edit_text(text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+    """Транзакции BSC (Blockscout - FREE!)."""
+    await callback.answer("⏳ Загружаю BSC...")
+    await callback.message.edit_text("⏳ *Загружаю BSC транзакции...*", parse_mode=ParseMode.MARKDOWN)
+
+    try:
+        whale_text = await whale_tracker.format_whale_message(blockchain="bsc")
+        await callback.message.edit_text(whale_text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        logger.error(f"Whale BSC callback error: {e}")
+        await callback.message.edit_text(
+            "🐋 *Whale Tracker - BSC*\n\n❌ Ошибка загрузки данных",
+            reply_markup=get_whale_keyboard(),
+            parse_mode=ParseMode.MARKDOWN
+        )
 
 
 @router.callback_query(lambda c: c.data == "whale_btc")

@@ -286,9 +286,10 @@ class BSCTracker:
         Получение крупных BNB транзакций.
 
         Использует несколько источников данных:
-        1. Ankr RPC (основной, бесплатный, без регистрации)
-        2. BscScan API (api.bscscan.com) если есть ключ
-        3. Публичные RPC ноды
+        1. Blockscout BSC API (FREE, no API key required!)
+        2. Binance dataseed RPC (основной, бесплатный, без регистрации)
+        3. BscScan API (api.bscscan.com) если есть ключ
+        4. Ankr RPC (резервный)
 
         Args:
             limit: Максимальное количество транзакций
@@ -299,38 +300,48 @@ class BSCTracker:
         await self._update_bnb_price()
         min_value_bnb = self.min_value_usd / self._bnb_price
 
-        # 1. Пробуем публичные RPC (Binance dataseed - наиболее надежные)
-        logger.debug("Пробуем получить данные через Binance RPC")
-        transactions = await self._get_from_rpc(min_value_bnb, limit)
+        # 1. Пробуем Blockscout BSC API (FREE, no key required!)
+        logger.debug("BSC: Пробуем получить данные через Blockscout (FREE)")
+        transactions = await self._get_from_blockscout(min_value_bnb, limit)
         if transactions:
             logger.info(
-                "Данные получены через Binance RPC",
+                "BSC: Данные получены через Blockscout (FREE)",
                 count=len(transactions),
             )
             return transactions
 
-        # 2. Пробуем BscScan API если есть ключ
+        # 2. Пробуем публичные RPC (Binance dataseed - наиболее надежные)
+        logger.debug("BSC: Пробуем получить данные через Binance RPC")
+        transactions = await self._get_from_rpc(min_value_bnb, limit)
+        if transactions:
+            logger.info(
+                "BSC: Данные получены через Binance RPC",
+                count=len(transactions),
+            )
+            return transactions
+
+        # 3. Пробуем BscScan API если есть ключ
         if self.api_key:
-            logger.debug("Пробуем получить данные через BscScan API")
+            logger.debug("BSC: Пробуем получить данные через BscScan API")
             transactions = await self._get_from_bscscan(min_value_bnb, limit)
             if transactions:
                 logger.info(
-                    "Данные получены через BscScan API",
+                    "BSC: Данные получены через BscScan API",
                     count=len(transactions),
                 )
                 return transactions
 
-        # 3. Резервный вариант через Ankr RPC
-        logger.debug("Пробуем получить данные через Ankr RPC")
+        # 4. Резервный вариант через Ankr RPC
+        logger.debug("BSC: Пробуем получить данные через Ankr RPC")
         transactions = await self._get_from_ankr_rpc(min_value_bnb, limit)
         if transactions:
             logger.info(
-                "Данные получены через Ankr RPC",
+                "BSC: Данные получены через Ankr RPC",
                 count=len(transactions),
             )
             return transactions
 
-        logger.warning("BSC данные временно недоступны")
+        logger.warning("BSC: Все источники данных недоступны")
         return []
 
     async def _get_from_ankr_rpc(
