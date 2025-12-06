@@ -819,50 +819,34 @@ class WhaleTracker:
         """
         # Sequential processing with priorities and timeouts
         all_transactions = []
-        
+
+        # Map network names to their corresponding methods
+        network_methods = {
+            "btc": self.get_bitcoin_transactions,
+            "avax": self.get_avalanche_transactions,
+            "bsc": self.get_bsc_transactions,
+            "eth": self.get_ethereum_transactions,
+            "arb": self.get_arbitrum_transactions,
+            "polygon": self.get_polygon_transactions,
+            "ton": self.get_ton_transactions,
+        }
+
         for network in NETWORK_PRIORITY:
             try:
-                if network == "btc":
-                    result = await asyncio.wait_for(
-                        self.get_bitcoin_transactions(limit=limit),
-                        timeout=NETWORK_TIMEOUTS["btc"]
-                    )
-                elif network == "avax":
-                    result = await asyncio.wait_for(
-                        self.get_avalanche_transactions(limit=limit),
-                        timeout=NETWORK_TIMEOUTS["avax"]
-                    )
-                elif network == "bsc":
-                    result = await asyncio.wait_for(
-                        self.get_bsc_transactions(limit=limit),
-                        timeout=NETWORK_TIMEOUTS["bsc"]
-                    )
-                elif network == "eth":
-                    result = await asyncio.wait_for(
-                        self.get_ethereum_transactions(limit=limit),
-                        timeout=NETWORK_TIMEOUTS["eth"]
-                    )
-                elif network == "arb":
-                    result = await asyncio.wait_for(
-                        self.get_arbitrum_transactions(limit=limit),
-                        timeout=NETWORK_TIMEOUTS["arb"]
-                    )
-                elif network == "polygon":
-                    result = await asyncio.wait_for(
-                        self.get_polygon_transactions(limit=limit),
-                        timeout=NETWORK_TIMEOUTS["polygon"]
-                    )
-                elif network == "ton":
-                    result = await asyncio.wait_for(
-                        self.get_ton_transactions(limit=limit),
-                        timeout=NETWORK_TIMEOUTS["ton"]
-                    )
-                else:
+                # Get the method for this network
+                method = network_methods.get(network)
+                if not method:
                     continue
-                
+
+                # Execute with timeout
+                result = await asyncio.wait_for(
+                    method(limit=limit),
+                    timeout=NETWORK_TIMEOUTS[network]
+                )
+
                 if isinstance(result, list):
                     all_transactions.extend(result)
-                    
+
             except asyncio.TimeoutError:
                 logger.warning(f"{network.upper()} timeout, skipping")
             except Exception as e:
@@ -871,7 +855,7 @@ class WhaleTracker:
                     network=network,
                     error=str(e),
                 )
-            
+
             # Pause between networks to avoid rate limits
             if network != "ton":
                 await asyncio.sleep(0.3)

@@ -53,24 +53,6 @@ _api_keys: list[str] = []
 _key_cycle: Optional[itertools.cycle] = None
 _initialized = False
 
-# Global rate limiter instance
-_rate_limiter: Optional[EtherscanRateLimiter] = None
-
-
-def get_rate_limiter() -> EtherscanRateLimiter:
-    """
-    Get the global Etherscan rate limiter instance.
-    
-    Returns:
-        EtherscanRateLimiter: Global rate limiter
-    """
-    global _rate_limiter
-    
-    if _rate_limiter is None:
-        _rate_limiter = EtherscanRateLimiter(calls_per_second=2.0)
-    
-    return _rate_limiter
-
 
 def init_api_keys() -> None:
     """
@@ -232,11 +214,10 @@ async def make_request_with_rate_limit(
 def reset_api_keys() -> None:
     """
     Reset API key rotation state.
-    
+
     Used for testing or re-initialization.
     """
-    global _api_keys, _key_cycle, _initialized, _rate_limiter
+    global _api_keys, _key_cycle, _initialized
     _api_keys = []
     _key_cycle = None
     _initialized = False
-    _rate_limiter = None
