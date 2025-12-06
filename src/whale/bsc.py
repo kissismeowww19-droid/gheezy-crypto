@@ -401,10 +401,9 @@ class BSCTracker:
                                 if block_data and "transactions" in block_data:
                                     blocks_data[block_num] = block_data
                                     self._cache_block(block_num, block_data)
-                            await asyncio.sleep(0.3)
                         except Exception as e:
                             logger.debug(f"BSC: Sequential block {block_num} failed: {e}")
-                            continue
+                        await asyncio.sleep(0.3)
 
             # Process all blocks
             for block_num in block_numbers:
