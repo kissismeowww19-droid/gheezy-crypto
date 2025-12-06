@@ -10,6 +10,12 @@ from typing import List, Optional, Tuple
 import numpy as np
 
 
+# Constants for indicator calculations
+RSI_MAX_VALUE = 100.0
+RSI_OVERBOUGHT_THRESHOLD = 70
+RSI_OVERSOLD_THRESHOLD = 30
+
+
 @dataclass
 class RSI:
     """
@@ -229,10 +235,10 @@ def calculate_rsi(
     avg_loss = np.mean(losses[-period:])
 
     if avg_loss == 0:
-        rsi_value = 100.0
+        rsi_value = RSI_MAX_VALUE
     else:
         rs = avg_gain / avg_loss
-        rsi_value = 100 - (100 / (1 + rs))
+        rsi_value = RSI_MAX_VALUE - (RSI_MAX_VALUE / (1 + rs))
 
     return RSI(value=float(rsi_value), period=period)
 
@@ -492,10 +498,10 @@ def calculate_stochastic_rsi(prices: List[float], period: int = 14, smooth_k: in
         avg_gain = np.mean(gains[i-period:i])
         avg_loss = np.mean(losses[i-period:i])
         if avg_loss == 0:
-            rsi_values.append(100.0)
+            rsi_values.append(RSI_MAX_VALUE)
         else:
             rs = avg_gain / avg_loss
-            rsi_values.append(100 - (100 / (1 + rs)))
+            rsi_values.append(RSI_MAX_VALUE - (RSI_MAX_VALUE / (1 + rs)))
     
     if len(rsi_values) < smooth_k:
         return None
@@ -586,10 +592,10 @@ def calculate_mfi(high: List[float], low: List[float], close: List[float], volum
     negative_mf = sum(negative_flow[-period:])
     
     if negative_mf == 0:
-        mfi_value = 100.0
+        mfi_value = RSI_MAX_VALUE
     else:
         money_ratio = positive_mf / negative_mf
-        mfi_value = 100 - (100 / (1 + money_ratio))
+        mfi_value = RSI_MAX_VALUE - (RSI_MAX_VALUE / (1 + money_ratio))
     
     # Determine signal
     if mfi_value < 20:

@@ -8,6 +8,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List
 import aiohttp
+import asyncio
 
 from api_manager import get_coin_price
 from signals.indicators import (
@@ -57,6 +58,9 @@ class AISignalAnalyzer:
     DERIVATIVES_WEIGHT = 0.10 # 10%
     ONCHAIN_WEIGHT = 0.08    # 8%
     SENTIMENT_WEIGHT = 0.07  # 7%
+    
+    # Scaling factor for final score calculation
+    SCORE_SCALE_FACTOR = 10  # Scale weighted sum from -10/+10 to -100/+100
     
     def __init__(self, whale_tracker):
         """
@@ -984,7 +988,7 @@ class AISignalAnalyzer:
             derivatives_score * self.DERIVATIVES_WEIGHT +
             onchain_score * self.ONCHAIN_WEIGHT +
             sentiment_score * self.SENTIMENT_WEIGHT
-        ) * 10  # Scale to -100 to +100
+        ) * self.SCORE_SCALE_FACTOR  # Scale to -100 to +100
         
         # Determine direction and strength
         if total_score > 20:
@@ -1325,7 +1329,6 @@ class AISignalAnalyzer:
             )
             
             # Wait for all tasks
-            import asyncio
             whale_data, market_data, fear_greed, funding_rate, external_data = await asyncio.gather(
                 whale_data_task,
                 market_data_task,

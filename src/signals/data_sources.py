@@ -347,9 +347,9 @@ class DataSourceManager:
                 if isinstance(ls_response, aiohttp.ClientResponse) and ls_response.status == 200:
                     ls_data = await ls_response.json()
                     if ls_data and len(ls_data) > 0:
-                        latest = ls_data[0]
-                        long_ratio = float(latest.get("longAccount", 0.5))
-                        short_ratio = float(latest.get("shortAccount", 0.5))
+                        latest_ratio_data = ls_data[0]
+                        long_ratio = float(latest_ratio_data.get("longAccount", 0.5))
+                        short_ratio = float(latest_ratio_data.get("shortAccount", 0.5))
                         
                         if short_ratio > 0:
                             ls_ratio = long_ratio / short_ratio
@@ -547,12 +547,18 @@ class DataSourceManager:
         """
         try:
             # Gather all data sources in parallel
+            # Create coroutine for on-chain data (BTC only) or return None
+            async def get_onchain_if_btc():
+                if symbol == "BTC":
+                    return await self.get_btc_onchain_data()
+                return None
+            
             results = await asyncio.gather(
                 self.get_ohlcv_data(symbol),
                 self.get_order_book_analysis(binance_symbol),
                 self.get_recent_trades_analysis(binance_symbol),
                 self.get_futures_data(binance_symbol),
-                self.get_btc_onchain_data() if symbol == "BTC" else asyncio.sleep(0, result=None),
+                get_onchain_if_btc(),
                 self.get_exchange_flows(whale_tracker, symbol),
                 return_exceptions=True
             )
