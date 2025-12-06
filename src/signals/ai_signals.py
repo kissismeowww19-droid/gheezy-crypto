@@ -39,12 +39,24 @@ class AISignalAnalyzer:
     CACHE_TTL_FUNDING_RATE = 300  # 5 минут
     MIN_PRICE_POINTS = 30  # Минимум точек для индикаторов
     
-    # Веса для нового алгоритма
-    NEW_WHALE_WEIGHT = 25
-    NEW_MARKET_WEIGHT = 20
-    NEW_TECHNICAL_WEIGHT = 35
-    NEW_FG_WEIGHT = 10
-    NEW_FR_WEIGHT = 10
+    # Новые константы для кэширования
+    CACHE_TTL_OHLCV = 300  # 5 минут
+    CACHE_TTL_ORDER_BOOK = 10  # 10 секунд
+    CACHE_TTL_TRADES = 30  # 30 секунд
+    CACHE_TTL_FUTURES = 60  # 1 минута
+    CACHE_TTL_ONCHAIN = 600  # 10 минут
+    
+    # Веса для НОВОГО расширенного алгоритма (10 факторов)
+    WEIGHT_WHALES = 12
+    WEIGHT_TREND = 15  # RSI + MACD
+    WEIGHT_MOMENTUM = 12  # Stoch RSI + MFI + Williams
+    WEIGHT_VOLATILITY = 8  # BB + ATR
+    WEIGHT_VOLUME = 10  # OBV
+    WEIGHT_MARKET = 8  # Price change
+    WEIGHT_ORDER_BOOK = 10
+    WEIGHT_DERIVATIVES = 10  # OI + Long/Short + Funding
+    WEIGHT_ONCHAIN = 8  # BTC on-chain
+    WEIGHT_SENTIMENT = 7  # Fear & Greed
     
     def __init__(self, whale_tracker):
         """
@@ -401,6 +413,397 @@ class AISignalAnalyzer:
                         return None
         except Exception as e:
             logger.error(f"Error getting funding rate for {symbol}: {e}")
+            return None
+    
+    async def get_ohlcv_data(self, symbol: str, limit: int = 48) -> Optional[Dict]:
+        """
+        Получение OHLCV данных из CryptoCompare API.
+        
+        Args:
+            symbol: Символ монеты (BTC, ETH)
+            limit: Количество свечей
+            
+        Returns:
+            Dict с OHLCV данными или None
+        """
+        cache_key = f"ohlcv_{symbol}_{limit}"
+        
+        # Проверяем кэш
+        cached_data = self._get_cache(cache_key, self.CACHE_TTL_OHLCV)
+        if cached_data is not None:
+            return cached_data
+        
+        try:
+            # Маппинг символов для CryptoCompare
+            fsym = symbol.upper()
+            
+            url = "https://min-api.cryptocompare.com/data/v2/histohour"
+            params = {
+                "fsym": fsym,
+                "tsym": "USD",
+                "limit": limit
+            }
+            
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params, timeout=timeout) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        if data.get("Response") == "Success":
+                            candles = data.get("Data", {}).get("Data", [])
+                            
+                            if candles:
+                                result = {
+                                    "high": [c["high"] for c in candles],
+                                    "low": [c["low"] for c in candles],
+                                    "open": [c["open"] for c in candles],
+                                    "close": [c["close"] for c in candles],
+                                    "volume": [c["volumeto"] for c in candles],
+                                }
+                                
+                                self._set_cache(cache_key, result)
+                                logger.info(f"Fetched {len(candles)} OHLCV candles for {symbol}")
+                                return result
+                        
+                        logger.warning(f"CryptoCompare API error for {symbol}")
+                        return None
+                    else:
+                        logger.warning(f"Failed to fetch OHLCV data for {symbol}: {response.status}")
+                        return None
+        except Exception as e:
+            logger.error(f"Error getting OHLCV data for {symbol}: {e}")
+            return None
+    
+    async def get_order_book_analysis(self, symbol: str) -> Optional[Dict]:
+        """
+        Получение и анализ Order Book из Binance.
+        
+        Args:
+            symbol: Символ монеты (BTC, ETH)
+            
+        Returns:
+            Dict с анализом Order Book или None
+        """
+        cache_key = f"order_book_{symbol}"
+        
+        # Проверяем кэш
+        cached_data = self._get_cache(cache_key, self.CACHE_TTL_ORDER_BOOK)
+        if cached_data is not None:
+            return cached_data
+        
+        try:
+            binance_symbol = self.binance_mapping.get(symbol)
+            if not binance_symbol:
+                logger.warning(f"Unknown symbol for order book: {symbol}")
+                return None
+            
+            url = "https://api.binance.com/api/v3/depth"
+            params = {
+                "symbol": binance_symbol,
+                "limit": 100
+            }
+            
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params, timeout=timeout) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        bids = data.get("bids", [])
+                        asks = data.get("asks", [])
+                        
+                        # Расчёт объёмов
+                        bid_volume = sum(float(bid[0]) * float(bid[1]) for bid in bids)
+                        ask_volume = sum(float(ask[0]) * float(ask[1]) for ask in asks)
+                        
+                        total_volume = bid_volume + ask_volume
+                        imbalance = (bid_volume - ask_volume) / total_volume if total_volume > 0 else 0
+                        
+                        # Спред
+                        best_bid = float(bids[0][0]) if bids else 0
+                        best_ask = float(asks[0][0]) if asks else 0
+                        spread = best_ask - best_bid if best_bid and best_ask else 0
+                        
+                        # Уровни поддержки/сопротивления (самые большие заявки)
+                        bid_levels = sorted([(float(b[0]), float(b[1])) for b in bids], 
+                                          key=lambda x: x[1], reverse=True)[:3]
+                        ask_levels = sorted([(float(a[0]), float(a[1])) for a in asks], 
+                                          key=lambda x: x[1], reverse=True)[:3]
+                        
+                        result = {
+                            "bid_volume": bid_volume,
+                            "ask_volume": ask_volume,
+                            "imbalance": imbalance,
+                            "spread": spread,
+                            "support_level": bid_levels[0][0] if bid_levels else 0,
+                            "resistance_level": ask_levels[0][0] if ask_levels else 0,
+                        }
+                        
+                        self._set_cache(cache_key, result)
+                        logger.info(f"Fetched order book for {symbol}, imbalance: {imbalance:.2%}")
+                        return result
+                    else:
+                        logger.warning(f"Failed to fetch order book for {symbol}: {response.status}")
+                        return None
+        except Exception as e:
+            logger.error(f"Error getting order book for {symbol}: {e}")
+            return None
+    
+    async def get_recent_trades_analysis(self, symbol: str) -> Optional[Dict]:
+        """
+        Получение и анализ Recent Trades из Binance.
+        
+        Args:
+            symbol: Символ монеты (BTC, ETH)
+            
+        Returns:
+            Dict с анализом сделок или None
+        """
+        cache_key = f"recent_trades_{symbol}"
+        
+        # Проверяем кэш
+        cached_data = self._get_cache(cache_key, self.CACHE_TTL_TRADES)
+        if cached_data is not None:
+            return cached_data
+        
+        try:
+            binance_symbol = self.binance_mapping.get(symbol)
+            if not binance_symbol:
+                logger.warning(f"Unknown symbol for trades: {symbol}")
+                return None
+            
+            url = "https://api.binance.com/api/v3/trades"
+            params = {
+                "symbol": binance_symbol,
+                "limit": 500
+            }
+            
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params, timeout=timeout) as response:
+                    if response.status == 200:
+                        trades = await response.json()
+                        
+                        buy_volume = 0
+                        sell_volume = 0
+                        buy_count = 0
+                        sell_count = 0
+                        large_threshold = sum(float(t["quoteQty"]) for t in trades) / len(trades) * 3
+                        large_buys = 0
+                        large_sells = 0
+                        
+                        for trade in trades:
+                            qty = float(trade["quoteQty"])
+                            is_buyer_maker = trade.get("isBuyerMaker", False)
+                            
+                            if is_buyer_maker:
+                                # Продажа (buyer is maker означает что покупатель был мейкером)
+                                sell_volume += qty
+                                sell_count += 1
+                                if qty > large_threshold:
+                                    large_sells += 1
+                            else:
+                                # Покупка
+                                buy_volume += qty
+                                buy_count += 1
+                                if qty > large_threshold:
+                                    large_buys += 1
+                        
+                        result = {
+                            "buy_volume": buy_volume,
+                            "sell_volume": sell_volume,
+                            "buy_count": buy_count,
+                            "sell_count": sell_count,
+                            "large_buys": large_buys,
+                            "large_sells": large_sells,
+                        }
+                        
+                        self._set_cache(cache_key, result)
+                        logger.info(f"Analyzed {len(trades)} trades for {symbol}")
+                        return result
+                    else:
+                        logger.warning(f"Failed to fetch trades for {symbol}: {response.status}")
+                        return None
+        except Exception as e:
+            logger.error(f"Error getting trades for {symbol}: {e}")
+            return None
+    
+    async def get_futures_data(self, symbol: str) -> Optional[Dict]:
+        """
+        Получение расширенных данных Binance Futures.
+        
+        Args:
+            symbol: Символ монеты (BTC, ETH)
+            
+        Returns:
+            Dict с данными фьючерсов или None
+        """
+        cache_key = f"futures_{symbol}"
+        
+        # Проверяем кэш
+        cached_data = self._get_cache(cache_key, self.CACHE_TTL_FUTURES)
+        if cached_data is not None:
+            return cached_data
+        
+        try:
+            binance_symbol = self.binance_mapping.get(symbol)
+            if not binance_symbol:
+                logger.warning(f"Unknown symbol for futures: {symbol}")
+                return None
+            
+            # Open Interest
+            oi_url = "https://fapi.binance.com/fapi/v1/openInterest"
+            oi_params = {"symbol": binance_symbol}
+            
+            # Long/Short Ratio
+            ls_url = "https://fapi.binance.com/futures/data/globalLongShortAccountRatio"
+            ls_params = {
+                "symbol": binance_symbol,
+                "period": "1h"
+            }
+            
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession() as session:
+                # Получаем Open Interest
+                async with session.get(oi_url, params=oi_params, timeout=timeout) as oi_response:
+                    if oi_response.status != 200:
+                        logger.warning(f"Failed to fetch OI for {symbol}: {oi_response.status}")
+                        return None
+                    
+                    oi_data = await oi_response.json()
+                    open_interest = float(oi_data.get("openInterest", 0))
+                
+                # Получаем Long/Short Ratio
+                async with session.get(ls_url, params=ls_params, timeout=timeout) as ls_response:
+                    if ls_response.status != 200:
+                        logger.warning(f"Failed to fetch L/S ratio for {symbol}: {ls_response.status}")
+                        # Продолжаем без L/S данных
+                        long_short_ratio = 1.0
+                        top_trader_long_ratio = 0.5
+                    else:
+                        ls_data = await ls_response.json()
+                        
+                        if ls_data:
+                            latest = ls_data[-1]
+                            long_short_ratio = float(latest.get("longShortRatio", 1.0))
+                            # Top trader ratio можно извлечь если есть в API
+                            top_trader_long_ratio = long_short_ratio / (1 + long_short_ratio)
+                        else:
+                            long_short_ratio = 1.0
+                            top_trader_long_ratio = 0.5
+                
+                result = {
+                    "open_interest": open_interest,
+                    "open_interest_change": 0,  # Требует исторических данных
+                    "long_short_ratio": long_short_ratio,
+                    "top_trader_long_ratio": top_trader_long_ratio,
+                }
+                
+                self._set_cache(cache_key, result)
+                logger.info(f"Fetched futures data for {symbol}, OI: {open_interest}")
+                return result
+                
+        except Exception as e:
+            logger.error(f"Error getting futures data for {symbol}: {e}")
+            return None
+    
+    async def get_btc_onchain_data(self) -> Optional[Dict]:
+        """
+        Получение on-chain данных для BTC из Blockchain.info.
+        
+        Returns:
+            Dict с on-chain данными или None
+        """
+        cache_key = "btc_onchain"
+        
+        # Проверяем кэш
+        cached_data = self._get_cache(cache_key, self.CACHE_TTL_ONCHAIN)
+        if cached_data is not None:
+            return cached_data
+        
+        try:
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession() as session:
+                # Получаем размер mempool
+                async with session.get("https://blockchain.info/q/unconfirmedcount", timeout=timeout) as mempool_response:
+                    if mempool_response.status == 200:
+                        mempool_size = int(await mempool_response.text())
+                    else:
+                        logger.warning(f"Failed to fetch mempool size: {mempool_response.status}")
+                        mempool_size = 0
+                
+                # Получаем hashrate
+                async with session.get("https://blockchain.info/q/hashrate", timeout=timeout) as hashrate_response:
+                    if hashrate_response.status == 200:
+                        hashrate = int(await hashrate_response.text())
+                    else:
+                        logger.warning(f"Failed to fetch hashrate: {hashrate_response.status}")
+                        hashrate = 0
+                
+                # Определяем статус mempool
+                if mempool_size < 5000:
+                    mempool_status = "low"
+                elif mempool_size < 50000:
+                    mempool_status = "normal"
+                else:
+                    mempool_status = "high"
+                
+                result = {
+                    "mempool_size": mempool_size,
+                    "mempool_status": mempool_status,
+                    "hashrate": hashrate,
+                    "hashrate_change": 0,  # Требует исторических данных
+                }
+                
+                self._set_cache(cache_key, result)
+                logger.info(f"Fetched BTC on-chain data, mempool: {mempool_size}")
+                return result
+                
+        except Exception as e:
+            logger.error(f"Error getting BTC on-chain data: {e}")
+            return None
+    
+    async def get_exchange_flows(self, symbol: str) -> Optional[Dict]:
+        """
+        Получение данных о потоках на/с бирж из whale tracker.
+        
+        Args:
+            symbol: Символ монеты (BTC, ETH)
+            
+        Returns:
+            Dict с данными о потоках или None
+        """
+        try:
+            whale_data = await self.get_whale_data(symbol)
+            
+            if not whale_data:
+                return None
+            
+            # Используем данные китов для определения потоков
+            exchange_inflow = whale_data.get("deposits", 0)
+            exchange_outflow = whale_data.get("withdrawals", 0)
+            net_flow = exchange_outflow - exchange_inflow
+            
+            if net_flow > 2:
+                flow_trend = "outflow"  # Деньги уходят с бирж (бычий сигнал)
+            elif net_flow < -2:
+                flow_trend = "inflow"  # Деньги приходят на биржи (медвежий сигнал)
+            else:
+                flow_trend = "neutral"
+            
+            result = {
+                "exchange_inflow": exchange_inflow,
+                "exchange_outflow": exchange_outflow,
+                "net_flow": net_flow,
+                "flow_trend": flow_trend,
+            }
+            
+            logger.info(f"Exchange flows for {symbol}: {flow_trend}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error getting exchange flows for {symbol}: {e}")
             return None
     
     def calculate_signal(self, whale_data: Dict, market_data: Dict, technical_data: Optional[Dict] = None, 
