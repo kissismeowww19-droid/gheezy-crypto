@@ -52,6 +52,11 @@ class BSCProvider:
         if self._session and not self._session.closed:
             await self._session.close()
     
+    def invalidate_cache(self) -> None:
+        """Invalidate the cached working provider."""
+        self.last_working_provider = None
+        self.last_check_time = 0
+    
     async def get_working_provider(self) -> Optional[str]:
         """
         Get a working RPC provider.
@@ -255,8 +260,7 @@ class BSCProvider:
                 )
             
             # Mark provider as failed and try next one
-            self.last_working_provider = None
-            self.last_check_time = 0
+            self.invalidate_cache()
             
             # Wait before retrying with exponential backoff
             if attempt < max_retries - 1:

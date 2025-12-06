@@ -7,7 +7,7 @@ Gheezy Crypto - BSC Whale Tracker
 Возможности:
 - Ротация публичных RPC нод с автоматическим failover
 - Health check для выбора рабочего RPC
-- Кэширование данных блоков (5-15 минут)
+- Кэширование данных блоков (10 минут)
 - Кэширование цен криптовалют
 - Retry логика с exponential backoff
 - Timeout handling (3-5 секунд)
@@ -37,6 +37,8 @@ logger = structlog.get_logger()
 
 # Block data cache settings
 BLOCK_CACHE_TTL = 600  # Cache block data for 10 minutes
+BLOCK_CACHE_MAX_SIZE = 100  # Maximum number of blocks to cache
+BLOCK_CACHE_CLEANUP_SIZE = 50  # Number of oldest blocks to remove when cleaning
 
 # ===== Block scanning constants =====
 # Maximum number of blocks to scan
@@ -437,9 +439,9 @@ class BSCTracker:
         self._block_cache[block_num] = (block_data, current_time)
         
         # Clean old cache entries if cache is too large
-        if len(self._block_cache) > 100:
+        if len(self._block_cache) > BLOCK_CACHE_MAX_SIZE:
             # Remove oldest entries
-            oldest_blocks = sorted(self._block_cache.keys())[:50]
+            oldest_blocks = sorted(self._block_cache.keys())[:BLOCK_CACHE_CLEANUP_SIZE]
             for old_block in oldest_blocks:
                 del self._block_cache[old_block]
         
