@@ -16,9 +16,10 @@ async applications. For multi-threaded use, add locking mechanisms.
 
 import asyncio
 import itertools
-import os
 from typing import Optional
 import structlog
+
+from config import settings
 
 logger = structlog.get_logger()
 
@@ -45,9 +46,9 @@ def init_api_keys() -> None:
         return
     
     keys = [
-        os.getenv("ETHERSCAN_API_KEY"),
-        os.getenv("ETHERSCAN_API_KEY_2"),
-        os.getenv("ETHERSCAN_API_KEY_3"),
+        settings.etherscan_api_key,
+        settings.etherscan_api_key_2,
+        settings.etherscan_api_key_3,
     ]
     
     # Filter out None and empty strings
