@@ -75,6 +75,7 @@ from whale.stats import (
     format_24h_summary_message,
     format_db_stats_message,
 )
+from whale.whale_cache import get_whale_cache
 from database.whale_db import (
     get_transactions as get_db_transactions,
     get_multi_period_stats,
@@ -229,6 +230,9 @@ class WhaleTracker:
 
         # Получаем глобальный кеш транзакций
         self._tx_cache = get_transaction_cache()
+        
+        # Получаем глобальный кеш результатов китов (2 минуты)
+        self._whale_cache = get_whale_cache()
 
         # Инициализация трекеров для работающих блокчейнов
         # Using Etherscan V2 API (3 keys with rotation for ETH, Arbitrum, Polygon)
@@ -952,7 +956,7 @@ class WhaleTracker:
         blockchain: Optional[str] = None,
     ) -> str:
         """
-        Форматирование сообщения о движениях китов для Telegram.
+        Форматирование сообщения о движениях китов для Telegram с кешированием.
 
         Args:
             blockchain: Блокчейн для отображения (None для всех)
@@ -960,6 +964,19 @@ class WhaleTracker:
         Returns:
             str: Форматированное сообщение
         """
+        # Определяем ключ кеша
+        cache_key = blockchain if blockchain else "all"
+        
+        # Проверяем кеш
+        cached_result = self._whale_cache.get(cache_key)
+        if cached_result:
+            logger.debug(
+                "Используем кешированные whale данные",
+                network=cache_key,
+            )
+            return cached_result
+        
+        # Данных в кеше нет, получаем свежие
         if blockchain:
             transactions = await self.get_transactions_by_blockchain(
                 blockchain, limit=10
@@ -970,7 +987,12 @@ class WhaleTracker:
         # Конвертируем в WhaleAlert для форматирования
         alerts = [tx.to_alert() for tx in transactions]
 
-        return format_whale_summary(alerts, period="последний час")
+        result = format_whale_summary(alerts, period="последний час")
+        
+        # Сохраняем в кеш
+        self._whale_cache.set(cache_key, result)
+        
+        return result
 
     async def format_stats_message(self) -> str:
         """

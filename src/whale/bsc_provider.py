@@ -29,11 +29,15 @@ class BSCProvider:
     def __init__(self):
         """Initialize BSC provider with list of free public RPC endpoints."""
         self.providers = [
-            "https://rpc.ankr.com/bsc",           # Best - no rate limit, 150k/month
+            # Best reliability (official + high-quality public)
             "https://bsc-dataseed1.binance.org",  # Official Binance
-            "https://bsc-dataseed2.defibit.io",   # Fast
-            "https://bscrpc.com",                 # New, fast
-            "https://bsc.publicnode.com",         # Reliable
+            "https://bsc-dataseed2.binance.org",  # Official Binance backup
+            "https://rpc.ankr.com/bsc",           # Best - no rate limit, 150k/month
+            "https://bsc-dataseed1.defibit.io",   # DefiLlama
+            "https://bsc.publicnode.com",         # Public Node
+            "https://binance.llamarpc.com",       # Llama RPC
+            "https://bsc-dataseed2.defibit.io",   # DefiLlama backup
+            "https://bscrpc.com",                 # Fast alternative
         ]
         self.current_index = 0
         self.last_working_provider: Optional[str] = None
