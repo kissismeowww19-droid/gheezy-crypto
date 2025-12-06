@@ -27,13 +27,13 @@ from tenacity import (
 )
 
 from config import settings
-from whale.etherscan_v2 import get_etherscan_key, get_etherscan_v2_url
+from whale.api_keys import get_next_api_key
 
 logger = structlog.get_logger()
 
 # ===== API URLs =====
 # Use Etherscan V2 API with chainid=42161 for Arbitrum
-ETHERSCAN_V2_URL = get_etherscan_v2_url("arbitrum") or "https://api.etherscan.io/v2/api?chainid=42161"
+ETHERSCAN_V2_URL = "https://api.etherscan.io/v2/api?chainid=42161"
 # Fallback to direct Arbiscan API
 ARBISCAN_API_URL = "https://api.arbiscan.io/api"
 
@@ -144,7 +144,7 @@ class ArbitrumTracker:
     def __init__(self):
         """Инициализация трекера."""
         # Use Etherscan V2 API key (shared across all EVM chains)
-        self.api_key = get_etherscan_key() or getattr(settings, "etherscan_api_key", "")
+        self.api_key = get_next_api_key()
         self.min_value_eth = MIN_WHALE_ETH
         self.min_value_usd = getattr(settings, "whale_min_transaction", 100_000)
         self.price_cache_ttl = getattr(settings, "whale_price_cache_ttl", 300)
@@ -282,6 +282,9 @@ class ArbitrumTracker:
             num_addresses = 10
 
             for address in TRACKED_ARBITRUM_ADDRESSES[:num_addresses]:
+                # Get next API key for each request (rotation)
+                api_key = get_next_api_key() or self.api_key
+                
                 params = {
                     "module": "account",
                     "action": "txlist",
@@ -291,7 +294,7 @@ class ArbitrumTracker:
                     "page": 1,
                     "offset": 50,
                     "sort": "desc",
-                    "apikey": self.api_key,
+                    "apikey": api_key,
                 }
 
                 data = await self._make_api_request(ETHERSCAN_V2_URL, params=params)
@@ -334,7 +337,7 @@ class ArbitrumTracker:
                         )
                     )
 
-                await asyncio.sleep(0.4)  # Rate limit: 3 req/sec
+                await asyncio.sleep(0.35)  # Rate limit: 3 req/sec per key
 
             return self._deduplicate_and_sort(transactions, limit)
 

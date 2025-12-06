@@ -4,7 +4,7 @@ Gheezy Crypto - Трекер китов
 Отслеживание крупных транзакций китов на 6 блокчейнах:
 - Ethereum (Etherscan V2)
 - Bitcoin (mempool.space - no key needed)
-- BSC (Blockscout - FREE, no API key needed!)
+- BSC (Etherscan V2 with chainid=56)
 - Arbitrum (Etherscan V2)
 - Polygon (Etherscan V2 with delay)
 - Avalanche (Snowtrace - no key needed)
@@ -15,13 +15,14 @@ Removed chains (API issues):
 - SOL (Solscan returns 404)
 
 Использует несколько источников данных с приоритетом:
-- Blockscout API для BSC (бесплатный, без ключа)
-- Etherscan V2 API (один ключ для ETH, Arbitrum, Polygon)
+- Etherscan V2 API (3 ключа с ротацией для ETH, BSC, Arbitrum, Polygon)
 - Snowtrace API (бесплатный для Avalanche)
 - mempool.space для Bitcoin
 - Публичные RPC ноды (fallback)
 
 Особенности:
+- Ротация 3 API ключей (9 req/sec вместо 3)
+- Кэширование транзакций (последние 1000, TTL 1 час)
 - Кэширование цен криптовалют
 - Retry логика с exponential backoff
 - Параллельные запросы ко всем сетям
@@ -51,6 +52,8 @@ from whale.avalanche import AvalancheTracker
 # Base chain removed - requires paid Etherscan plan
 # DeFi tracker
 from whale.defi import DeFiTracker
+# Transaction cache
+from whale.cache import get_transaction_cache
 from whale.known_wallets import (
     is_exchange_address,
     get_short_address,
@@ -226,11 +229,14 @@ class WhaleTracker:
         # Инициализация SQLite базы данных для транзакций
         init_whale_db()
 
+        # Получаем глобальный кеш транзакций
+        self._tx_cache = get_transaction_cache()
+
         # Инициализация трекеров для работающих блокчейнов
-        # Using Etherscan V2 API (one key for ETH, Arbitrum, Polygon)
+        # Using Etherscan V2 API (3 keys with rotation for ETH, BSC, Arbitrum, Polygon)
         self._eth_tracker = EthereumTracker()
         self._btc_tracker = BitcoinTracker()  # mempool.space - no key needed
-        self._bsc_tracker = BSCTracker()  # Blockscout - FREE, no API key needed!
+        self._bsc_tracker = BSCTracker()  # Etherscan V2 with chainid=56
 
         # Etherscan V2 supported chains
         self._arb_tracker = ArbitrumTracker()
@@ -257,6 +263,7 @@ class WhaleTracker:
             networks=["ETH", "BTC", "BSC", "ARB", "POLYGON", "AVAX"],
             database="SQLite",
             defi_tracking="enabled",
+            tx_cache="enabled",
         )
 
     async def close(self) -> None:
@@ -749,10 +756,10 @@ class WhaleTracker:
 
         Working chains:
         - BTC (mempool.space - no key needed)
-        - ETH (Etherscan V2)
-        - BSC (Blockscout - FREE, no API key needed!)
-        - Arbitrum (Etherscan V2)
-        - Polygon (Etherscan V2 with delay)
+        - ETH (Etherscan V2 with key rotation)
+        - BSC (Etherscan V2 with chainid=56 and key rotation)
+        - Arbitrum (Etherscan V2 with key rotation)
+        - Polygon (Etherscan V2 with delay and key rotation)
         - AVAX (Snowtrace - no key needed)
 
         Removed chains:
@@ -764,7 +771,7 @@ class WhaleTracker:
             limit: Максимальное количество транзакций на блокчейн
 
         Returns:
-            list[WhaleTransaction]: Список всех транзакций
+            list[WhaleTransaction]: Список всех транзакций (без дубликатов)
         """
         # Запускаем все запросы параллельно (только работающие сети)
         eth_task = self.get_ethereum_transactions(limit=limit)
@@ -789,8 +796,27 @@ class WhaleTracker:
                     error=str(result),
                 )
 
+        # Фильтруем дубликаты с помощью кеша
+        unique_transactions = []
+        duplicates_count = 0
+        
+        for tx in all_transactions:
+            if not self._tx_cache.contains(tx.tx_hash):
+                # Новая транзакция, добавляем в кеш и результаты
+                self._tx_cache.add(tx.tx_hash)
+                unique_transactions.append(tx)
+            else:
+                duplicates_count += 1
+        
+        if duplicates_count > 0:
+            logger.debug(
+                "Отфильтровано дубликатов транзакций",
+                duplicates=duplicates_count,
+                unique=len(unique_transactions),
+            )
+
         # Если нет реальных данных и включен демо-режим
-        if not all_transactions and self.use_demo_data:
+        if not unique_transactions and self.use_demo_data:
             logger.warning(
                 "⚠️ ВНИМАНИЕ: Используются демо-данные! "
                 "Реальные API недоступны или не настроены. "
@@ -799,12 +825,12 @@ class WhaleTracker:
             return await self._get_demo_transactions()
 
         # Сортируем по времени
-        all_transactions.sort(
+        unique_transactions.sort(
             key=lambda x: x.timestamp if x.timestamp else datetime.now(timezone.utc),
             reverse=True,
         )
 
-        return all_transactions
+        return unique_transactions
 
     async def get_transactions_by_blockchain(
         self,
