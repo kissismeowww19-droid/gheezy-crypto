@@ -232,27 +232,11 @@ class PolygonTracker:
         Returns:
             list[PolygonTransaction]: Список транзакций
         """
-        # Add initial delay to avoid rate limit collision with other chains
-        # Etherscan V2 has 3 req/sec rate limit shared across ETH, Arbitrum, and Polygon.
-        # Without this delay, all three chains start simultaneously and exceed the limit.
-        # 2-second delay ensures Polygon starts after ETH/Arbitrum finish initial requests.
-        await asyncio.sleep(POLYGON_STARTUP_DELAY_SECONDS)
-
         await self._update_matic_price()
 
-        # Пробуем Etherscan V2 API (один ключ для всех EVM сетей)
-        logger.debug("Polygon: Пробуем получить данные через Etherscan V2")
-        transactions = await self._get_from_etherscan_v2(limit)
-        if transactions:
-            logger.info(
-                "Данные получены через Etherscan V2",
-                chain="polygon",
-                count=len(transactions),
-            )
-            return transactions
-
-        # Fallback to direct Polygonscan API
-        logger.debug("Polygon: Пробуем получить данные через Polygonscan API")
+        # Skip Etherscan V2 (causes rate limit issues with ETH/ARB)
+        # Go directly to Polygonscan API
+        logger.debug("Polygon: Getting data via Polygonscan API")
         transactions = await self._get_from_polygonscan(limit)
         if transactions:
             logger.info(
@@ -261,8 +245,8 @@ class PolygonTracker:
             )
             return transactions
 
-        # Пробуем публичные RPC
-        logger.debug("Polygon: Пробуем получить данные через RPC")
+        # Fallback to RPC
+        logger.debug("Polygon: Fallback to RPC")
         transactions = await self._get_from_rpc(limit)
         if transactions:
             logger.info(
@@ -284,7 +268,7 @@ class PolygonTracker:
 
         try:
             transactions = []
-            num_addresses = 10
+            num_addresses = 6  # Reduced from 10 for performance
 
             for address in TRACKED_POLYGON_ADDRESSES[:num_addresses]:
                 # Get next API key for each request (rotation)
@@ -359,8 +343,8 @@ class PolygonTracker:
         """Получение транзакций через Polygonscan API (работает без ключа с rate limit)."""
         try:
             transactions = []
-            # Limit addresses when no API key to avoid rate limiting
-            num_addresses = 10 if self.api_key else 3
+            # Reduced to 6 addresses for performance optimization
+            num_addresses = 6 if self.api_key else 3
 
             for address in TRACKED_POLYGON_ADDRESSES[:num_addresses]:
                 params = {

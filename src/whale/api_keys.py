@@ -27,48 +27,25 @@ logger = structlog.get_logger()
 
 
 class EtherscanRateLimiter:
-    """
-    Rate limiter for Etherscan API to stay under 3 req/sec limit.
+    """Global rate limiter for Etherscan V2 API (shared across ETH, ARB, Polygon)."""
     
-    Uses a simple time-based approach to ensure at least delay_seconds
-    between consecutive calls. Set to 2 req/sec (0.5s delay) to stay
-    comfortably under the 3 req/sec limit with margin for safety.
-    """
+    def __init__(self, requests_per_second: float = 2.5):
+        self.min_interval = 1.0 / requests_per_second
+        self.last_request_time = 0.0
+        self._lock = asyncio.Lock()
     
-    def __init__(self, calls_per_second: float = 2.0):
-        """
-        Initialize rate limiter.
-        
-        Args:
-            calls_per_second: Maximum calls per second (default 2 to stay under 3/sec limit)
-        """
-        self.delay = 1.0 / calls_per_second
-        self.last_call = 0.0
-        
-        logger.info(
-            "Etherscan rate limiter initialized",
-            calls_per_second=calls_per_second,
-            delay_seconds=self.delay,
-        )
-    
-    async def wait(self) -> None:
-        """
-        Wait if necessary to respect rate limit.
-        
-        Should be called before making an API request.
-        """
-        now = time.time()
-        time_since_last_call = now - self.last_call
-        
-        if time_since_last_call < self.delay:
-            wait_time = self.delay - time_since_last_call
-            logger.debug(
-                "Rate limit wait",
-                wait_seconds=round(wait_time, 3),
-            )
-            await asyncio.sleep(wait_time)
-        
-        self.last_call = time.time()
+    async def acquire(self):
+        """Wait if necessary to respect rate limit."""
+        async with self._lock:
+            now = time.time()
+            wait_time = self.min_interval - (now - self.last_request_time)
+            if wait_time > 0:
+                await asyncio.sleep(wait_time)
+            self.last_request_time = time.time()
+
+
+# Global instance
+etherscan_rate_limiter = EtherscanRateLimiter()
 
 
 # API key rotation state

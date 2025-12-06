@@ -430,7 +430,7 @@ class TONTracker:
             dict | list: Ответ API или None при ошибке
         """
         session = await self._get_session()
-        timeout = aiohttp.ClientTimeout(total=20)
+        timeout = aiohttp.ClientTimeout(total=8)  # Reduced from 20
         headers = {
             "Accept": "application/json",
             "User-Agent": "GheezyCrypto/1.0",
@@ -516,8 +516,8 @@ class TONTracker:
         try:
             transactions = []
 
-            # Проверяем транзакции известных адресов
-            for address in list(TON_EXCHANGES.keys())[:8]:
+            # Reduced to 4 addresses for performance optimization
+            for address in list(TON_EXCHANGES.keys())[:4]:
                 txs = await self._fetch_address_transactions_toncenter_v3(
                     address, min_value_ton
                 )
@@ -644,9 +644,8 @@ class TONTracker:
         try:
             transactions = []
 
-            # Проверяем транзакции известных адресов
-            # Уменьшаем количество адресов для снижения rate limit ошибок
-            for address in list(TON_EXCHANGES.keys())[:8]:
+            # Reduced to 4 addresses for performance optimization
+            for address in list(TON_EXCHANGES.keys())[:4]:
                 txs = await self._fetch_address_transactions_toncenter(
                     address, min_value_ton
                 )
@@ -778,8 +777,8 @@ class TONTracker:
         try:
             transactions = []
 
-            # Проверяем транзакции известных адресов
-            for address in list(TON_EXCHANGES.keys())[:8]:
+            # Reduced to 4 addresses for performance optimization
+            for address in list(TON_EXCHANGES.keys())[:4]:
                 txs = await self._fetch_address_transactions_tonapi(
                     address, min_value_ton
                 )

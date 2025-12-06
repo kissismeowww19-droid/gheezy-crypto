@@ -41,8 +41,8 @@ BLOCK_CACHE_MAX_SIZE = 100  # Maximum number of blocks to cache
 BLOCK_CACHE_CLEANUP_SIZE = 50  # Number of oldest blocks to remove when cleaning
 
 # ===== Block scanning constants =====
-# Reduced to prevent RPC overload - 10 blocks = ~30 seconds of transactions
-BSC_BLOCKS_TO_ANALYZE = 10
+# Reduced to 8 blocks for performance optimization (was 10)
+BSC_BLOCKS_TO_ANALYZE = 8
 # Maximum number of whale addresses to check per request
 BSC_MAX_ADDRESSES = 5
 # Multiplier for over-collecting transactions before filtering
@@ -385,6 +385,24 @@ class BSCTracker:
                                 blocks_data[block_num] = block_data
                                 # Cache the block
                                 self._cache_block(block_num, block_data)
+                else:
+                    # Fallback: sequential requests if batch fails
+                    logger.debug("BSC: Batch failed, using sequential requests")
+                    for block_num in uncached_blocks[:5]:  # Limit to 5 blocks
+                        try:
+                            block_response = await self._provider.make_request(
+                                method="eth_getBlockByNumber",
+                                params=[hex(block_num), True],
+                                timeout=3,
+                            )
+                            if block_response and "result" in block_response:
+                                block_data = block_response["result"]
+                                if block_data and "transactions" in block_data:
+                                    blocks_data[block_num] = block_data
+                                    self._cache_block(block_num, block_data)
+                        except Exception as e:
+                            logger.debug(f"BSC: Failed to fetch block {block_num}: {e}")
+                        await asyncio.sleep(0.2)  # Small delay between requests
 
             # Process all blocks
             for block_num in block_numbers:
