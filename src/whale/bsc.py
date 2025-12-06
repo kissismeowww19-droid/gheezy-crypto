@@ -573,9 +573,11 @@ class BSCTracker:
             
             transactions = []
             
-            # Query transactions from known addresses (Blockscout is free, no limits)
-            # Use more addresses since Blockscout doesn't have strict rate limits
-            for address in TRACKED_BSC_ADDRESSES[:5]:  # Use first 5 addresses
+            # Query transactions from known addresses
+            # Using 5 addresses balances coverage vs performance.
+            # Blockscout is free with no strict rate limits, but we limit
+            # to 5 addresses to avoid overloading the service and keep response time reasonable.
+            for address in TRACKED_BSC_ADDRESSES[:5]:
                 params = {
                     "module": "account",
                     "action": "txlist",

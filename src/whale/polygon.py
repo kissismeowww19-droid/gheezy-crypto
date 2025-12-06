@@ -244,8 +244,9 @@ class PolygonTracker:
             list[PolygonTransaction]: Список транзакций
         """
         # Add initial delay to avoid rate limit collision with other chains
-        # Polygon starts 2 seconds after other Etherscan V2 chains to prevent
-        # hitting 3 req/sec rate limit when all chains start simultaneously
+        # Etherscan V2 has 3 req/sec rate limit shared across ETH, Arbitrum, and Polygon.
+        # Without this delay, all three chains start simultaneously and exceed the limit.
+        # 2-second delay ensures Polygon starts after ETH/Arbitrum finish initial requests.
         await asyncio.sleep(POLYGON_STARTUP_DELAY_SECONDS)
         
         await self._update_matic_price()
