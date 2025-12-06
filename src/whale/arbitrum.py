@@ -147,7 +147,7 @@ class ArbitrumTracker:
         self.api_key = get_next_api_key()
         self.min_value_eth = MIN_WHALE_ETH
         self.min_value_usd = getattr(settings, "whale_min_transaction", 100_000)
-        self.price_cache_ttl = getattr(settings, "whale_price_cache_ttl", 300)
+        self.price_cache_ttl = 600  # Increased from 300 to reduce CoinGecko rate limit issues
         self._session: Optional[aiohttp.ClientSession] = None
         self._eth_price: float = 2000.0
         self._price_last_update: float = 0

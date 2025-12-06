@@ -148,7 +148,7 @@ class PolygonTracker:
         self.api_key = get_next_api_key()
         self.min_value_matic = MIN_WHALE_MATIC
         self.min_value_usd = getattr(settings, "whale_min_transaction", 100_000)
-        self.price_cache_ttl = getattr(settings, "whale_price_cache_ttl", 300)
+        self.price_cache_ttl = 600  # Increased from 300 to reduce CoinGecko rate limit issues
         self._session: Optional[aiohttp.ClientSession] = None
         self._matic_price: float = 0.5  # Дефолтная цена MATIC
         self._price_last_update: float = 0
@@ -206,7 +206,7 @@ class PolygonTracker:
     ) -> Optional[dict]:
         """Выполнение HTTP запроса с retry логикой."""
         session = await self._get_session()
-        timeout = aiohttp.ClientTimeout(total=15)
+        timeout = aiohttp.ClientTimeout(total=20)  # Increased from 15 to 20 seconds
 
         if json_data:
             async with session.post(url, json=json_data, timeout=timeout) as response:
@@ -439,8 +439,8 @@ class PolygonTracker:
         latest_block = int(data["result"], 16)
         transactions = []
 
-        # Polygon блоки очень быстрые, смотрим больше блоков
-        for block_num in range(latest_block, max(latest_block - 10, 0), -1):
+        # Polygon блоки очень быстрые, смотрим меньше блоков для надежности
+        for block_num in range(latest_block, max(latest_block - 5, 0), -1):
             block_request = {
                 "jsonrpc": "2.0",
                 "method": "eth_getBlockByNumber",

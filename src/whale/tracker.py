@@ -89,13 +89,13 @@ NETWORK_PRIORITY = ["btc", "avax", "bsc", "eth", "arb", "polygon", "ton"]
 
 # Timeouts per network
 NETWORK_TIMEOUTS = {
-    "btc": 5,
-    "avax": 4,
-    "bsc": 5,
-    "eth": 6,
-    "arb": 5,
-    "polygon": 5,
-    "ton": 8,
+    "btc": 8,
+    "avax": 10,
+    "bsc": 10,
+    "eth": 12,
+    "arb": 10,
+    "polygon": 10,
+    "ton": 12,
 }
 
 

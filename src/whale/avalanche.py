@@ -143,7 +143,7 @@ class AvalancheTracker:
         self.api_key = getattr(settings, "snowtrace_api_key", "")
         self.min_value_avax = MIN_WHALE_AVAX
         self.min_value_usd = getattr(settings, "whale_min_transaction", 100_000)
-        self.price_cache_ttl = getattr(settings, "whale_price_cache_ttl", 300)
+        self.price_cache_ttl = 600  # Increased from 300 to reduce CoinGecko rate limit issues
         self._session: Optional[aiohttp.ClientSession] = None
         self._avax_price: float = 25.0  # Дефолтная цена AVAX
         self._price_last_update: float = 0
