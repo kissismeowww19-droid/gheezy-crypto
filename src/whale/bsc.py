@@ -362,6 +362,15 @@ class BSCTracker:
                                     if value_bnb >= min_value_bnb:
                                         value_usd = value_bnb * self._bnb_price
                                         
+                                        # Parse timestamp
+                                        try:
+                                            block_timestamp = int(block.get("timestamp", "0x0"), 16)
+                                            timestamp = datetime.fromtimestamp(
+                                                block_timestamp, tz=timezone.utc
+                                            )
+                                        except (ValueError, OSError):
+                                            timestamp = datetime.now(timezone.utc)
+                                        
                                         transactions.append(
                                             BSCTransaction(
                                                 tx_hash=tx.get("hash", ""),
@@ -369,6 +378,8 @@ class BSCTracker:
                                                 to_address=tx.get("to", "") or "",
                                                 value_bnb=value_bnb,
                                                 value_usd=value_usd,
+                                                token_symbol="BNB",
+                                                timestamp=timestamp,
                                                 block_number=block_num,
                                             )
                                         )

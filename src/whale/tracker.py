@@ -87,15 +87,15 @@ logger = structlog.get_logger()
 # Network priority order (fastest first)
 NETWORK_PRIORITY = ["btc", "avax", "bsc", "eth", "arb", "polygon", "ton"]
 
-# Timeouts per network
+# Timeouts per network (optimized for hybrid parallel approach)
 NETWORK_TIMEOUTS = {
-    "btc": 8,
-    "avax": 10,
-    "bsc": 10,
-    "eth": 12,
+    "btc": 5,
+    "avax": 5,
+    "bsc": 8,
+    "eth": 10,
     "arb": 10,
-    "polygon": 10,
-    "ton": 12,
+    "polygon": 8,
+    "ton": 8,
 }
 
 
@@ -833,13 +833,13 @@ class WhaleTracker:
         
         # All networks in parallel!
         results = await asyncio.gather(
-            fetch_with_timeout("BTC", self.get_bitcoin_transactions(limit), 5),
-            fetch_with_timeout("AVAX", self.get_avalanche_transactions(limit), 5),
-            fetch_with_timeout("BSC", self.get_bsc_transactions(limit), 8),
-            fetch_with_timeout("ETH", self.get_ethereum_transactions(limit), 10),
-            fetch_with_timeout("ARB", self.get_arbitrum_transactions(limit), 10),
-            fetch_with_timeout("POLYGON", self.get_polygon_transactions(limit), 8),
-            fetch_with_timeout("TON", self.get_ton_transactions(limit), 8),
+            fetch_with_timeout("BTC", self.get_bitcoin_transactions(limit), NETWORK_TIMEOUTS["btc"]),
+            fetch_with_timeout("AVAX", self.get_avalanche_transactions(limit), NETWORK_TIMEOUTS["avax"]),
+            fetch_with_timeout("BSC", self.get_bsc_transactions(limit), NETWORK_TIMEOUTS["bsc"]),
+            fetch_with_timeout("ETH", self.get_ethereum_transactions(limit), NETWORK_TIMEOUTS["eth"]),
+            fetch_with_timeout("ARB", self.get_arbitrum_transactions(limit), NETWORK_TIMEOUTS["arb"]),
+            fetch_with_timeout("POLYGON", self.get_polygon_transactions(limit), NETWORK_TIMEOUTS["polygon"]),
+            fetch_with_timeout("TON", self.get_ton_transactions(limit), NETWORK_TIMEOUTS["ton"]),
             return_exceptions=True
         )
         
