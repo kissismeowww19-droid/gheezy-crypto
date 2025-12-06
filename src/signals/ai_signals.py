@@ -20,6 +20,17 @@ class AISignalAnalyzer:
     Использует данные китов и рыночные данные для прогнозирования движения цены.
     """
     
+    # Константы для расчёта сигнала
+    WHALE_SCORE_WEIGHT = 40  # Максимальный вес whale score
+    PRICE_SCORE_WEIGHT = 30  # Максимальный вес price score
+    VOLUME_SCORE_VALUE = 10  # Значение volume score
+    HIGH_VOLUME_THRESHOLD = 10_000_000_000  # Порог высокого объёма ($10B)
+    
+    # Константы для нормализации score в проценты (диапазон -80 до +80)
+    MIN_SCORE = -80  # Минимальный возможный score
+    MAX_SCORE = 80   # Максимальный возможный score
+    SCORE_RANGE = MAX_SCORE - MIN_SCORE  # Полный диапазон score (160)
+    
     def __init__(self, whale_tracker):
         """
         Инициализация анализатора.
@@ -130,9 +141,9 @@ class AISignalAnalyzer:
         Расчёт сигнала на основе данных китов и рынка.
         
         Формула:
-        - whale_score = (withdrawals - deposits) / total_transactions * 40
-        - price_score = min(max(change_24h * 2, -30), 30)
-        - volume_score = 10 если volume высокий, иначе -10
+        - whale_score = (withdrawals - deposits) / max(withdrawals + deposits, 1) * WHALE_SCORE_WEIGHT
+        - price_score = min(max(change_24h * 2, -PRICE_SCORE_WEIGHT), PRICE_SCORE_WEIGHT)
+        - volume_score = VOLUME_SCORE_VALUE если volume > HIGH_VOLUME_THRESHOLD, иначе -VOLUME_SCORE_VALUE
         - total_score = whale_score + price_score + volume_score
         
         Args:
@@ -142,22 +153,23 @@ class AISignalAnalyzer:
         Returns:
             Dict с результатами анализа
         """
-        # Whale score
+        # Whale score - правильное соотношение выводов к депозитам
         whale_score = 0
-        if whale_data["transaction_count"] > 0:
+        total_exchange_txs = whale_data["withdrawals"] + whale_data["deposits"]
+        if total_exchange_txs > 0:
             whale_score = (
                 (whale_data["withdrawals"] - whale_data["deposits"]) 
-                / whale_data["transaction_count"] 
-                * 40
+                / total_exchange_txs
+                * self.WHALE_SCORE_WEIGHT
             )
         
         # Price score
         change_24h = market_data.get("change_24h", 0)
-        price_score = min(max(change_24h * 2, -30), 30)
+        price_score = min(max(change_24h * 2, -self.PRICE_SCORE_WEIGHT), self.PRICE_SCORE_WEIGHT)
         
-        # Volume score (считаем высоким если volume > 10B)
+        # Volume score (высокий если volume > HIGH_VOLUME_THRESHOLD)
         volume_24h = market_data.get("volume_24h", 0)
-        volume_score = 10 if volume_24h > 10_000_000_000 else -10
+        volume_score = self.VOLUME_SCORE_VALUE if volume_24h > self.HIGH_VOLUME_THRESHOLD else -self.VOLUME_SCORE_VALUE
         
         # Total score
         total_score = whale_score + price_score + volume_score
@@ -180,8 +192,8 @@ class AISignalAnalyzer:
             strength = "слабый"
         
         # Расчёт силы сигнала в процентах (0-100%)
-        # Нормализуем score от -80 до 80 в диапазон 0-100%
-        strength_percent = min(max((total_score + 80) / 160 * 100, 0), 100)
+        # Нормализуем score от MIN_SCORE до MAX_SCORE в диапазон 0-100%
+        strength_percent = min(max((total_score - self.MIN_SCORE) / self.SCORE_RANGE * 100, 0), 100)
         
         return {
             "direction": direction,
