@@ -31,9 +31,9 @@ _initialized = False
 
 def init_api_keys() -> None:
     """
-    Initialize API key rotation from environment variables.
+    Initialize API key rotation from settings configuration.
     
-    Reads up to 3 API keys from:
+    Reads up to 3 API keys from settings (loaded from .env via Pydantic):
     - ETHERSCAN_API_KEY (primary)
     - ETHERSCAN_API_KEY_2 (optional)
     - ETHERSCAN_API_KEY_3 (optional)

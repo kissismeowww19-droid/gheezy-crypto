@@ -7,14 +7,15 @@ instead of directly from os.getenv(), ensuring .env file is properly read.
 
 import sys
 from pathlib import Path
+from types import ModuleType
 
 # Add src directory to path for imports
 src_path = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(src_path))
 
-import pytest
-from unittest.mock import Mock, patch
-from importlib.util import spec_from_file_location, module_from_spec
+import pytest  # noqa: E402
+from unittest.mock import Mock, patch  # noqa: E402
+from importlib.util import spec_from_file_location, module_from_spec  # noqa: E402
 
 
 def load_api_keys_module():
@@ -24,7 +25,7 @@ def load_api_keys_module():
     module = module_from_spec(spec)
     
     # Create a mock config module
-    mock_config = type(sys)('config')
+    mock_config = ModuleType('config')
     mock_config.settings = Mock()
     mock_config.settings.etherscan_api_key = ""
     mock_config.settings.etherscan_api_key_2 = ""
