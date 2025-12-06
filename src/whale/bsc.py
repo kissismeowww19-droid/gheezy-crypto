@@ -43,9 +43,9 @@ BSCSCAN_API_URL = "https://api.etherscan.io/v2/api?chainid=56"
 # Fallback: Direct BscScan API (api.bscscan.com)
 BSCSCAN_DIRECT_API_URL = "https://api.bscscan.com/api"
 
-# Blockscout BSC API URL (бесплатный, no API key required)
-# Note: Using the correct endpoint format
-BLOCKSCOUT_BSC_API_URL = "https://api.bscscan.com"
+# Blockscout BSC API URL (бесплатный, FREE, no API key required!)
+# Real Blockscout API endpoint
+BLOCKSCOUT_BSC_API_URL = "https://blockscout.com/bsc/mainnet/api"
 
 # ===== Публичные RPC URL для BSC (с приоритетом Binance официальных) =====
 # Binance official dataseed servers are most reliable
@@ -556,9 +556,9 @@ class BSCTracker:
         limit: int,
     ) -> list[BSCTransaction]:
         """
-        Получение транзакций через BscScan API без ключа (бесплатный).
+        Получение транзакций через Blockscout BSC API (FREE, no API key!).
 
-        Uses api.bscscan.com without API key for basic queries.
+        Uses blockscout.com/bsc/mainnet/api - completely free, no registration.
 
         Args:
             min_value_bnb: Минимальная сумма в BNB
@@ -568,61 +568,47 @@ class BSCTracker:
             list[BSCTransaction]: Список транзакций
         """
         try:
-            # Use BscScan API without key for basic block number query
-            api_url = f"{BLOCKSCOUT_BSC_API_URL}/api"
-
-            # Получаем последний блок (без ключа API, rate limited)
-            params_block = {
-                "module": "proxy",
-                "action": "eth_blockNumber",
-            }
-
-            data = await self._make_api_request(api_url, params=params_block)
-            if not data or "result" not in data:
-                logger.debug("BscScan (no key): не удалось получить номер блока")
-                return []
-
-            result = data.get("result", "")
-            if isinstance(result, str) and not result.startswith("0x"):
-                logger.debug(f"BscScan (no key) API вернул ошибку: {result[:100]}")
-                return []
-
-            latest_block = int(result, 16)
+            # Blockscout BSC API - FREE, no API key required!
+            api_url = BLOCKSCOUT_BSC_API_URL
+            
             transactions = []
-
-            # Query transactions from known addresses (limited without API key)
-            for address in TRACKED_BSC_ADDRESSES[:3]:  # Limit to 3 addresses without key
+            
+            # Query transactions from known addresses (Blockscout is free, no limits)
+            # Use more addresses since Blockscout doesn't have strict rate limits
+            for address in TRACKED_BSC_ADDRESSES[:5]:  # Use first 5 addresses
                 params = {
                     "module": "account",
                     "action": "txlist",
                     "address": address,
-                    "startblock": latest_block - 100,
-                    "endblock": latest_block,
                     "page": 1,
                     "offset": 20,
                     "sort": "desc",
                 }
-
+                
                 txs_data = await self._make_api_request(api_url, params=params)
                 if not txs_data or txs_data.get("status") != "1":
-                    await asyncio.sleep(0.5)  # Rate limit delay
+                    logger.debug(
+                        "Blockscout: не удалось получить транзакции",
+                        address=address[:12],
+                    )
+                    await asyncio.sleep(0.5)  # Small delay between addresses
                     continue
-
+                
                 for tx in txs_data.get("result", []):
                     value_wei = int(tx.get("value", 0))
                     value_bnb = value_wei / 10**18
                     value_usd = value_bnb * self._bnb_price
-
+                    
                     if value_bnb < min_value_bnb:
                         continue
-
+                    
                     try:
                         timestamp = datetime.fromtimestamp(
                             int(tx.get("timeStamp", 0)), tz=timezone.utc
                         )
                     except (ValueError, OSError):
                         timestamp = datetime.now(timezone.utc)
-
+                    
                     transactions.append(
                         BSCTransaction(
                             tx_hash=tx.get("hash", ""),
@@ -635,18 +621,18 @@ class BSCTracker:
                             block_number=int(tx.get("blockNumber", 0)),
                         )
                     )
-
+                    
                     if len(transactions) >= limit * 2:
                         break
-
-                # Rate limit delay between addresses
+                
+                # Small delay between addresses to be polite
                 await asyncio.sleep(0.5)
-
+            
             return self._deduplicate_and_sort(transactions, limit)
-
+        
         except Exception as e:
             logger.warning(
-                "Ошибка BscScan API (без ключа)",
+                "Ошибка Blockscout BSC API",
                 error=str(e),
             )
             return []
