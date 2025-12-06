@@ -2,18 +2,19 @@
 Gheezy Crypto - Etherscan V2 API Client
 
 Etherscan V2 uses ONE API key for multiple EVM chains.
-Supported chains: ETH, Polygon, Arbitrum
-Note: BSC (chainid=56) and Base (chainid=8453) require paid plan - NOT included.
+Supported chains: ETH, Polygon, Arbitrum, BSC
+Note: Base (chainid=8453) requires paid plan - NOT included.
 
 API endpoint format:
 https://api.etherscan.io/v2/api?chainid={CHAIN_ID}&module=...
 """
 
-import itertools
-import os
 from typing import Optional
 
 import structlog
+
+# Import API key rotation from centralized module
+from whale.api_keys import get_next_api_key, init_api_keys
 
 logger = structlog.get_logger()
 
@@ -21,36 +22,18 @@ logger = structlog.get_logger()
 ETHERSCAN_V2_BASE = "https://api.etherscan.io/v2/api"
 
 # Chain IDs for Etherscan V2
-# Note: BSC (56) and Base (8453) require paid plan - NOT included
+# BSC (chainid=56) now supported with paid plan
 CHAIN_IDS = {
     "eth": 1,
+    "bsc": 56,
     "polygon": 137,
     "arbitrum": 42161,
 }
 
-# API key rotation using itertools.cycle for consistent round-robin rotation
-_etherscan_keys: list[str] = []
-_key_cycle: Optional[itertools.cycle] = None
-
-
-def _init_key_rotation() -> None:
-    """Initialize API key rotation from environment variables."""
-    global _etherscan_keys, _key_cycle
-    keys = [
-        os.getenv("ETHERSCAN_API_KEY"),
-        os.getenv("ETHERSCAN_API_KEY_2"),
-        os.getenv("ETHERSCAN_API_KEY_3"),
-    ]
-    _etherscan_keys = [k for k in keys if k]
-    if _etherscan_keys:
-        _key_cycle = itertools.cycle(_etherscan_keys)
-    else:
-        _key_cycle = None
-
 
 def get_etherscan_key() -> Optional[str]:
     """
-    Rotate between available Etherscan API keys using round-robin.
+    Get next Etherscan API key using round-robin rotation.
 
     Supports up to 3 API keys for rate limit management:
     - ETHERSCAN_API_KEY (primary)
@@ -60,12 +43,7 @@ def get_etherscan_key() -> Optional[str]:
     Returns:
         str: Next available API key in rotation or None if no keys configured
     """
-    global _key_cycle
-    if _key_cycle is None:
-        _init_key_rotation()
-    if _key_cycle is None:
-        return None
-    return next(_key_cycle)
+    return get_next_api_key()
 
 
 def get_etherscan_v2_url(chain: str) -> Optional[str]:
