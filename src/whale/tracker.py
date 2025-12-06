@@ -1,17 +1,17 @@
 """
 Gheezy Crypto - Трекер китов
 
-Отслеживание крупных транзакций китов на 6 блокчейнах:
+Отслеживание крупных транзакций китов на 7 блокчейнах:
 - Ethereum (Etherscan V2)
 - Bitcoin (mempool.space - no key needed)
 - BSC (Etherscan V2 with chainid=56)
 - Arbitrum (Etherscan V2)
 - Polygon (Etherscan V2 with delay)
 - Avalanche (Snowtrace - no key needed)
+- TON (TON Center API - no key needed)
 
 Removed chains (API issues):
 - Base (chainid=8453 requires paid Etherscan plan)
-- TON (complex API)
 - SOL (Solscan returns 404)
 
 Использует несколько источников данных с приоритетом:

@@ -72,12 +72,12 @@ class WhaleStats:
         """Инициализация статистики для всех сетей."""
         if not self.networks:
             self.networks = {
-                "BTC": NetworkStats(network="BTC", emoji="🟠"),
+                "BTC": NetworkStats(network="BTC", emoji="🟡"),
                 "ETH": NetworkStats(network="ETH", emoji="🔷"),
                 "BSC": NetworkStats(network="BSC", emoji="🟡"),
-                "ARB": NetworkStats(network="ARB", emoji="🔵"),
+                "ARB": NetworkStats(network="ARB", emoji="🔺"),
                 "POLYGON": NetworkStats(network="POLYGON", emoji="🟣"),
-                "AVAX": NetworkStats(network="AVAX", emoji="🔺"),
+                "AVAX": NetworkStats(network="AVAX", emoji="🔴"),
                 "TON": NetworkStats(network="TON", emoji="💎"),
             }
 
