@@ -4,7 +4,7 @@ Gheezy Crypto - Трекер китов
 Отслеживание крупных транзакций китов на 7 блокчейнах:
 - Ethereum (Etherscan V2)
 - Bitcoin (mempool.space - no key needed)
-- BSC (Etherscan V2 with chainid=56)
+- BSC (Free public RPC with rotation - no key needed)
 - Arbitrum (Etherscan V2)
 - Polygon (Etherscan V2 with delay)
 - Avalanche (Snowtrace - no key needed)
@@ -15,13 +15,14 @@ Removed chains (API issues):
 - SOL (Solscan returns 404)
 
 Использует несколько источников данных с приоритетом:
-- Etherscan V2 API (3 ключа с ротацией для ETH, BSC, Arbitrum, Polygon)
+- Etherscan V2 API (3 ключа с ротацией для ETH, Arbitrum, Polygon)
 - Snowtrace API (бесплатный для Avalanche)
 - mempool.space для Bitcoin
-- Публичные RPC ноды (fallback)
+- Публичные RPC ноды для BSC (ротация 5 endpoints)
 
 Особенности:
-- Ротация 3 API ключей (9 req/sec вместо 3)
+- Ротация 3 API ключей Etherscan (9 req/sec вместо 3)
+- Ротация 5 RPC endpoints для BSC с автоматическим failover
 - Кэширование транзакций (последние 1000, TTL 1 час)
 - Кэширование цен криптовалют
 - Retry логика с exponential backoff
@@ -201,20 +202,15 @@ class WhaleTracker:
     """
     Трекер крупных транзакций китов на нескольких блокчейнах.
 
-    Отслеживает большие переводы на Ethereum, BSC, Bitcoin, Solana и TON.
+    Отслеживает большие переводы на Ethereum, BSC, Bitcoin, Arbitrum, Polygon и Avalanche.
 
     Источники данных (в порядке приоритета):
-    - Ethereum: Etherscan API → Blockscout API → Публичные RPC
-    - BSC: BscScan API → Публичные RPC
-    - Bitcoin: mempool.space → blockstream.info
-    - Solana: Solscan API
-    - TON: TON Center API → TON API
-    - Arbitrum: Arbiscan API
-    - Polygon: Polygonscan API
-    - Avalanche: Snowtrace API
-    - Base: Basescan API
-
-    Все источники работают в России без VPN.
+    - Ethereum: Etherscan V2 API (3 keys rotation)
+    - BSC: Free public RPC with automatic rotation (5 endpoints)
+    - Bitcoin: mempool.space (no key needed)
+    - Arbitrum: Etherscan V2 API (3 keys rotation)
+    - Polygon: Etherscan V2 API (3 keys rotation with delay)
+    - Avalanche: Snowtrace API (no key needed)
 
     Настройки:
     - WHALE_MIN_TRANSACTION: минимальная сумма транзакции в USD
@@ -235,10 +231,10 @@ class WhaleTracker:
         self._tx_cache = get_transaction_cache()
 
         # Инициализация трекеров для работающих блокчейнов
-        # Using Etherscan V2 API (3 keys with rotation for ETH, BSC, Arbitrum, Polygon)
+        # Using Etherscan V2 API (3 keys with rotation for ETH, Arbitrum, Polygon)
         self._eth_tracker = EthereumTracker()
         self._btc_tracker = BitcoinTracker()  # mempool.space - no key needed
-        self._bsc_tracker = BSCTracker()  # Etherscan V2 with chainid=56
+        self._bsc_tracker = BSCTracker()  # Free public RPC with rotation - no key needed
 
         # Etherscan V2 supported chains
         self._arb_tracker = ArbitrumTracker()
@@ -457,7 +453,7 @@ class WhaleTracker:
         limit: int = 20,
     ) -> list[WhaleTransaction]:
         """
-        Получение крупных BNB транзакций на BSC (Blockscout - FREE!).
+        Получение крупных BNB транзакций на BSC через публичные RPC.
 
         Args:
             limit: Максимальное количество транзакций
@@ -787,7 +783,7 @@ class WhaleTracker:
         Working chains:
         - BTC (mempool.space - no key needed)
         - ETH (Etherscan V2 with key rotation)
-        - BSC (Etherscan V2 with chainid=56 and key rotation)
+        - BSC (Free public RPC with rotation - no key needed)
         - Arbitrum (Etherscan V2 with key rotation)
         - Polygon (Etherscan V2 with delay and key rotation)
         - AVAX (Snowtrace - no key needed)
