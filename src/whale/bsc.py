@@ -386,8 +386,8 @@ class BSCTracker:
                                 # Cache the block
                                 self._cache_block(block_num, block_data)
                 
-                # Fallback: sequential requests if batch fails or returns empty
-                if not batch_response or len(batch_response) == 0:
+                # Fallback: sequential requests if batch fails
+                if not batch_response:
                     logger.debug("BSC: Batch failed, using sequential fallback")
                     for block_num in uncached_blocks[:5]:  # Only 5 blocks
                         try:
