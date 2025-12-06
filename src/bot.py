@@ -667,12 +667,16 @@ def get_whale_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🟡 BTC", callback_data="whale_btc"),
         ],
         [
+            InlineKeyboardButton(text="🟡 BSC", callback_data="whale_bsc"),
             InlineKeyboardButton(text="🔺 ARB", callback_data="whale_arb"),
-            InlineKeyboardButton(text="🔴 AVAX", callback_data="whale_avax"),
         ],
         [
             InlineKeyboardButton(text="🟣 Polygon", callback_data="whale_polygon"),
+            InlineKeyboardButton(text="🔴 AVAX", callback_data="whale_avax"),
+        ],
+        [
             InlineKeyboardButton(text="💎 TON", callback_data="whale_ton"),
+            InlineKeyboardButton(text="📊 Статистика", callback_data="whale_stats"),
         ],
         [
             InlineKeyboardButton(text="📊 Все сети", callback_data="whale_all"),
@@ -1364,6 +1368,7 @@ async def callback_whale(callback: CallbackQuery):
         "Выберите сеть для отслеживания:\n\n"
         "• 🔷 ETH — Ethereum\n"
         "• 🟡 BTC — Bitcoin\n"
+        "• 🟡 BSC — Binance Smart Chain\n"
         "• 🔺 ARB — Arbitrum\n"
         "• 🟣 Polygon — Polygon\n"
         "• 🔴 AVAX — Avalanche\n"
