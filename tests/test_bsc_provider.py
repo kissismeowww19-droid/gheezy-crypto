@@ -39,11 +39,15 @@ def bsc_provider():
 @pytest.mark.asyncio
 async def test_provider_initialization(bsc_provider):
     """Test that BSCProvider initializes with correct providers."""
-    assert len(bsc_provider.providers) == 5
+    assert len(bsc_provider.providers) == 9
     assert "https://rpc.ankr.com/bsc" in bsc_provider.providers
     assert "https://bsc-dataseed1.binance.org" in bsc_provider.providers
+    assert "https://bsc-dataseed3.binance.org" in bsc_provider.providers
     assert bsc_provider.current_index == 0
     assert bsc_provider.last_working_provider is None
+    # Verify rate limiter is initialized
+    assert hasattr(bsc_provider, 'rate_limiter')
+    assert bsc_provider.rate_limiter.delay == 0.5
 
 
 @pytest.mark.asyncio
@@ -235,6 +239,64 @@ async def test_close_session(bsc_provider, mock_aiohttp_session):
     bsc_provider._session = mock_aiohttp_session
     await bsc_provider.close()
     mock_aiohttp_session.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_rate_limiter():
+    """Test that rate limiter enforces minimum delay."""
+    from whale.bsc_provider import BSCRateLimiter
+    
+    rate_limiter = BSCRateLimiter(delay=0.1)
+    
+    # First call should not wait
+    start = asyncio.get_event_loop().time()
+    await rate_limiter.wait()
+    first_duration = asyncio.get_event_loop().time() - start
+    assert first_duration < 0.05  # Should be instant
+    
+    # Second call should wait
+    start = asyncio.get_event_loop().time()
+    await rate_limiter.wait()
+    second_duration = asyncio.get_event_loop().time() - start
+    assert second_duration >= 0.09  # Should wait ~0.1 seconds
+
+
+@pytest.mark.asyncio
+async def test_batch_request_success(bsc_provider, mock_aiohttp_session):
+    """Test successful batch RPC request."""
+    # Mock successful batch response
+    mock_response = AsyncMock()
+    mock_response.status = 200
+    mock_response.json = AsyncMock(return_value=[
+        {"jsonrpc": "2.0", "id": 0, "result": "0x123456"},
+        {"jsonrpc": "2.0", "id": 1, "result": "0x789abc"},
+    ])
+    mock_aiohttp_session.post = AsyncMock(return_value=mock_response)
+    mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+    mock_response.__aexit__ = AsyncMock(return_value=None)
+    
+    bsc_provider._session = mock_aiohttp_session
+    bsc_provider.last_working_provider = "https://rpc.ankr.com/bsc"
+    bsc_provider.last_check_time = 100.0
+    
+    with patch('time.time', return_value=150.0):
+        requests = [
+            ("eth_blockNumber", []),
+            ("eth_getBlockByNumber", ["0x1", True]),
+        ]
+        result = await bsc_provider.make_batch_request(requests)
+        assert result is not None
+        assert len(result) == 2
+        assert result[0]["result"] == "0x123456"
+        assert result[1]["result"] == "0x789abc"
+
+
+@pytest.mark.asyncio
+async def test_batch_request_empty_list(bsc_provider):
+    """Test batch request with empty list returns empty list."""
+    result = await bsc_provider.make_batch_request([])
+    # Empty batch should return empty list
+    assert result == []
 
 
 if __name__ == "__main__":

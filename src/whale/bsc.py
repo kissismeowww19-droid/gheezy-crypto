@@ -41,9 +41,10 @@ BLOCK_CACHE_MAX_SIZE = 100  # Maximum number of blocks to cache
 BLOCK_CACHE_CLEANUP_SIZE = 50  # Number of oldest blocks to remove when cleaning
 
 # ===== Block scanning constants =====
-# Maximum number of blocks to scan
-# BSC creates a block every ~3 seconds, so 20 blocks = ~1 minute of transactions
-MAX_BLOCKS_TO_SCAN = 20
+# Reduced to prevent RPC overload - 10 blocks = ~30 seconds of transactions
+BSC_BLOCKS_TO_ANALYZE = 10
+# Maximum number of whale addresses to check per request
+BSC_MAX_ADDRESSES = 5
 # Multiplier for over-collecting transactions before filtering
 TRANSACTION_BUFFER_MULTIPLIER = 2
 
@@ -307,6 +308,7 @@ class BSCTracker:
 
         Использует BSCProvider для выбора рабочего RPC endpoint.
         Получает последние блоки и фильтрует крупные транзакции.
+        Использует batch requests для эффективной загрузки блоков.
 
         Args:
             min_value_bnb: Минимальная сумма в BNB
@@ -332,7 +334,7 @@ class BSCTracker:
 
             # BSC creates blocks every ~3 seconds
             # Analyze recent blocks to capture more transactions
-            blocks_to_scan = min(MAX_BLOCKS_TO_SCAN, 20)
+            blocks_to_scan = BSC_BLOCKS_TO_ANALYZE
 
             logger.debug(
                 "BSC: Analyzing blocks",
@@ -341,9 +343,56 @@ class BSCTracker:
                 blocks_count=blocks_to_scan,
             )
 
-            for block_num in range(latest_block, max(latest_block - blocks_to_scan, 0), -1):
-                # Check cache first
-                block = await self._get_block_cached(block_num)
+            # Collect block numbers to fetch
+            block_numbers = list(range(
+                latest_block,
+                max(latest_block - blocks_to_scan, 0),
+                -1
+            ))
+            
+            # Check cache and collect uncached block numbers
+            blocks_data = {}
+            uncached_blocks = []
+            
+            for block_num in block_numbers:
+                cached_block = await self._get_block_from_cache(block_num)
+                if cached_block:
+                    blocks_data[block_num] = cached_block
+                else:
+                    uncached_blocks.append(block_num)
+            
+            # Fetch uncached blocks using batch request
+            if uncached_blocks:
+                logger.debug(
+                    "BSC: Fetching uncached blocks",
+                    count=len(uncached_blocks),
+                )
+                
+                # Prepare batch requests
+                batch_requests = [
+                    ("eth_getBlockByNumber", [hex(num), True])
+                    for num in uncached_blocks
+                ]
+                
+                # Make batch request
+                batch_response = await self._provider.make_batch_request(
+                    batch_requests,
+                    timeout=10,
+                )
+                
+                if batch_response:
+                    for i, response in enumerate(batch_response):
+                        if response and "result" in response:
+                            block_data = response["result"]
+                            if block_data and "transactions" in block_data:
+                                block_num = uncached_blocks[i]
+                                blocks_data[block_num] = block_data
+                                # Cache the block
+                                self._cache_block(block_num, block_data)
+
+            # Process all blocks
+            for block_num in block_numbers:
+                block = blocks_data.get(block_num)
                 
                 if not block:
                     continue
@@ -399,6 +448,49 @@ class BSCTracker:
                 error=str(e),
             )
             return []
+
+    def _get_block_from_cache(self, block_num: int) -> Optional[dict]:
+        """
+        Get block data from cache (synchronous check).
+
+        Args:
+            block_num: Block number
+
+        Returns:
+            dict: Block data or None if not cached or expired
+        """
+        current_time = time.time()
+        
+        # Check cache
+        if block_num in self._block_cache:
+            block_data, cache_time = self._block_cache[block_num]
+            if current_time - cache_time < self._block_cache_ttl:
+                return block_data
+            else:
+                # Remove expired cache entry
+                del self._block_cache[block_num]
+        
+        return None
+    
+    def _cache_block(self, block_num: int, block_data: dict) -> None:
+        """
+        Cache block data.
+
+        Args:
+            block_num: Block number
+            block_data: Block data to cache
+        """
+        current_time = time.time()
+        
+        # Cache the block data
+        self._block_cache[block_num] = (block_data, current_time)
+        
+        # Clean old cache entries if cache is too large
+        if len(self._block_cache) > BLOCK_CACHE_MAX_SIZE:
+            # Remove oldest entries
+            oldest_blocks = sorted(self._block_cache.keys())[:BLOCK_CACHE_CLEANUP_SIZE]
+            for old_block in oldest_blocks:
+                del self._block_cache[old_block]
 
     async def _get_block_cached(self, block_num: int) -> Optional[dict]:
         """
