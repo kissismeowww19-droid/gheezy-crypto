@@ -2593,11 +2593,18 @@ class AISignalAnalyzer:
             
         Returns:
             Экранированный текст
+            
+        Note:
+            Uses simple string.replace() in a loop for readability and maintainability.
+            Performance is acceptable since we're dealing with short strings (news titles,
+            status messages, etc.) typically under 200 characters. For larger texts,
+            str.translate() with a translation table would be more efficient.
         """
         if not text or not isinstance(text, str):
             return text
         
         # Список специальных символов Markdown, которые нужно экранировать
+        # Based on Telegram's MarkdownV2 spec: https://core.telegram.org/bots/api#markdownv2-style
         escape_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
         
         for char in escape_chars:

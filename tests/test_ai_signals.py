@@ -629,7 +629,8 @@ class TestAISignalAnalyzer:
         # Test news-like content with various special characters
         news_title = "Bitcoin's price surged by 10% - analysts predict more gains!"
         escaped = analyzer.escape_markdown(news_title)
-        # Should escape: ' (apostrophe becomes \'), - (dash), % (percent), ! (exclamation)
+        # Should escape: - (dash) and ! (exclamation) which are in the escape_chars list
+        # Note: apostrophe (') and percent (%) are NOT escaped as they don't break Markdown
         assert "\\-" in escaped
         assert "\\!" in escaped
         
