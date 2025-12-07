@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, List
 import aiohttp
 import asyncio
+import numpy as np
 
 from api_manager import get_coin_price
 from signals.indicators import (
@@ -69,6 +70,14 @@ class AISignalAnalyzer:
     
     # Scaling factor for final score calculation
     SCORE_SCALE_FACTOR = 10  # Scale weighted sum from -10/+10 to -100/+100
+    
+    # Short-term analysis constants
+    EMA_CROSSOVER_THRESHOLD = 0.001  # 0.1% threshold for EMA crossover detection
+    LONG_LIQUIDATION_RATIO = 0.7     # Assumed ratio of long liquidations in total
+    SHORT_LIQUIDATION_RATIO = 0.3    # Assumed ratio of short liquidations in total
+    TRADES_FLOW_BULLISH_THRESHOLD = 1.5   # Buy/Sell ratio threshold for bullish
+    TRADES_FLOW_BEARISH_THRESHOLD = 0.67  # Buy/Sell ratio threshold for bearish
+    TRADES_FLOW_NEUTRAL_DIVISOR = 0.33    # Normalization divisor for neutral range
     
     def __init__(self, whale_tracker):
         """
@@ -810,9 +819,9 @@ class AISignalAnalyzer:
                         if oi_change < 0:
                             # OI decreased = liquidations happened
                             liquidation_volume = abs(oi_change)
-                            # Estimate 70/30 split (assumption)
-                            long_liquidations = liquidation_volume * 0.7
-                            short_liquidations = liquidation_volume * 0.3
+                            # Estimate split based on historical ratios
+                            long_liquidations = liquidation_volume * self.LONG_LIQUIDATION_RATIO
+                            short_liquidations = liquidation_volume * self.SHORT_LIQUIDATION_RATIO
                             sentiment = "bearish"  # More longs liquidated
                         else:
                             # OI increased or stable
@@ -979,7 +988,6 @@ class AISignalAnalyzer:
                 closes_5m = [c["close"] for c in ohlcv_5m]
                 
                 # Calculate EMA 9 and 21
-                import numpy as np
                 closes_array = np.array(closes_5m)
                 
                 # EMA formula: EMA = price * k + EMA(prev) * (1-k), where k = 2/(N+1)
@@ -996,15 +1004,16 @@ class AISignalAnalyzer:
                 result["ema_9_5m"] = round(ema_9, 2)
                 result["ema_21_5m"] = round(ema_21, 2)
                 
-                # Crossover
-                if ema_9 > ema_21 * 1.001:  # 0.1% threshold
+                # Crossover detection with threshold to avoid false signals
+                threshold = self.EMA_CROSSOVER_THRESHOLD
+                if ema_9 > ema_21 * (1 + threshold):
                     result["ema_crossover"] = "bullish"
-                elif ema_9 < ema_21 * 0.999:
+                elif ema_9 < ema_21 * (1 - threshold):
                     result["ema_crossover"] = "bearish"
                 else:
                     result["ema_crossover"] = "neutral"
             
-            # Price 10 minutes ago (2 candles ago on 5m)
+            # Price 10 minutes ago (index -3 represents 2 candles back = 10 min on 5m chart)
             if ohlcv_5m and len(ohlcv_5m) >= 3:
                 result["price_10min_ago"] = ohlcv_5m[-3]["close"]
                 result["current_price"] = ohlcv_5m[0]["close"]
@@ -1096,20 +1105,21 @@ class AISignalAnalyzer:
         
         flow_ratio = trades_flow.get("flow_ratio", 1.0)
         
-        if flow_ratio > 1.5:
+        if flow_ratio > self.TRADES_FLOW_BULLISH_THRESHOLD:
             # Много покупок - максимально бычье
             score = 10
-        elif flow_ratio < 0.67:
+        elif flow_ratio < self.TRADES_FLOW_BEARISH_THRESHOLD:
             # Много продаж - максимально медвежье
             score = -10
         else:
-            # Градиент между 0.67 и 1.5
+            # Градиент между thresholds
             # Normalize to -10 to +10
             # flow_ratio: 0.67 -> -10, 1.0 -> 0, 1.5 -> +10
             if flow_ratio >= 1.0:
-                score = ((flow_ratio - 1.0) / 0.5) * 10
+                bullish_range = self.TRADES_FLOW_BULLISH_THRESHOLD - 1.0
+                score = ((flow_ratio - 1.0) / bullish_range) * 10
             else:
-                score = ((flow_ratio - 1.0) / 0.33) * 10
+                score = ((flow_ratio - 1.0) / self.TRADES_FLOW_NEUTRAL_DIVISOR) * 10
         
         return max(min(score, 10), -10)
     
