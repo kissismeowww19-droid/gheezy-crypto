@@ -25,6 +25,7 @@ aioredis==2.0.1
 pandas==2.2.3
 numpy==2.1.3
 ta-lib==0.5.1
+tradingview_ta>=3.3.0
 
 # Валидация
 pydantic==2.10.3
