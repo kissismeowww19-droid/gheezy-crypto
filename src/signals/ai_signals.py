@@ -2583,6 +2583,39 @@ class AISignalAnalyzer:
             "data_sources_count": data_sources_available,
         }
     
+    @staticmethod
+    def escape_markdown(text: str) -> str:
+        """
+        Экранирует специальные символы Markdown для безопасного отображения в Telegram.
+        
+        Args:
+            text: Текст для экранирования
+            
+        Returns:
+            Экранированный текст (или исходное значение если None/не строка)
+            
+        Note:
+            - Gracefully handles None and non-string inputs by returning them unchanged.
+              This is intentional for defensive programming when dealing with optional
+              API responses that may be None or unexpected types.
+            - Uses simple string.replace() in a loop for readability and maintainability.
+            - Performance is acceptable since we're dealing with short strings (news titles,
+              status messages, etc.) typically under 200 characters. For larger texts,
+              str.translate() with a translation table would be more efficient.
+        """
+        if not text or not isinstance(text, str):
+            # Return unchanged for None or non-string inputs (defensive programming)
+            return text
+        
+        # Список специальных символов Markdown, которые нужно экранировать
+        # Based on Telegram's MarkdownV2 spec: https://core.telegram.org/bots/api#markdownv2-style
+        escape_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+        
+        for char in escape_chars:
+            text = text.replace(char, f'\\{char}')
+        
+        return text
+    
     def format_signal_message(
         self, 
         symbol: str, 
@@ -2788,7 +2821,7 @@ class AISignalAnalyzer:
         # Fear & Greed Index
         if fear_greed:
             fg_value = fear_greed["value"]
-            fg_class = fear_greed["classification"]
+            fg_class = self.escape_markdown(str(fear_greed["classification"]))
             text += f"😱 *Fear & Greed Index:* {fg_value} — {fg_class}\n"
         
         # Funding Rate
@@ -2842,7 +2875,7 @@ class AISignalAnalyzer:
                 text += f"• L/S Ratio: {ls_text}\n"
             
             if onchain_data and symbol == "BTC":
-                mempool_status = onchain_data.get("mempool_status", "unknown")
+                mempool_status = self.escape_markdown(str(onchain_data.get("mempool_status", "unknown")))
                 mempool_size = onchain_data.get("mempool_size", 0)
                 text += f"• Mempool: {mempool_status.capitalize()} ({mempool_size:,} tx)\n"
             
@@ -2997,25 +3030,33 @@ class AISignalAnalyzer:
                 
                 important = news_sentiment.get("important_news", [])
                 if important:
-                    text += f"└─ Важное: \"{important[0]}...\"\n\n"
+                    # Экранируем новости от внешних API для безопасного отображения
+                    escaped_news = self.escape_markdown(str(important[0]))
+                    text += f"└─ Важное: \"{escaped_news}...\"\n\n"
                 else:
                     text += "\n"
             
             # TradingView
             if tradingview_rating:
-                recommendation = tradingview_rating.get("recommendation", "NEUTRAL")
+                # Get raw values once to avoid redundant lookups
+                recommendation_raw = tradingview_rating.get("recommendation", "NEUTRAL")
                 buy_signals = tradingview_rating.get("buy_signals", 0)
                 sell_signals = tradingview_rating.get("sell_signals", 0)
-                ma = tradingview_rating.get("moving_averages", "NEUTRAL")
-                osc = tradingview_rating.get("oscillators", "NEUTRAL")
+                ma_raw = tradingview_rating.get("moving_averages", "NEUTRAL")
+                osc_raw = tradingview_rating.get("oscillators", "NEUTRAL")
                 
-                if recommendation == "STRONG_BUY":
+                # Escape for display
+                ma = self.escape_markdown(str(ma_raw))
+                osc = self.escape_markdown(str(osc_raw))
+                
+                # Map recommendation to display text
+                if recommendation_raw == "STRONG_BUY":
                     tv_text = "STRONG BUY ✅✅"
-                elif recommendation == "BUY":
+                elif recommendation_raw == "BUY":
                     tv_text = "BUY ✅"
-                elif recommendation == "SELL":
+                elif recommendation_raw == "SELL":
                     tv_text = "SELL ❌"
-                elif recommendation == "STRONG_SELL":
+                elif recommendation_raw == "STRONG_SELL":
                     tv_text = "STRONG SELL ❌❌"
                 else:
                     tv_text = "NEUTRAL ➡️"

@@ -612,6 +612,38 @@ class TestAISignalAnalyzer:
         # Get non-existent key
         result_none = analyzer._get_cache("non_existent", 3600)
         assert result_none is None
+    
+    def test_escape_markdown(self, analyzer):
+        """Test that escape_markdown properly escapes special characters."""
+        # Test basic special characters
+        assert analyzer.escape_markdown("Hello_World") == "Hello\\_World"
+        assert analyzer.escape_markdown("Test*Bold*") == "Test\\*Bold\\*"
+        assert analyzer.escape_markdown("Link[text]") == "Link\\[text\\]"
+        assert analyzer.escape_markdown("Code`block`") == "Code\\`block\\`"
+        
+        # Test multiple special characters
+        input_text = "Breaking news: BTC up 5%! [Details]"
+        expected = "Breaking news: BTC up 5%\\! \\[Details\\]"
+        assert analyzer.escape_markdown(input_text) == expected
+        
+        # Test news-like content with various special characters
+        news_title = "Bitcoin's price surged by 10% - analysts predict more gains!"
+        escaped = analyzer.escape_markdown(news_title)
+        # Should escape: - (dash) and ! (exclamation) which are in the escape_chars list
+        # Note: apostrophe (') and percent (%) are NOT escaped as they don't break Markdown
+        assert "\\-" in escaped
+        assert "\\!" in escaped
+        
+        # Test with None or empty
+        assert analyzer.escape_markdown("") == ""
+        assert analyzer.escape_markdown(None) is None
+        
+        # Test all special characters
+        all_special = "_*[]()~`>#+-=|{}.!"
+        escaped_all = analyzer.escape_markdown(all_special)
+        # Each character should be escaped with backslash
+        for char in all_special:
+            assert f"\\{char}" in escaped_all
 
 
 if __name__ == "__main__":

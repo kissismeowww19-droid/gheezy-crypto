@@ -13,6 +13,7 @@ from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramBadRequest
 
 from config import settings
 from api_manager import get_coin_price as get_price_multi_api, get_api_stats
@@ -1260,7 +1261,11 @@ async def callback_signals(callback: CallbackQuery):
     text = text + "🔮 _Прогноз на ближайший час_\n\n"
     text = text + "👇 Выбери монету:\n\n"
     text = text + "🔜 _Скоро новые монеты_"
-    await callback.message.edit_text(text, reply_markup=get_signals_keyboard(), parse_mode=ParseMode.MARKDOWN)
+    try:
+        await callback.message.edit_text(text, reply_markup=get_signals_keyboard(), parse_mode=ParseMode.MARKDOWN)
+    except TelegramBadRequest as e:
+        logger.error(f"Markdown parsing error: {e}")
+        await callback.message.edit_text(text, reply_markup=get_signals_keyboard())
     await callback. answer()
 
 
@@ -1295,7 +1300,12 @@ async def callback_signal_coin(callback: CallbackQuery):
         ],
     ])
     
-    await callback.message.edit_text(signal_text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+    try:
+        await callback.message.edit_text(signal_text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+    except TelegramBadRequest as e:
+        logger.error(f"Markdown parsing error: {e}")
+        # Если Markdown не парсится, отправить без форматирования
+        await callback.message.edit_text(signal_text, reply_markup=keyboard)
 
 
 @router.callback_query(lambda c: c.data == "menu_market")
