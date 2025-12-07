@@ -47,17 +47,25 @@ class AISignalAnalyzer:
     CACHE_TTL_FUNDING_RATE = 300  # 5 минут
     MIN_PRICE_POINTS = 30  # Минимум точек для индикаторов
     
-    # Веса для 10-факторной системы (100% total)
-    WHALE_WEIGHT = 0.12      # 12%
-    TREND_WEIGHT = 0.15      # 15%
-    MOMENTUM_WEIGHT = 0.12   # 12%
-    VOLATILITY_WEIGHT = 0.08 # 8%
-    VOLUME_WEIGHT = 0.10     # 10%
-    MARKET_WEIGHT = 0.08     # 8%
-    ORDERBOOK_WEIGHT = 0.10  # 10%
-    DERIVATIVES_WEIGHT = 0.10 # 10%
-    ONCHAIN_WEIGHT = 0.08    # 8%
-    SENTIMENT_WEIGHT = 0.07  # 7%
+    # Веса для 15-факторной системы (100% total)
+    # Долгосрочные факторы (50% веса)
+    WHALE_WEIGHT = 0.06          # 6% (было 12%)
+    TREND_WEIGHT = 0.08          # 8% (было 15%)
+    MOMENTUM_WEIGHT = 0.06       # 6% (было 12%)
+    VOLATILITY_WEIGHT = 0.05     # 5% (было 8%)
+    VOLUME_WEIGHT = 0.05         # 5% (было 10%)
+    MARKET_WEIGHT = 0.05         # 5% (было 8%)
+    ORDERBOOK_WEIGHT = 0.05      # 5% (было 10%)
+    DERIVATIVES_WEIGHT = 0.05    # 5% (было 10%)
+    ONCHAIN_WEIGHT = 0.03        # 3% (было 8%)
+    SENTIMENT_WEIGHT = 0.02      # 2% (было 7%)
+    
+    # Краткосрочные факторы (50% веса) - НОВЫЕ
+    SHORT_TREND_WEIGHT = 0.12    # 12% - RSI 5м/15м, EMA
+    TRADES_FLOW_WEIGHT = 0.10    # 10% - Buy/Sell flow
+    LIQUIDATIONS_WEIGHT = 0.08   # 8% - Ликвидации
+    ORDERBOOK_DELTA_WEIGHT = 0.10 # 10% - Изменение order book
+    PRICE_MOMENTUM_WEIGHT = 0.10 # 10% - Движение цены за 10 мин
     
     # Scaling factor for final score calculation
     SCORE_SCALE_FACTOR = 10  # Scale weighted sum from -10/+10 to -100/+100
@@ -94,7 +102,11 @@ class AISignalAnalyzer:
         self._cache = {}
         self._cache_timestamps = {}
         
-        logger.info("AISignalAnalyzer initialized with 10-factor system")
+        # Хранилище для расчёта delta (краткосрочные данные)
+        self._previous_orderbook = {}  # {"BTC": {...}, "ETH": {...}}
+        self._previous_prices = {}  # {"BTC": [(timestamp, price), ...], "ETH": [...]}
+        
+        logger.info("AISignalAnalyzer initialized with 15-factor system")
     
     def _get_cache(self, key: str, ttl_seconds: int) -> Optional[Dict]:
         """
@@ -566,6 +578,630 @@ class AISignalAnalyzer:
         except Exception as e:
             logger.error(f"Error getting funding rate for {symbol}: {e}")
             return None
+    
+    async def get_short_term_ohlcv(self, symbol: str, interval: str = "5", limit: int = 50) -> Optional[List]:
+        """
+        Получение краткосрочных свечей с Bybit.
+        НЕ кэшируется для получения свежих данных!
+        
+        Args:
+            symbol: BTC или ETH
+            interval: "5" (5 мин), "15" (15 мин)
+            limit: количество свечей
+        
+        API: https://api.bybit.com/v5/market/kline?category=spot&symbol=BTCUSDT&interval=5&limit=50
+        
+        Returns:
+            List of candles: [{"open": 97000, "high": 98000, "low": 96500, "close": 97500, 
+                               "volume": 123.45, "timestamp": 1234567890}, ...]
+        """
+        try:
+            bybit_symbol = self.bybit_mapping.get(symbol)
+            if not bybit_symbol:
+                logger.warning(f"Unknown symbol for short-term OHLCV: {symbol}")
+                return None
+            
+            url = "https://api.bybit.com/v5/market/kline"
+            params = {
+                "category": "spot",
+                "symbol": bybit_symbol,
+                "interval": interval,
+                "limit": limit
+            }
+            
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params, timeout=timeout) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        if data.get("retCode") != 0:
+                            logger.warning(f"Bybit kline error: {data.get('retMsg')}")
+                            return None
+                        
+                        klines = data.get("result", {}).get("list", [])
+                        
+                        if not klines:
+                            return None
+                        
+                        result = []
+                        for kline in klines:
+                            # Bybit format: [timestamp, open, high, low, close, volume, turnover]
+                            result.append({
+                                "timestamp": int(kline[0]),
+                                "open": float(kline[1]),
+                                "high": float(kline[2]),
+                                "low": float(kline[3]),
+                                "close": float(kline[4]),
+                                "volume": float(kline[5])
+                            })
+                        
+                        logger.info(f"Fetched {len(result)} short-term {interval}m candles for {symbol}")
+                        return result
+                    else:
+                        logger.warning(f"Failed to fetch short-term OHLCV for {symbol}: {response.status}")
+                        return None
+        except Exception as e:
+            logger.error(f"Error getting short-term OHLCV for {symbol}: {e}")
+            return None
+    
+    async def get_recent_trades_flow(self, symbol: str) -> Optional[Dict]:
+        """
+        Анализ потока сделок за последние 10 минут.
+        НЕ кэшируется для получения свежих данных!
+        
+        Args:
+            symbol: BTC или ETH
+        
+        API: https://api.bybit.com/v5/market/recent-trade?category=spot&symbol=BTCUSDT&limit=1000
+        
+        Returns:
+            {
+                "buy_volume": 1234567,
+                "sell_volume": 987654,
+                "buy_count": 150,
+                "sell_count": 120,
+                "flow_ratio": 1.25,  # buy/sell
+                "sentiment": "bullish"  # bullish/bearish/neutral
+            }
+        """
+        try:
+            bybit_symbol = self.bybit_mapping.get(symbol)
+            if not bybit_symbol:
+                logger.warning(f"Unknown symbol for trades flow: {symbol}")
+                return None
+            
+            url = "https://api.bybit.com/v5/market/recent-trade"
+            params = {
+                "category": "spot",
+                "symbol": bybit_symbol,
+                "limit": 1000
+            }
+            
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params, timeout=timeout) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        if data.get("retCode") != 0:
+                            logger.warning(f"Bybit trades error: {data.get('retMsg')}")
+                            return None
+                        
+                        trades = data.get("result", {}).get("list", [])
+                        
+                        if not trades:
+                            return None
+                        
+                        # Filter only last 10 minutes
+                        now_ms = datetime.now().timestamp() * 1000
+                        ten_min_ago_ms = now_ms - (10 * 60 * 1000)
+                        
+                        buy_volume = 0.0
+                        sell_volume = 0.0
+                        buy_count = 0
+                        sell_count = 0
+                        
+                        for trade in trades:
+                            trade_time = int(trade.get("time", 0))
+                            if trade_time < ten_min_ago_ms:
+                                continue
+                            
+                            price = float(trade.get("price", 0))
+                            size = float(trade.get("size", 0))
+                            side = trade.get("side", "")
+                            
+                            if price <= 0 or size <= 0 or not side:
+                                continue
+                            
+                            volume_usd = price * size
+                            
+                            if side == "Buy":
+                                buy_volume += volume_usd
+                                buy_count += 1
+                            elif side == "Sell":
+                                sell_volume += volume_usd
+                                sell_count += 1
+                        
+                        # Calculate flow ratio and sentiment
+                        flow_ratio = buy_volume / sell_volume if sell_volume > 0 else 1.0
+                        
+                        if flow_ratio > 1.2:
+                            sentiment = "bullish"
+                        elif flow_ratio < 0.83:
+                            sentiment = "bearish"
+                        else:
+                            sentiment = "neutral"
+                        
+                        result = {
+                            "buy_volume": round(buy_volume, 2),
+                            "sell_volume": round(sell_volume, 2),
+                            "buy_count": buy_count,
+                            "sell_count": sell_count,
+                            "flow_ratio": round(flow_ratio, 3),
+                            "sentiment": sentiment
+                        }
+                        
+                        logger.info(f"Analyzed trades flow for {symbol}: {sentiment} (ratio: {flow_ratio:.2f})")
+                        return result
+                    else:
+                        logger.warning(f"Failed to fetch trades flow for {symbol}: {response.status}")
+                        return None
+        except Exception as e:
+            logger.error(f"Error getting trades flow for {symbol}: {e}")
+            return None
+    
+    async def get_liquidations(self, symbol: str) -> Optional[Dict]:
+        """
+        Получение данных о ликвидациях из Bybit futures.
+        НЕ кэшируется для получения свежих данных!
+        
+        Args:
+            symbol: BTC или ETH
+        
+        Note: Bybit не предоставляет прямого API для ликвидаций.
+        Используем Open Interest изменения как прокси для ликвидаций.
+        
+        Returns:
+            {
+                "long_liquidations": 5000000,
+                "short_liquidations": 3000000,
+                "net_liquidations": 2000000,  # long - short
+                "sentiment": "bearish"  # много лонг ликвидаций = bearish
+            }
+        """
+        try:
+            bybit_symbol = self.bybit_mapping.get(symbol)
+            if not bybit_symbol:
+                logger.warning(f"Unknown symbol for liquidations: {symbol}")
+                return None
+            
+            # Используем open interest change как прокси для ликвидаций
+            url = "https://api.bybit.com/v5/market/open-interest"
+            params = {
+                "category": "linear",
+                "symbol": bybit_symbol,
+                "intervalTime": "5min",
+                "limit": 10
+            }
+            
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params, timeout=timeout) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        if data.get("retCode") != 0:
+                            logger.warning(f"Bybit OI error: {data.get('retMsg')}")
+                            return None
+                        
+                        oi_list = data.get("result", {}).get("list", [])
+                        
+                        if not oi_list or len(oi_list) < 2:
+                            return None
+                        
+                        # Calculate OI change
+                        latest_oi = float(oi_list[0].get("openInterest", 0))
+                        prev_oi = float(oi_list[-1].get("openInterest", 0))
+                        oi_change = latest_oi - prev_oi
+                        
+                        # Negative OI change suggests liquidations
+                        # Positive suggests new positions opening
+                        if oi_change < 0:
+                            # OI decreased = liquidations happened
+                            liquidation_volume = abs(oi_change)
+                            # Estimate 70/30 split (assumption)
+                            long_liquidations = liquidation_volume * 0.7
+                            short_liquidations = liquidation_volume * 0.3
+                            sentiment = "bearish"  # More longs liquidated
+                        else:
+                            # OI increased or stable
+                            long_liquidations = 0
+                            short_liquidations = 0
+                            sentiment = "neutral"
+                        
+                        net_liquidations = long_liquidations - short_liquidations
+                        
+                        result = {
+                            "long_liquidations": round(long_liquidations, 2),
+                            "short_liquidations": round(short_liquidations, 2),
+                            "net_liquidations": round(net_liquidations, 2),
+                            "sentiment": sentiment
+                        }
+                        
+                        logger.info(f"Analyzed liquidations for {symbol}: {sentiment}")
+                        return result
+                    else:
+                        logger.warning(f"Failed to fetch liquidations for {symbol}: {response.status}")
+                        return None
+        except Exception as e:
+            logger.error(f"Error getting liquidations for {symbol}: {e}")
+            return None
+    
+    async def get_orderbook_delta(self, symbol: str) -> Optional[Dict]:
+        """
+        Изменение order book за последние запросы.
+        Сравнивает текущий order book с предыдущим (хранится в памяти).
+        НЕ кэшируется для получения свежих данных!
+        
+        Args:
+            symbol: BTC или ETH
+        
+        Returns:
+            {
+                "bid_change": +5.2,  # % изменение bid wall
+                "ask_change": -3.1,  # % изменение ask wall
+                "delta": +8.3,  # bid_change - ask_change
+                "sentiment": "bullish"
+            }
+        """
+        try:
+            bybit_symbol = self.bybit_mapping.get(symbol)
+            if not bybit_symbol:
+                logger.warning(f"Unknown symbol for orderbook delta: {symbol}")
+                return None
+            
+            url = "https://api.bybit.com/v5/market/orderbook"
+            params = {
+                "category": "spot",
+                "symbol": bybit_symbol,
+                "limit": 50
+            }
+            
+            timeout = aiohttp.ClientTimeout(total=5)
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params, timeout=timeout) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        result_data = data.get("result", {})
+                        bids = result_data.get("b", [])
+                        asks = result_data.get("a", [])
+                        
+                        if not bids or not asks:
+                            return None
+                        
+                        # Calculate current volumes
+                        bid_volume = sum(float(b[1]) for b in bids)
+                        ask_volume = sum(float(a[1]) for a in asks)
+                        
+                        # Get previous orderbook data
+                        prev_orderbook = self._previous_orderbook.get(symbol)
+                        
+                        if prev_orderbook:
+                            prev_bid_volume = prev_orderbook["bid_volume"]
+                            prev_ask_volume = prev_orderbook["ask_volume"]
+                            
+                            # Calculate percentage change
+                            bid_change = ((bid_volume - prev_bid_volume) / prev_bid_volume * 100) if prev_bid_volume > 0 else 0
+                            ask_change = ((ask_volume - prev_ask_volume) / prev_ask_volume * 100) if prev_ask_volume > 0 else 0
+                            delta = bid_change - ask_change
+                            
+                            # Determine sentiment
+                            if delta > 5:
+                                sentiment = "bullish"
+                            elif delta < -5:
+                                sentiment = "bearish"
+                            else:
+                                sentiment = "neutral"
+                            
+                            result = {
+                                "bid_change": round(bid_change, 2),
+                                "ask_change": round(ask_change, 2),
+                                "delta": round(delta, 2),
+                                "sentiment": sentiment
+                            }
+                        else:
+                            # First call, no delta yet
+                            result = {
+                                "bid_change": 0.0,
+                                "ask_change": 0.0,
+                                "delta": 0.0,
+                                "sentiment": "neutral"
+                            }
+                        
+                        # Store current orderbook for next comparison
+                        self._previous_orderbook[symbol] = {
+                            "bid_volume": bid_volume,
+                            "ask_volume": ask_volume,
+                            "timestamp": datetime.now()
+                        }
+                        
+                        logger.info(f"Calculated orderbook delta for {symbol}: {result.get('delta', 0):.2f}%")
+                        return result
+                    else:
+                        logger.warning(f"Failed to fetch orderbook delta for {symbol}: {response.status}")
+                        return None
+        except Exception as e:
+            logger.error(f"Error getting orderbook delta for {symbol}: {e}")
+            return None
+    
+    async def calculate_short_term_indicators(self, symbol: str, ohlcv_5m: Optional[List], 
+                                             ohlcv_15m: Optional[List]) -> Optional[Dict]:
+        """
+        Расчёт краткосрочных индикаторов на основе 5м и 15м данных.
+        
+        Args:
+            symbol: BTC или ETH
+            ohlcv_5m: Свечи 5 минут
+            ohlcv_15m: Свечи 15 минут
+        
+        Returns:
+            Dict: {
+                "rsi_5m": 65.5,
+                "rsi_15m": 58.2,
+                "ema_9_5m": 97500,
+                "ema_21_5m": 97200,
+                "ema_crossover": "bullish",  # bullish/bearish/neutral
+                "price_10min_ago": 97000,
+                "current_price": 97500
+            }
+        """
+        try:
+            result = {}
+            
+            # RSI 5m
+            if ohlcv_5m and len(ohlcv_5m) >= 14:
+                closes_5m = [c["close"] for c in ohlcv_5m]
+                rsi_5m = calculate_rsi(closes_5m, period=14)
+                if rsi_5m:
+                    result["rsi_5m"] = rsi_5m.value
+            
+            # RSI 15m
+            if ohlcv_15m and len(ohlcv_15m) >= 14:
+                closes_15m = [c["close"] for c in ohlcv_15m]
+                rsi_15m = calculate_rsi(closes_15m, period=14)
+                if rsi_15m:
+                    result["rsi_15m"] = rsi_15m.value
+            
+            # EMA crossover on 5m
+            if ohlcv_5m and len(ohlcv_5m) >= 21:
+                closes_5m = [c["close"] for c in ohlcv_5m]
+                
+                # Calculate EMA 9 and 21
+                import numpy as np
+                closes_array = np.array(closes_5m)
+                
+                # EMA formula: EMA = price * k + EMA(prev) * (1-k), where k = 2/(N+1)
+                ema_9 = closes_array[0]
+                k_9 = 2 / (9 + 1)
+                for price in closes_array:
+                    ema_9 = price * k_9 + ema_9 * (1 - k_9)
+                
+                ema_21 = closes_array[0]
+                k_21 = 2 / (21 + 1)
+                for price in closes_array:
+                    ema_21 = price * k_21 + ema_21 * (1 - k_21)
+                
+                result["ema_9_5m"] = round(ema_9, 2)
+                result["ema_21_5m"] = round(ema_21, 2)
+                
+                # Crossover
+                if ema_9 > ema_21 * 1.001:  # 0.1% threshold
+                    result["ema_crossover"] = "bullish"
+                elif ema_9 < ema_21 * 0.999:
+                    result["ema_crossover"] = "bearish"
+                else:
+                    result["ema_crossover"] = "neutral"
+            
+            # Price 10 minutes ago (2 candles ago on 5m)
+            if ohlcv_5m and len(ohlcv_5m) >= 3:
+                result["price_10min_ago"] = ohlcv_5m[-3]["close"]
+                result["current_price"] = ohlcv_5m[0]["close"]
+            
+            logger.info(f"Calculated short-term indicators for {symbol}")
+            return result if result else None
+            
+        except Exception as e:
+            logger.error(f"Error calculating short-term indicators for {symbol}: {e}")
+            return None
+    
+    def _calculate_short_term_trend_score(self, short_term_data: Dict) -> float:
+        """
+        Краткосрочный тренд на основе 5м/15м данных.
+        
+        Использует:
+        - RSI 5м (oversold < 30, overbought > 70)
+        - RSI 15м
+        - EMA 9/21 crossover на 5м
+        - Price momentum (цена сейчас vs 10 мин назад)
+        
+        Args:
+            short_term_data: Краткосрочные индикаторы
+        
+        Returns: -10 to +10
+        """
+        if not short_term_data:
+            return 0.0
+        
+        score = 0.0
+        
+        # RSI 5m score (max ±3)
+        rsi_5m = short_term_data.get("rsi_5m")
+        if rsi_5m:
+            if rsi_5m < 30:
+                score += 3  # Oversold = bullish
+            elif rsi_5m > 70:
+                score -= 3  # Overbought = bearish
+            else:
+                # Gradient
+                score += (50 - rsi_5m) / 20
+        
+        # RSI 15m score (max ±2)
+        rsi_15m = short_term_data.get("rsi_15m")
+        if rsi_15m:
+            if rsi_15m < 30:
+                score += 2
+            elif rsi_15m > 70:
+                score -= 2
+            else:
+                score += (50 - rsi_15m) / 30
+        
+        # EMA crossover score (max ±3)
+        ema_crossover = short_term_data.get("ema_crossover")
+        if ema_crossover == "bullish":
+            score += 3
+        elif ema_crossover == "bearish":
+            score -= 3
+        
+        # Price momentum score (max ±2)
+        current_price = short_term_data.get("current_price")
+        price_10min_ago = short_term_data.get("price_10min_ago")
+        if current_price and price_10min_ago:
+            price_change_pct = ((current_price - price_10min_ago) / price_10min_ago) * 100
+            if price_change_pct > 0.5:
+                score += 2
+            elif price_change_pct < -0.5:
+                score -= 2
+            else:
+                score += price_change_pct * 4  # Gradient
+        
+        return max(min(score, 10), -10)
+    
+    def _calculate_trades_flow_score(self, trades_flow: Optional[Dict]) -> float:
+        """
+        Score на основе потока сделок.
+        
+        - flow_ratio > 1.5 = +5 (много покупок)
+        - flow_ratio < 0.67 = -5 (много продаж)
+        - Градиент между ними
+        
+        Args:
+            trades_flow: Данные о потоке сделок
+        
+        Returns: -10 to +10
+        """
+        if not trades_flow:
+            return 0.0
+        
+        flow_ratio = trades_flow.get("flow_ratio", 1.0)
+        
+        if flow_ratio > 1.5:
+            # Много покупок - максимально бычье
+            score = 10
+        elif flow_ratio < 0.67:
+            # Много продаж - максимально медвежье
+            score = -10
+        else:
+            # Градиент между 0.67 и 1.5
+            # Normalize to -10 to +10
+            # flow_ratio: 0.67 -> -10, 1.0 -> 0, 1.5 -> +10
+            if flow_ratio >= 1.0:
+                score = ((flow_ratio - 1.0) / 0.5) * 10
+            else:
+                score = ((flow_ratio - 1.0) / 0.33) * 10
+        
+        return max(min(score, 10), -10)
+    
+    def _calculate_liquidations_score(self, liquidations: Optional[Dict]) -> float:
+        """
+        Score на основе ликвидаций.
+        
+        - Много лонг ликвидаций = bearish (цена падает, лонги закрываются)
+        - Много шорт ликвидаций = bullish (цена растёт, шорты закрываются)
+        
+        Args:
+            liquidations: Данные о ликвидациях
+        
+        Returns: -10 to +10
+        """
+        if not liquidations:
+            return 0.0
+        
+        sentiment = liquidations.get("sentiment", "neutral")
+        net_liquidations = liquidations.get("net_liquidations", 0)
+        
+        if sentiment == "bearish":
+            # Много лонг ликвидаций
+            score = -8
+        elif sentiment == "bullish":
+            # Много шорт ликвидаций
+            score = 8
+        else:
+            # Нейтрально
+            score = 0
+        
+        return max(min(score, 10), -10)
+    
+    def _calculate_orderbook_delta_score(self, orderbook_delta: Optional[Dict]) -> float:
+        """
+        Score на основе изменения order book.
+        
+        - Bid wall растёт, Ask wall падает = bullish
+        - Bid wall падает, Ask wall растёт = bearish
+        
+        Args:
+            orderbook_delta: Изменение order book
+        
+        Returns: -10 to +10
+        """
+        if not orderbook_delta:
+            return 0.0
+        
+        delta = orderbook_delta.get("delta", 0)
+        
+        # Delta > 10% = strong bullish
+        # Delta < -10% = strong bearish
+        if delta > 10:
+            score = 10
+        elif delta < -10:
+            score = -10
+        else:
+            # Gradient
+            score = delta
+        
+        return max(min(score, 10), -10)
+    
+    def _calculate_price_momentum_score(self, current_price: float, price_10min_ago: float) -> float:
+        """
+        Score на основе движения цены за 10 минут.
+        
+        - Рост > 0.5% = bullish
+        - Падение > 0.5% = bearish
+        
+        Args:
+            current_price: Текущая цена
+            price_10min_ago: Цена 10 минут назад
+        
+        Returns: -10 to +10
+        """
+        if not current_price or not price_10min_ago:
+            return 0.0
+        
+        price_change_pct = ((current_price - price_10min_ago) / price_10min_ago) * 100
+        
+        if price_change_pct > 0.5:
+            # Strong bullish
+            score = min(price_change_pct * 10, 10)
+        elif price_change_pct < -0.5:
+            # Strong bearish
+            score = max(price_change_pct * 10, -10)
+        else:
+            # Gradient
+            score = price_change_pct * 20
+        
+        return max(min(score, 10), -10)
+    
     
     def _calculate_whale_score(self, whale_data: Dict, exchange_flows: Optional[Dict] = None) -> float:
         """
@@ -1047,21 +1683,31 @@ class AISignalAnalyzer:
                         fear_greed: Optional[Dict] = None, funding_rate: Optional[Dict] = None,
                         order_book: Optional[Dict] = None, trades: Optional[Dict] = None,
                         futures_data: Optional[Dict] = None, onchain_data: Optional[Dict] = None,
-                        exchange_flows: Optional[Dict] = None, ohlcv_data: Optional[List] = None) -> Dict:
+                        exchange_flows: Optional[Dict] = None, ohlcv_data: Optional[List] = None,
+                        short_term_data: Optional[Dict] = None, trades_flow: Optional[Dict] = None,
+                        liquidations: Optional[Dict] = None, orderbook_delta: Optional[Dict] = None) -> Dict:
         """
-        10-факторная система расчёта сигнала.
+        15-факторная система расчёта сигнала.
         
         Веса факторов (100% total):
-        - Whale Score (12%): Whale transactions + Exchange flows
-        - Trend Score (15%): RSI + MACD + MA Crossover
-        - Momentum Score (12%): Stoch RSI + MFI + ROC + Williams %R
-        - Volatility Score (8%): Bollinger Bands + ATR + Keltner
-        - Volume Score (10%): OBV + VWAP + Volume SMA
-        - Market Score (8%): Price change + Volume
-        - Order Book Score (10%): Bid/Ask imbalance + Spread
-        - Derivatives Score (10%): OI + Long/Short + Funding
-        - On-Chain Score (8%): Mempool + Hashrate
-        - Sentiment Score (7%): Fear & Greed Index
+        Долгосрочные (50%):
+        - Whale Score (6%): Whale transactions + Exchange flows
+        - Trend Score (8%): RSI + MACD + MA Crossover
+        - Momentum Score (6%): Stoch RSI + MFI + ROC + Williams %R
+        - Volatility Score (5%): Bollinger Bands + ATR + Keltner
+        - Volume Score (5%): OBV + VWAP + Volume SMA
+        - Market Score (5%): Price change + Volume
+        - Order Book Score (5%): Bid/Ask imbalance + Spread
+        - Derivatives Score (5%): OI + Long/Short + Funding
+        - On-Chain Score (3%): Mempool + Hashrate
+        - Sentiment Score (2%): Fear & Greed Index
+        
+        Краткосрочные (50%):
+        - Short Trend Score (12%): RSI 5м/15м, EMA crossover
+        - Trades Flow Score (10%): Buy/Sell flow ratio
+        - Liquidations Score (8%): Long/Short liquidations
+        - Orderbook Delta Score (10%): Bid/Ask wall changes
+        - Price Momentum Score (10%): 10-min price movement
         
         Each factor gives -10 to +10 points.
         Total score: -100 to +100 (weighted sum).
@@ -1078,12 +1724,15 @@ class AISignalAnalyzer:
             futures_data: Futures data (optional)
             onchain_data: On-chain data (optional)
             exchange_flows: Exchange flows (optional)
-            ohlcv_data: OHLCV candles (optional)
+            short_term_data: Short-term indicators (optional)
+            trades_flow: Trades flow analysis (optional)
+            liquidations: Liquidations data (optional)
+            orderbook_delta: Orderbook delta analysis (optional)
             
         Returns:
             Dict with analysis results
         """
-        # Calculate 10 factor scores
+        # Calculate 10 long-term factor scores
         whale_score = self._calculate_whale_score(whale_data, exchange_flows)
         
         trend_score = 0.0
@@ -1102,8 +1751,23 @@ class AISignalAnalyzer:
         onchain_score = self._calculate_onchain_score(onchain_data)
         sentiment_score = self._calculate_sentiment_score(fear_greed)
         
-        # Calculate weighted total score
+        # Calculate 5 short-term factor scores (NEW)
+        short_trend_score = self._calculate_short_term_trend_score(short_term_data)
+        trades_flow_score = self._calculate_trades_flow_score(trades_flow)
+        liquidations_score = self._calculate_liquidations_score(liquidations)
+        orderbook_delta_score = self._calculate_orderbook_delta_score(orderbook_delta)
+        
+        # Price momentum from short_term_data
+        price_momentum_score = 0.0
+        if short_term_data:
+            current_price = short_term_data.get("current_price")
+            price_10min_ago = short_term_data.get("price_10min_ago")
+            if current_price and price_10min_ago:
+                price_momentum_score = self._calculate_price_momentum_score(current_price, price_10min_ago)
+        
+        # Calculate weighted total score (15 factors)
         total_score = (
+            # Long-term (50%)
             whale_score * self.WHALE_WEIGHT +
             trend_score * self.TREND_WEIGHT +
             momentum_score * self.MOMENTUM_WEIGHT +
@@ -1113,11 +1777,18 @@ class AISignalAnalyzer:
             orderbook_score * self.ORDERBOOK_WEIGHT +
             derivatives_score * self.DERIVATIVES_WEIGHT +
             onchain_score * self.ONCHAIN_WEIGHT +
-            sentiment_score * self.SENTIMENT_WEIGHT
+            sentiment_score * self.SENTIMENT_WEIGHT +
+            # Short-term (50%)
+            short_trend_score * self.SHORT_TREND_WEIGHT +
+            trades_flow_score * self.TRADES_FLOW_WEIGHT +
+            liquidations_score * self.LIQUIDATIONS_WEIGHT +
+            orderbook_delta_score * self.ORDERBOOK_DELTA_WEIGHT +
+            price_momentum_score * self.PRICE_MOMENTUM_WEIGHT
         ) * self.SCORE_SCALE_FACTOR  # Scale to -100 to +100
         
-        # Count consensus
+        # Count consensus (15 factors)
         all_scores = {
+            # Long-term
             "whale_score": whale_score,
             "trend_score": trend_score,
             "momentum_score": momentum_score,
@@ -1128,11 +1799,18 @@ class AISignalAnalyzer:
             "derivatives_score": derivatives_score,
             "onchain_score": onchain_score,
             "sentiment_score": sentiment_score,
+            # Short-term
+            "short_trend_score": short_trend_score,
+            "trades_flow_score": trades_flow_score,
+            "liquidations_score": liquidations_score,
+            "orderbook_delta_score": orderbook_delta_score,
+            "price_momentum_score": price_momentum_score,
         }
         consensus_data = self.count_consensus(all_scores)
         
-        # Count available data sources
+        # Count available data sources (15 total)
         data_sources_available = sum([
+            # Long-term
             whale_data is not None and whale_data.get("transaction_count", 0) > 0,
             market_data is not None,
             technical_data is not None,
@@ -1143,14 +1821,20 @@ class AISignalAnalyzer:
             futures_data is not None,
             onchain_data is not None,
             exchange_flows is not None,
+            # Short-term
+            short_term_data is not None,
+            trades_flow is not None,
+            liquidations is not None,
+            orderbook_delta is not None,
+            short_term_data is not None and short_term_data.get("current_price") is not None,
         ])
         
-        # Calculate probability
+        # Calculate probability (15 factors)
         probability_data = self.calculate_probability(
             total_score=total_score,
             data_sources_count=data_sources_available,
             consensus_count=consensus_data["bullish_count"] if total_score > 0 else consensus_data["bearish_count"],
-            total_factors=10
+            total_factors=15
         )
         
         # Determine direction and strength
@@ -1184,6 +1868,7 @@ class AISignalAnalyzer:
             "strength_percent": round(strength_percent),
             "confidence": confidence,
             "total_score": round(total_score, 2),
+            # Long-term scores
             "whale_score": round(whale_score, 2),
             "trend_score": round(trend_score, 2),
             "momentum_score": round(momentum_score, 2),
@@ -1194,6 +1879,12 @@ class AISignalAnalyzer:
             "derivatives_score": round(derivatives_score, 2),
             "onchain_score": round(onchain_score, 2),
             "sentiment_score": round(sentiment_score, 2),
+            # Short-term scores (NEW)
+            "short_trend_score": round(short_trend_score, 2),
+            "trades_flow_score": round(trades_flow_score, 2),
+            "liquidations_score": round(liquidations_score, 2),
+            "orderbook_delta_score": round(orderbook_delta_score, 2),
+            "price_momentum_score": round(price_momentum_score, 2),
             # Add probability data
             "probability": probability_data["probability"],
             "probability_direction": probability_data["direction"],
@@ -1219,10 +1910,15 @@ class AISignalAnalyzer:
         order_book: Optional[Dict] = None,
         futures_data: Optional[Dict] = None,
         onchain_data: Optional[Dict] = None,
-        exchange_flows: Optional[Dict] = None
+        exchange_flows: Optional[Dict] = None,
+        # Short-term data (NEW)
+        short_term_data: Optional[Dict] = None,
+        trades_flow: Optional[Dict] = None,
+        liquidations: Optional[Dict] = None,
+        orderbook_delta: Optional[Dict] = None
     ) -> str:
         """
-        Форматирование сообщения с AI сигналом (10-факторная система).
+        Форматирование сообщения с AI сигналом (15-факторная система).
         
         Args:
             symbol: Символ монеты
@@ -1236,6 +1932,10 @@ class AISignalAnalyzer:
             futures_data: Futures data (опционально)
             onchain_data: On-chain data (опционально)
             exchange_flows: Exchange flows (опционально)
+            short_term_data: Short-term indicators (опционально)
+            trades_flow: Trades flow analysis (опционально)
+            liquidations: Liquidations data (опционально)
+            orderbook_delta: Orderbook delta (опционально)
             
         Returns:
             Форматированное сообщение для Telegram
@@ -1452,23 +2152,131 @@ class AISignalAnalyzer:
             
             text += "\n━━━━━━━━━━━━━━━━━━━━\n\n"
         
-        # Breakdown сигнала (10-факторная система)
-        text += "🎯 *Breakdown сигнала (10 факторов):*\n\n"
-        text += "📊 *Основные факторы:*\n"
+        # Краткосрочный анализ (5-15м) - NEW SECTION
+        has_short_term = short_term_data or trades_flow or liquidations or orderbook_delta
+        if has_short_term:
+            text += "⚡ *Краткосрочный анализ (5-15м):*\n\n"
+            
+            # Short-term indicators
+            if short_term_data:
+                text += "📊 *Индикаторы:*\n"
+                
+                # RSI 5m
+                rsi_5m = short_term_data.get("rsi_5m")
+                if rsi_5m:
+                    if rsi_5m < 30:
+                        rsi_5m_status = "⬇️ Перепродан"
+                    elif rsi_5m > 70:
+                        rsi_5m_status = "⬆️ Перекуплен"
+                    else:
+                        rsi_5m_status = "➡️ Нейтрально"
+                    text += f"├─ RSI 5м: {rsi_5m:.1f} — {rsi_5m_status}\n"
+                
+                # RSI 15m
+                rsi_15m = short_term_data.get("rsi_15m")
+                if rsi_15m:
+                    if rsi_15m < 30:
+                        rsi_15m_status = "⬇️ Перепродан"
+                    elif rsi_15m > 70:
+                        rsi_15m_status = "⬆️ Перекуплен"
+                    else:
+                        rsi_15m_status = "➡️ Нейтрально"
+                    text += f"├─ RSI 15м: {rsi_15m:.1f} — {rsi_15m_status}\n"
+                
+                # EMA Crossover
+                ema_crossover = short_term_data.get("ema_crossover")
+                if ema_crossover:
+                    if ema_crossover == "bullish":
+                        ema_text = "🟢 Бычий"
+                    elif ema_crossover == "bearish":
+                        ema_text = "🔴 Медвежий"
+                    else:
+                        ema_text = "🟡 Нейтральный"
+                    text += f"└─ EMA 9/21: {ema_text}\n\n"
+                else:
+                    text += "\n"
+            
+            # Trades Flow
+            if trades_flow:
+                flow_ratio = trades_flow.get("flow_ratio", 1.0)
+                sentiment = trades_flow.get("sentiment", "neutral")
+                buy_count = trades_flow.get("buy_count", 0)
+                sell_count = trades_flow.get("sell_count", 0)
+                
+                if sentiment == "bullish":
+                    flow_emoji = "🟢"
+                    flow_text = "Бычий"
+                elif sentiment == "bearish":
+                    flow_emoji = "🔴"
+                    flow_text = "Медвежий"
+                else:
+                    flow_emoji = "🟡"
+                    flow_text = "Нейтральный"
+                
+                text += f"💱 *Поток сделок (10 мин):*\n"
+                text += f"├─ Покупки/Продажи: {buy_count}/{sell_count}\n"
+                text += f"├─ Соотношение: {flow_ratio:.2f}\n"
+                text += f"└─ Настроение: {flow_emoji} {flow_text}\n\n"
+            
+            # Liquidations
+            if liquidations:
+                liq_sentiment = liquidations.get("sentiment", "neutral")
+                long_liq = liquidations.get("long_liquidations", 0)
+                short_liq = liquidations.get("short_liquidations", 0)
+                
+                if liq_sentiment == "bullish":
+                    liq_emoji = "🟢"
+                    liq_text = "Бычье (шорты закрыты)"
+                elif liq_sentiment == "bearish":
+                    liq_emoji = "🔴"
+                    liq_text = "Медвежье (лонги закрыты)"
+                else:
+                    liq_emoji = "🟡"
+                    liq_text = "Нейтрально"
+                
+                text += f"⚠️ *Ликвидации:*\n"
+                text += f"└─ Настроение: {liq_emoji} {liq_text}\n\n"
+            
+            # Orderbook Delta
+            if orderbook_delta:
+                delta = orderbook_delta.get("delta", 0)
+                ob_sentiment = orderbook_delta.get("sentiment", "neutral")
+                
+                if ob_sentiment == "bullish":
+                    ob_emoji = "🟢"
+                    ob_text = "Bid растёт"
+                elif ob_sentiment == "bearish":
+                    ob_emoji = "🔴"
+                    ob_text = "Ask растёт"
+                else:
+                    ob_emoji = "🟡"
+                    ob_text = "Стабильно"
+                
+                text += f"📖 *Orderbook:*\n"
+                text += f"└─ Изменение: {delta:+.1f}% ({ob_emoji} {ob_text})\n\n"
+            
+            text += "━━━━━━━━━━━━━━━━━━━━\n\n"
+        
+        # Breakdown сигнала (15-факторная система)
+        text += "🎯 *Breakdown сигнала (15 факторов):*\n\n"
+        text += "📊 *Долгосрочные факторы (1ч):*\n"
         text += f"├─ 🐋 Whale Score ({self.WHALE_WEIGHT:.0%}): {signal_data['whale_score']:+.1f}\n"
         text += f"├─ 📈 Trend Score ({self.TREND_WEIGHT:.0%}): {signal_data['trend_score']:+.1f}\n"
         text += f"├─ 💪 Momentum Score ({self.MOMENTUM_WEIGHT:.0%}): {signal_data['momentum_score']:+.1f}\n"
-        text += f"└─ 📉 Volatility Score ({self.VOLATILITY_WEIGHT:.0%}): {signal_data['volatility_score']:+.1f}\n\n"
-        
-        text += "📊 *Объём & Рынок:*\n"
+        text += f"├─ 📉 Volatility Score ({self.VOLATILITY_WEIGHT:.0%}): {signal_data['volatility_score']:+.1f}\n"
         text += f"├─ 📊 Volume Score ({self.VOLUME_WEIGHT:.0%}): {signal_data['volume_score']:+.1f}\n"
-        text += f"└─ 💹 Market Score ({self.MARKET_WEIGHT:.0%}): {signal_data['market_score']:+.1f}\n\n"
-        
-        text += "📊 *Деривативы & Настроения:*\n"
+        text += f"├─ 💹 Market Score ({self.MARKET_WEIGHT:.0%}): {signal_data['market_score']:+.1f}\n"
         text += f"├─ 📖 Order Book ({self.ORDERBOOK_WEIGHT:.0%}): {signal_data['orderbook_score']:+.1f}\n"
         text += f"├─ 🔮 Derivatives ({self.DERIVATIVES_WEIGHT:.0%}): {signal_data['derivatives_score']:+.1f}\n"
         text += f"├─ ⛓️ On-Chain ({self.ONCHAIN_WEIGHT:.0%}): {signal_data['onchain_score']:+.1f}\n"
         text += f"└─ 😱 Sentiment ({self.SENTIMENT_WEIGHT:.0%}): {signal_data['sentiment_score']:+.1f}\n\n"
+        
+        text += "⚡ *Краткосрочные факторы (5-15м):*\n"
+        text += f"├─ 📊 Short Trend ({self.SHORT_TREND_WEIGHT:.0%}): {signal_data['short_trend_score']:+.1f}\n"
+        text += f"├─ 💱 Trades Flow ({self.TRADES_FLOW_WEIGHT:.0%}): {signal_data['trades_flow_score']:+.1f}\n"
+        text += f"├─ ⚠️ Liquidations ({self.LIQUIDATIONS_WEIGHT:.0%}): {signal_data['liquidations_score']:+.1f}\n"
+        text += f"├─ 📖 Orderbook Δ ({self.ORDERBOOK_DELTA_WEIGHT:.0%}): {signal_data['orderbook_delta_score']:+.1f}\n"
+        text += f"└─ ⚡ Price Momentum ({self.PRICE_MOMENTUM_WEIGHT:.0%}): {signal_data['price_momentum_score']:+.1f}\n\n"
         
         text += "━━━━━━━━━━━━━━━━━━━━\n"
         text += f"*📊 ИТОГО: {signal_data['total_score']:+.1f} / 100 очков*\n\n"
@@ -1595,6 +2403,44 @@ class AISignalAnalyzer:
             # Calculate technical indicators with OHLCV data
             technical_data = await self.calculate_technical_indicators(symbol, ohlcv_data)
             
+            # Gather SHORT-TERM data (NEW - not cached!)
+            logger.info(f"Gathering short-term data for {symbol}...")
+            short_term_ohlcv_5m_task = self.get_short_term_ohlcv(symbol, interval="5", limit=50)
+            short_term_ohlcv_15m_task = self.get_short_term_ohlcv(symbol, interval="15", limit=50)
+            trades_flow_task = self.get_recent_trades_flow(symbol)
+            liquidations_task = self.get_liquidations(symbol)
+            orderbook_delta_task = self.get_orderbook_delta(symbol)
+            
+            # Wait for short-term tasks
+            short_term_ohlcv_5m, short_term_ohlcv_15m, trades_flow, liquidations, orderbook_delta = await asyncio.gather(
+                short_term_ohlcv_5m_task,
+                short_term_ohlcv_15m_task,
+                trades_flow_task,
+                liquidations_task,
+                orderbook_delta_task,
+                return_exceptions=True
+            )
+            
+            # Handle exceptions for short-term data
+            if isinstance(short_term_ohlcv_5m, Exception):
+                logger.error(f"Error fetching 5m OHLCV: {short_term_ohlcv_5m}")
+                short_term_ohlcv_5m = None
+            if isinstance(short_term_ohlcv_15m, Exception):
+                logger.error(f"Error fetching 15m OHLCV: {short_term_ohlcv_15m}")
+                short_term_ohlcv_15m = None
+            if isinstance(trades_flow, Exception):
+                logger.error(f"Error fetching trades flow: {trades_flow}")
+                trades_flow = None
+            if isinstance(liquidations, Exception):
+                logger.error(f"Error fetching liquidations: {liquidations}")
+                liquidations = None
+            if isinstance(orderbook_delta, Exception):
+                logger.error(f"Error fetching orderbook delta: {orderbook_delta}")
+                orderbook_delta = None
+            
+            # Calculate short-term indicators
+            short_term_data = await self.calculate_short_term_indicators(symbol, short_term_ohlcv_5m, short_term_ohlcv_15m)
+            
             # Log data availability
             data_sources_available = {
                 "whale_data": whale_data is not None and whale_data.get("transaction_count", 0) > 0,
@@ -1607,11 +2453,16 @@ class AISignalAnalyzer:
                 "futures_data": futures_data is not None,
                 "onchain_data": onchain_data is not None,
                 "exchange_flows": exchange_flows is not None,
+                # Short-term
+                "short_term_data": short_term_data is not None,
+                "trades_flow": trades_flow is not None,
+                "liquidations": liquidations is not None,
+                "orderbook_delta": orderbook_delta is not None,
             }
             available_count = sum(1 for v in data_sources_available.values() if v)
-            logger.info(f"Data sources available: {available_count}/10 for {symbol}")
+            logger.info(f"Data sources available: {available_count}/14 for {symbol}")
             
-            # Calculate signal with all available data
+            # Calculate signal with all available data (including short-term)
             signal_data = self.calculate_signal(
                 whale_data=whale_data,
                 market_data=market_data,
@@ -1623,10 +2474,15 @@ class AISignalAnalyzer:
                 futures_data=futures_data,
                 onchain_data=onchain_data,
                 exchange_flows=exchange_flows,
-                ohlcv_data=ohlcv_data
+                ohlcv_data=ohlcv_data,
+                # Short-term data (NEW)
+                short_term_data=short_term_data,
+                trades_flow=trades_flow,
+                liquidations=liquidations,
+                orderbook_delta=orderbook_delta
             )
             
-            # Format message with all data
+            # Format message with all data (including short-term)
             message = self.format_signal_message(
                 symbol=symbol,
                 signal_data=signal_data,
@@ -1638,7 +2494,12 @@ class AISignalAnalyzer:
                 order_book=order_book,
                 futures_data=futures_data,
                 onchain_data=onchain_data,
-                exchange_flows=exchange_flows
+                exchange_flows=exchange_flows,
+                # Short-term data (NEW)
+                short_term_data=short_term_data,
+                trades_flow=trades_flow,
+                liquidations=liquidations,
+                orderbook_delta=orderbook_delta
             )
             
             return message
