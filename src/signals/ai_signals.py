@@ -3027,14 +3027,18 @@ class AISignalAnalyzer:
             
             # TradingView
             if tradingview_rating:
-                recommendation = self.escape_markdown(str(tradingview_rating.get("recommendation", "NEUTRAL")))
+                # Get raw values once to avoid redundant lookups
+                recommendation_raw = tradingview_rating.get("recommendation", "NEUTRAL")
                 buy_signals = tradingview_rating.get("buy_signals", 0)
                 sell_signals = tradingview_rating.get("sell_signals", 0)
-                ma = self.escape_markdown(str(tradingview_rating.get("moving_averages", "NEUTRAL")))
-                osc = self.escape_markdown(str(tradingview_rating.get("oscillators", "NEUTRAL")))
+                ma_raw = tradingview_rating.get("moving_averages", "NEUTRAL")
+                osc_raw = tradingview_rating.get("oscillators", "NEUTRAL")
                 
-                # Use escaped recommendation for comparison
-                recommendation_raw = tradingview_rating.get("recommendation", "NEUTRAL")
+                # Escape for display
+                ma = self.escape_markdown(str(ma_raw))
+                osc = self.escape_markdown(str(osc_raw))
+                
+                # Map recommendation to display text
                 if recommendation_raw == "STRONG_BUY":
                     tv_text = "STRONG BUY ✅✅"
                 elif recommendation_raw == "BUY":

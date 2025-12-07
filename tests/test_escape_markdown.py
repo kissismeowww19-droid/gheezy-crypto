@@ -1,6 +1,11 @@
 """
 Test for escape_markdown function.
 Simple test without heavy dependencies.
+
+Note: The escape_markdown function is duplicated here instead of imported
+from src/signals/ai_signals.py because importing requires all project dependencies
+(aiohttp, structlog, numpy, etc.) which makes the test setup complex. This
+standalone version allows running tests quickly without full environment setup.
 """
 
 import sys
