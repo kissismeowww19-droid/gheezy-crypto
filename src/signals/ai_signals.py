@@ -2592,15 +2592,19 @@ class AISignalAnalyzer:
             text: Текст для экранирования
             
         Returns:
-            Экранированный текст
+            Экранированный текст (или исходное значение если None/не строка)
             
         Note:
-            Uses simple string.replace() in a loop for readability and maintainability.
-            Performance is acceptable since we're dealing with short strings (news titles,
-            status messages, etc.) typically under 200 characters. For larger texts,
-            str.translate() with a translation table would be more efficient.
+            - Gracefully handles None and non-string inputs by returning them unchanged.
+              This is intentional for defensive programming when dealing with optional
+              API responses that may be None or unexpected types.
+            - Uses simple string.replace() in a loop for readability and maintainability.
+            - Performance is acceptable since we're dealing with short strings (news titles,
+              status messages, etc.) typically under 200 characters. For larger texts,
+              str.translate() with a translation table would be more efficient.
         """
         if not text or not isinstance(text, str):
+            # Return unchanged for None or non-string inputs (defensive programming)
             return text
         
         # Список специальных символов Markdown, которые нужно экранировать
