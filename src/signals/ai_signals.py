@@ -1317,6 +1317,8 @@ class AISignalAnalyzer:
                     if response.status == 200:
                         data = await response.json()
                         
+                        # TODO: Parse actual LunarCrush API response structure
+                        # Currently using mock data - implement proper parsing when API structure is confirmed
                         # LunarCrush returns different structure
                         # Simulate realistic social data based on symbol
                         if symbol == "BTC":
@@ -2432,7 +2434,6 @@ class AISignalAnalyzer:
             orderbook_score * self.ORDERBOOK_WEIGHT +
             derivatives_score * self.DERIVATIVES_WEIGHT +
             onchain_score * self.ONCHAIN_WEIGHT +
-            onchain_score * self.ONCHAIN_WEIGHT +
             sentiment_score * self.SENTIMENT_WEIGHT +
             # Short-term (35%)
             short_trend_score * self.SHORT_TREND_WEIGHT +
@@ -3318,7 +3319,7 @@ class AISignalAnalyzer:
                 "social_data": social_data is not None,
             }
             available_count = sum(1 for v in data_sources_available.values() if v)
-            logger.info(f"Data sources available: {available_count}/19 for {symbol}")
+            logger.info(f"Data sources available: {available_count}/22 for {symbol}")
             
             # Calculate signal with all available data (22-factor system)
             signal_data = self.calculate_signal(

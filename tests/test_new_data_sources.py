@@ -198,8 +198,8 @@ class TestWeightSystem:
     
     def test_weight_distribution(self):
         """Test that weights sum to 100% and are distributed correctly."""
-        weights = {
-            # Long-term (35%)
+        # Long-term factors (35%)
+        long_term_weights = {
             'WHALE_WEIGHT': 0.04,
             'TREND_WEIGHT': 0.05,
             'MOMENTUM_WEIGHT': 0.04,
@@ -210,13 +210,19 @@ class TestWeightSystem:
             'DERIVATIVES_WEIGHT': 0.03,
             'ONCHAIN_WEIGHT': 0.02,
             'SENTIMENT_WEIGHT': 0.01,
-            # Short-term (35%)
+        }
+        
+        # Short-term factors (35%)
+        short_term_weights = {
             'SHORT_TREND_WEIGHT': 0.08,
             'TRADES_FLOW_WEIGHT': 0.07,
             'LIQUIDATIONS_WEIGHT': 0.06,
             'ORDERBOOK_DELTA_WEIGHT': 0.07,
             'PRICE_MOMENTUM_WEIGHT': 0.07,
-            # New sources (30%)
+        }
+        
+        # New sources (30%)
+        new_source_weights = {
             'COINGLASS_OI_WEIGHT': 0.05,
             'COINGLASS_TOP_TRADERS_WEIGHT': 0.05,
             'NEWS_SENTIMENT_WEIGHT': 0.05,
@@ -225,13 +231,16 @@ class TestWeightSystem:
             'SOCIAL_WEIGHT': 0.04,
         }
         
-        total = sum(weights.values())
+        # Combine all weights
+        all_weights = {**long_term_weights, **short_term_weights, **new_source_weights}
+        
+        total = sum(all_weights.values())
         assert abs(total - 1.0) < 0.01, f"Weights should sum to 1.0, got {total}"
         
         # Test category distributions
-        long_term = sum([weights[k] for k in list(weights.keys())[:10]])
-        short_term = sum([weights[k] for k in list(weights.keys())[10:15]])
-        new_sources = sum([weights[k] for k in list(weights.keys())[15:]])
+        long_term = sum(long_term_weights.values())
+        short_term = sum(short_term_weights.values())
+        new_sources = sum(new_source_weights.values())
         
         assert abs(long_term - 0.35) < 0.01, f"Long-term should be 35%, got {long_term * 100:.0f}%"
         assert abs(short_term - 0.35) < 0.01, f"Short-term should be 35%, got {short_term * 100:.0f}%"
