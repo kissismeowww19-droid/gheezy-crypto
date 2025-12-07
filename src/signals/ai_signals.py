@@ -1314,41 +1314,42 @@ class AISignalAnalyzer:
             timeout = aiohttp.ClientTimeout(total=10)
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, timeout=timeout) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        
-                        # TODO: Parse actual LunarCrush API response structure
-                        # Currently using mock data - implement proper parsing when API structure is confirmed
-                        # LunarCrush returns different structure
-                        # Simulate realistic social data based on symbol
-                        if symbol == "BTC":
-                            galaxy_score = 75
-                            social_volume = 18000
-                            social_volume_change = 5.5
-                            sentiment = 0.65
-                            social_dominance = 45.0
-                        elif symbol == "ETH":
-                            galaxy_score = 70
-                            social_volume = 12000
-                            social_volume_change = 3.2
-                            sentiment = 0.60
-                            social_dominance = 25.0
-                        else:
-                            return None
-                        
-                        result = {
-                            "galaxy_score": galaxy_score,
-                            "social_volume": social_volume,
-                            "social_volume_change": social_volume_change,
-                            "sentiment": sentiment,
-                            "social_dominance": social_dominance
-                        }
-                        
-                        logger.info(f"Fetched LunarCrush data for {symbol}: galaxy_score {galaxy_score}")
-                        return result
-                    else:
+                    # Check if request was successful before using mock data
+                    if response.status != 200:
                         logger.warning(f"Failed to fetch LunarCrush data for {symbol}: {response.status}")
                         return None
+                    
+                    # TODO: Parse actual LunarCrush API response structure
+                    # Currently using mock data - implement proper parsing when API structure is confirmed
+                    # For now, only return data if the API is accessible
+                    data = await response.json()
+                    
+                    # Use mock data based on symbol (to be replaced with actual parsing)
+                    if symbol == "BTC":
+                        galaxy_score = 75
+                        social_volume = 18000
+                        social_volume_change = 5.5
+                        sentiment = 0.65
+                        social_dominance = 45.0
+                    elif symbol == "ETH":
+                        galaxy_score = 70
+                        social_volume = 12000
+                        social_volume_change = 3.2
+                        sentiment = 0.60
+                        social_dominance = 25.0
+                    else:
+                        return None
+                    
+                    result = {
+                        "galaxy_score": galaxy_score,
+                        "social_volume": social_volume,
+                        "social_volume_change": social_volume_change,
+                        "sentiment": sentiment,
+                        "social_dominance": social_dominance
+                    }
+                    
+                    logger.info(f"Fetched LunarCrush data for {symbol}: galaxy_score {galaxy_score}")
+                    return result
         except Exception as e:
             logger.error(f"Error getting LunarCrush data for {symbol}: {e}")
             return None
@@ -2410,9 +2411,9 @@ class AISignalAnalyzer:
             price_change = market_data.get("change_24h", 0)
             coinglass_oi_score = self._calculate_oi_change_score(oi_change, price_change)
             
-            liq_long = coinglass_data.get("liquidations_long", 0)
-            liq_short = coinglass_data.get("liquidations_short", 0)
-            # Note: We already have liquidations_score, so we'll use top_traders only
+            # Note: Coinglass liquidations are available but not used separately
+            # as we already have liquidations_score from Bybit real-time data
+            # which is more suitable for short-term analysis
             
             ratio = coinglass_data.get("top_traders_ratio", 1.0)
             coinglass_top_traders_score = self._calculate_top_traders_score(ratio)
