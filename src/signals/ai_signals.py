@@ -127,6 +127,12 @@ class AISignalAnalyzer:
         self._cache[key] = value
         self._cache_timestamps[key] = datetime.now()
     
+    def clear_cache(self):
+        """Очистить весь кэш для получения свежих данных."""
+        self._cache = {}
+        self._cache_timestamps = {}
+        logger.info("AISignalAnalyzer cache cleared")
+    
     async def get_whale_data(self, symbol: str) -> Optional[Dict]:
         """
         Получение данных о транзакциях китов за последний час.
@@ -988,26 +994,26 @@ class AISignalAnalyzer:
         
         Формула:
         1. Base probability = 50% (нейтральный рынок)
-        2. Score adjustment = total_score * 0.3 (макс ±30%)
-        3. Data quality bonus = (sources/10) * 10% (макс +10%)
-        4. Consensus bonus = (consensus/10) * 10% (макс +10%)
+        2. Score adjustment = total_score * 0.4 (макс ±40%)
+        3. Data quality bonus = (sources/10) * 5% (макс +5%)
+        4. Consensus bonus = (consensus/10) * 5% (макс +5%)
         
-        Max probability = 50 + 30 + 10 + 10 = 100%
-        Min probability = 50 - 30 = 20%
+        Max probability = 50 + 40 + 5 + 5 = 100%
+        Min probability = 50 - 40 = 10%
         """
         # Base probability
         base = 50.0
         
-        # Score adjustment (±30%)
-        score_adj = (total_score / 100) * 30
+        # Score adjustment (±40%)
+        score_adj = (total_score / 100) * 40
         
-        # Data quality (0-10%)
+        # Data quality (0-5%)
         data_quality = data_sources_count / 10
-        data_bonus = data_quality * 10
+        data_bonus = data_quality * 5
         
-        # Consensus bonus (0-10%)
+        # Consensus bonus (0-5%)
         consensus_ratio = consensus_count / total_factors
-        consensus_bonus = consensus_ratio * 10
+        consensus_bonus = consensus_ratio * 5
         
         # Direction and probability calculation
         if total_score > 0:
@@ -1503,6 +1509,9 @@ class AISignalAnalyzer:
             Форматированное сообщение с AI сигналом
         """
         symbol = symbol.upper()
+        
+        # Сбрасываем кэш для получения свежих данных
+        self.clear_cache()
         
         # Проверяем поддержку монеты
         if symbol not in self.blockchain_mapping:
