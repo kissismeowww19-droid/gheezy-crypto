@@ -76,6 +76,9 @@ class AISignalAnalyzer:
     WHALE_ALERT_WEIGHT = 0.05     # 5% - Whale Alert
     SOCIAL_WEIGHT = 0.04          # 4% - LunarCrush
     
+    # Total factors in the analysis system
+    TOTAL_FACTORS = 22  # 10 long-term + 5 short-term + 6 new sources + sentiment
+    
     # Scaling factor for final score calculation
     SCORE_SCALE_FACTOR = 10  # Scale weighted sum from -10/+10 to -100/+100
     
@@ -2771,17 +2774,21 @@ class AISignalAnalyzer:
         whale_score_emoji = "🔥" if whale_score_scaled >= 7 else "⚡" if whale_score_scaled >= 5 else "💧"
         
         tx_count = whale_data.get('transaction_count', 0)
-        deposits = whale_data.get('deposits', 0)
-        withdrawals = whale_data.get('withdrawals', 0)
-        net_flow = withdrawals - deposits
-        net_flow_text = f"+{format_volume(abs(net_flow))}" if net_flow != 0 else "нейтрально"
+        deposits_count = whale_data.get('deposits', 0)  # Number of deposit transactions
+        withdrawals_count = whale_data.get('withdrawals', 0)  # Number of withdrawal transactions
+        total_volume = whale_data.get('total_volume_usd', 0)
+        
+        # Net flow: positive when more withdrawals (bullish), negative when more deposits (bearish)
+        net_flow = withdrawals_count - deposits_count
+        net_flow_text = f"+{abs(net_flow)}" if net_flow > 0 else f"{net_flow}" if net_flow < 0 else "0"
         net_flow_sentiment = "(бычье)" if net_flow > 0 else "(медвежье)" if net_flow < 0 else ""
         
         text += f"Score: {whale_score_scaled:.1f}/10 {whale_score_emoji}\n"
         text += f"• Транзакций: {tx_count}\n"
-        text += f"• На биржи: {format_volume(deposits)}\n"
-        text += f"• С бирж: {format_volume(withdrawals)}\n"
-        text += f"• Net Flow: {net_flow_text} {net_flow_sentiment}\n\n"
+        text += f"• Объём: {format_volume(total_volume)}\n"
+        text += f"• На биржи: {deposits_count} тx\n"
+        text += f"• С бирж: {withdrawals_count} тx\n"
+        text += f"• Net Flow: {net_flow_text} тx {net_flow_sentiment}\n\n"
         
         # ===== ТЕХНИЧЕСКИЙ АНАЛИЗ =====
         text += "⚡ *ТЕХНИЧЕСКИЙ АНАЛИЗ*\n"
@@ -2910,7 +2917,7 @@ class AISignalAnalyzer:
         # Считаем факторы
         bullish_count = sum(1 for r in reasons if r[1])
         bearish_count = sum(1 for r in reasons if not r[1])
-        neutral_count = max(0, 22 - bullish_count - bearish_count)  # 22-факторная система
+        neutral_count = max(0, self.TOTAL_FACTORS - bullish_count - bearish_count)
         
         consensus_text = "БЫЧИЙ ✅" if bullish_count > bearish_count else "МЕДВЕЖИЙ ❌" if bearish_count > bullish_count else "НЕЙТРАЛЬНЫЙ ⚠️"
         
@@ -2922,7 +2929,6 @@ class AISignalAnalyzer:
         
         # Считаем доступные источники
         available_sources = 0
-        total_sources = 22
         if whale_data: available_sources += 1
         if market_data: available_sources += 1
         if technical_data: available_sources += 1
@@ -2942,7 +2948,7 @@ class AISignalAnalyzer:
         if whale_alert: available_sources += 1
         if social_data: available_sources += 1
         
-        text += f"📡 Источников данных: {available_sources}/{total_sources}\n"
+        text += f"📡 Источников данных: {available_sources}/{self.TOTAL_FACTORS}\n"
         text += "━━━━━━━━━━━━━━━━━━━━\n"
         text += "⚠️ Не финансовый совет"
         

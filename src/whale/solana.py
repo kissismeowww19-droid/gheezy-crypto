@@ -558,8 +558,9 @@ class SolanaTracker:
             if not data or not isinstance(data, dict):
                 return []
 
-            # Jupiter API не предоставляет детальные транзакции напрямую
-            # Поэтому возвращаем пустой список и полагаемся на другие источники
+            # Jupiter API больше подходит для цен и свапов, а не для whale tracking
+            # Пропускаем Jupiter в цепочке fallback, так как он не предоставляет
+            # детальные данные о транзакциях
             logger.debug("Jupiter API не подходит для whale tracking транзакций")
             return []
 

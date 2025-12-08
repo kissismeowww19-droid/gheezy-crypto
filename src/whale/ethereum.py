@@ -462,7 +462,7 @@ class EthereumTracker:
                         token_symbol="ETH",
                         timestamp=timestamp,
                         block_number=int(tx.get("blockNumber", 0)),
-                        gas_price_gwei=0,  # Internal transactions don't have gas
+                        gas_price_gwei=0,  # Gas price not available in internal tx API response
                         gas_used=int(tx.get("gas", 0)),
                         tx_type=0,
                         is_internal=True,
