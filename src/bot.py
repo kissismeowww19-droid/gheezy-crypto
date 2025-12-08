@@ -647,18 +647,10 @@ async def cmd_rune(message: Message):
 def get_whale_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура для whale tracker с 3 сетями: BTC, ETH, SOL."""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🟠 BTC", callback_data="whale_btc"),
-            InlineKeyboardButton(text="🔷 ETH", callback_data="whale_eth"),
-            InlineKeyboardButton(text="🟣 SOL", callback_data="whale_sol"),
-        ],
-        [
-            InlineKeyboardButton(text="📊 Статистика", callback_data="whale_stats"),
-            InlineKeyboardButton(text="📊 Все сети", callback_data="whale_all"),
-        ],
-        [
-            InlineKeyboardButton(text="🔙 Назад", callback_data="menu_back"),
-        ],
+        [InlineKeyboardButton(text="₿ Bitcoin (BTC)", callback_data="whale_btc")],
+        [InlineKeyboardButton(text="⟠ Ethereum (ETH)", callback_data="whale_eth")],
+        [InlineKeyboardButton(text="◎ Solana (SOL)", callback_data="whale_sol")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")],
     ])
 
 
@@ -1044,9 +1036,22 @@ async def callback_signal_coin(callback: CallbackQuery):
     try:
         await callback.message.edit_text(signal_text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
     except TelegramBadRequest as e:
-        logger.error(f"Markdown parsing error: {e}")
-        # Если Markdown не парсится, отправить без форматирования
-        await callback.message.edit_text(signal_text, reply_markup=keyboard)
+        if "message to edit not found" in str(e):
+            # Сообщение было удалено, отправляем новое
+            await callback.message.answer(signal_text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+        elif "message is not modified" in str(e):
+            # Сообщение не изменилось, игнорируем
+            pass
+        else:
+            logger.error(f"TelegramBadRequest error: {e}")
+            # Fallback: попробовать без форматирования
+            try:
+                await callback.message.edit_text(signal_text, reply_markup=keyboard)
+            except Exception:
+                pass
+    except Exception as e:
+        logger.error(f"Error in signal callback: {e}")
+        await callback.answer("❌ Ошибка при формировании сигнала", show_alert=True)
 
 
 @router.callback_query(lambda c: c.data == "menu_market")
@@ -1078,18 +1083,17 @@ async def callback_market(callback: CallbackQuery):
 @router.callback_query(lambda c: c.data == "menu_whale")
 async def callback_whale(callback: CallbackQuery):
     """Обработка callback для меню Whale Tracker - показать меню выбора сети."""
-    text = (
-        "🐋 *Whale Tracker*\n\n"
-        "Выберите сеть для отслеживания:\n\n"
-        "• 🔷 ETH — Ethereum\n"
-        "• 🟡 BTC — Bitcoin\n"
-        "• 🟡 BSC — Binance Smart Chain\n"
-        "• 🔺 ARB — Arbitrum\n"
-        "• 🟣 Polygon — Polygon\n"
-        "• 🔴 AVAX — Avalanche\n"
-        "• 💎 TON — The Open Network\n\n"
-        "👇 Выберите сеть:"
-    )
+    text = """
+🐋 *Whale Tracker*
+
+Выберите сеть для отслеживания:
+
+• ₿ *BTC* — Bitcoin
+• ⟠ *ETH* — Ethereum  
+• ◎ *SOL* — Solana
+
+👇 Выберите сеть:
+"""
     await callback.message.edit_text(text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
     await callback.answer()
 
