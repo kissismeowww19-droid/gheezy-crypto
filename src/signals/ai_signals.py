@@ -2804,8 +2804,14 @@ class AISignalAnalyzer:
             # MACD
             if "macd" in technical_data:
                 macd_signal = technical_data["macd"]["signal"]
-                macd_emoji = "✅" if macd_signal > 0 else "❌"
-                macd_text = "бычье пересечение" if macd_signal > 0 else "медвежье пересечение"
+                # macd_signal is a string: "bullish", "bearish", or "neutral"
+                if isinstance(macd_signal, str):
+                    macd_emoji = "✅" if macd_signal in ["bullish", "buy"] else "❌" if macd_signal in ["bearish", "sell"] else "➖"
+                    macd_text = "бычье пересечение" if macd_signal in ["bullish", "buy"] else "медвежье пересечение" if macd_signal in ["bearish", "sell"] else "нейтрально"
+                else:
+                    # Fallback for numeric values (should not happen)
+                    macd_emoji = "✅" if macd_signal > 0 else "❌"
+                    macd_text = "бычье пересечение" if macd_signal > 0 else "медвежье пересечение"
                 text += f"• MACD: {macd_text} {macd_emoji}\n"
             
             # Bollinger Bands
@@ -2817,9 +2823,10 @@ class AISignalAnalyzer:
             
             # EMA Crossover
             if "ma_crossover" in technical_data:
-                ma_signal = technical_data["ma_crossover"]["signal"]
-                ma_emoji = "✅" if ma_signal > 0 else "❌"
-                ma_text = "бычий кросс" if ma_signal > 0 else "медвежий кросс"
+                # ma_crossover uses "trend" field, not "signal"
+                ma_trend = technical_data["ma_crossover"].get("trend", "neutral")
+                ma_emoji = "✅" if ma_trend == "bullish" else "❌" if ma_trend == "bearish" else "➖"
+                ma_text = "бычий кросс" if ma_trend == "bullish" else "медвежий кросс" if ma_trend == "bearish" else "нейтрально"
                 text += f"• EMA 9/21: {ma_text} {ma_emoji}\n"
         
         text += "\n"
@@ -2872,11 +2879,13 @@ class AISignalAnalyzer:
         
         # 4. EMA Crossover
         if technical_data and "ma_crossover" in technical_data:
-            ma_signal = technical_data["ma_crossover"]["signal"]
-            if abs(ma_signal) > 0.5:
+            ma_trend = technical_data["ma_crossover"].get("trend", "neutral")
+            ma_crossover_type = technical_data["ma_crossover"].get("crossover", "none")
+            # Check if there's a significant trend or recent crossover
+            if ma_trend in ["bullish", "bearish"] or ma_crossover_type in ["golden_cross", "death_cross"]:
                 timeframe = "5м" if short_term_data else "1ч"
-                ma_text = f"EMA бычий кросс на {timeframe}" if ma_signal > 0 else f"EMA медвежий кросс на {timeframe}"
-                reasons.append((ma_text, ma_signal > 0))
+                ma_text = f"EMA бычий кросс на {timeframe}" if ma_trend == "bullish" else f"EMA медвежий кросс на {timeframe}"
+                reasons.append((ma_text, ma_trend == "bullish"))
         
         # 5. Funding Rate
         if funding_rate and 'rate' in funding_rate:

@@ -497,8 +497,8 @@ class WhaleTracker:
                         tx_hash=tx.tx_hash,
                         blockchain="Solana",
                         token_symbol=tx.token_symbol,
-                        amount=tx.amount,
-                        amount_usd=tx.amount_usd,
+                        amount=tx.value_sol,  # SolanaTransaction uses value_sol, not amount
+                        amount_usd=tx.value_usd,  # SolanaTransaction uses value_usd, not amount_usd
                         from_address=tx.from_address,
                         to_address=tx.to_address,
                         from_label=tx.from_label,
