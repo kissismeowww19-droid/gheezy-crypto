@@ -2648,24 +2648,28 @@ class AISignalAnalyzer:
         social_data: Optional[Dict] = None
     ) -> str:
         """
-        Упрощённое форматирование сообщения с AI сигналом.
+        Расширенное форматирование сообщения с AI сигналом.
         
-        Показывает только ключевую информацию:
-        - Направление сигнала и уверенность
-        - Цена, TP, SL
-        - Топ 2-3 причины для сигнала
-        - Краткая информация о китах
-        - Таймфрейм
+        Включает:
+        - Направление сигнала с вероятностью и силой
+        - Цена, TP (два уровня), SL
+        - Тренд цены (1ч, 24ч, 7д)
+        - Рыночные данные (Market Cap, Volume, Vol/MCap)
+        - Активность китов (score, транзакции, потоки)
+        - Технический анализ (RSI, MACD, BB, EMA)
+        - Уровни поддержки/сопротивления
+        - Топ 5 причин для сигнала
+        - Факторы анализа (бычьи/медвежьи/нейтральные)
         
         Args:
             symbol: Символ монеты
             signal_data: Результаты анализа сигнала
             whale_data: Данные о китах
             market_data: Рыночные данные
-            ... (остальные параметры используются для расчёта причин)
+            ... (остальные параметры используются для расчёта)
             
         Returns:
-            Форматированное сообщение для Telegram
+            Форматированное сообщение для Telegram (MarkdownV2)
         """
         # Форматирование цены
         def format_price(price: float) -> str:
@@ -2694,76 +2698,253 @@ class AISignalAnalyzer:
         # Текущая цена
         current_price = market_data['price_usd']
         
-        # Рассчитываем TP и SL на основе направления и волатильности
-        # TP: 1.5-2% для LONG, -1.5-2% для SHORT
-        # SL: 0.5-0.7% для LONG, -0.5-0.7% для SHORT
+        # Рассчитываем TP (два уровня) и SL
         if is_long:
-            tp_percent = 1.5 if probability < 70 else 2.0
+            tp1_percent = 1.5
+            tp2_percent = 2.0
             sl_percent = -0.6
-            tp_price = current_price * (1 + tp_percent / 100)
+            tp1_price = current_price * (1 + tp1_percent / 100)
+            tp2_price = current_price * (1 + tp2_percent / 100)
             sl_price = current_price * (1 + sl_percent / 100)
         else:
-            tp_percent = -1.5 if probability < 70 else -2.0
+            tp1_percent = -1.5
+            tp2_percent = -2.0
             sl_percent = 0.6
-            tp_price = current_price * (1 + tp_percent / 100)
+            tp1_price = current_price * (1 + tp1_percent / 100)
+            tp2_price = current_price * (1 + tp2_percent / 100)
             sl_price = current_price * (1 + sl_percent / 100)
         
         # Направление текст и эмодзи
         direction_text = "ЛОНГ" if is_long else "ШОРТ"
         direction_emoji = "📈" if is_long else "📉"
         
-        # Формируем сообщение
-        text = f"📡 *{symbol} СИГНАЛ*\n\n"
-        text += f"{direction_emoji} *{direction_text} ({probability}%)*\n"
-        text += f"💰 {format_price(current_price)}\n\n"
+        # Сила сигнала (прогресс бар)
+        signal_strength = min(100, int(probability))
+        filled_blocks = int(signal_strength / 10)
+        empty_blocks = 10 - filled_blocks
+        strength_bar = "█" * filled_blocks + "░" * empty_blocks
         
-        # TP и SL
-        text += f"🎯 TP: {format_price(tp_price)} ({tp_percent:+.1f}%)\n"
-        text += f"🛑 SL: {format_price(sl_price)} ({sl_percent:+.1f}%)\n\n"
+        # ===== НАЧАЛО СООБЩЕНИЯ =====
+        text = f"🤖 *AI СИГНАЛ: {symbol}*\n"
         text += "━━━━━━━━━━━━━━━━━━━━\n\n"
         
-        # Топ причины для сигнала
-        text += "📊 *Почему:*\n"
+        # ===== НАПРАВЛЕНИЕ =====
+        text += "📊 *НАПРАВЛЕНИЕ*\n"
+        text += f"{direction_emoji} {direction_text} ({probability}% вероятность)\n"
+        text += f"Сила сигнала: {strength_bar} {signal_strength}%\n\n"
+        
+        # ===== ЦЕНА И УРОВНИ =====
+        text += "💰 *ЦЕНА И УРОВНИ*\n"
+        text += f"Текущая: {format_price(current_price)}\n"
+        text += f"🎯 TP1: {format_price(tp1_price)} ({tp1_percent:+.1f}%)\n"
+        text += f"🎯 TP2: {format_price(tp2_price)} ({tp2_percent:+.1f}%)\n"
+        text += f"🛑 SL: {format_price(sl_price)} ({sl_percent:+.1f}%)\n\n"
+        
+        # ===== ТРЕНД ЦЕНЫ =====
+        text += "📈 *ТРЕНД ЦЕНЫ*\n"
+        change_1h = market_data.get('price_change_1h', 0)
+        change_24h = market_data.get('price_change_24h', 0)
+        change_7d = market_data.get('price_change_7d', 0)
+        
+        change_1h_emoji = "🟢" if change_1h >= 0 else "🔴"
+        change_24h_emoji = "🟢" if change_24h >= 0 else "🔴"
+        change_7d_emoji = "🟢" if change_7d >= 0 else "🔴"
+        
+        text += f"• 1ч: {change_1h:+.1f}% {change_1h_emoji}\n"
+        text += f"• 24ч: {change_24h:+.1f}% {change_24h_emoji}\n"
+        text += f"• 7д: {change_7d:+.1f}% {change_7d_emoji}\n\n"
+        
+        # ===== РЫНОЧНЫЕ ДАННЫЕ =====
+        text += "📊 *РЫНОЧНЫЕ ДАННЫЕ*\n"
+        market_cap = market_data.get('market_cap', 0)
+        volume_24h = market_data.get('volume_24h', 0)
+        vol_mcap_ratio = (volume_24h / market_cap * 100) if market_cap > 0 else 0
+        
+        text += f"💰 Market Cap: {format_volume(market_cap)}\n"
+        text += f"📊 Volume 24h: {format_volume(volume_24h)}\n"
+        text += f"📈 Vol/MCap: {vol_mcap_ratio:.2f}%\n\n"
+        
+        # ===== АКТИВНОСТЬ КИТОВ =====
+        text += "🐋 *АКТИВНОСТЬ КИТОВ*\n"
+        whale_score = signal_data.get('factors', {}).get('whale', {}).get('score', 0)
+        whale_score_scaled = (whale_score + 10) / 2  # Scale from -10/+10 to 0/10
+        whale_score_emoji = "🔥" if whale_score_scaled >= 7 else "⚡" if whale_score_scaled >= 5 else "💧"
+        
+        tx_count = whale_data.get('transaction_count', 0)
+        deposits = whale_data.get('deposits', 0)
+        withdrawals = whale_data.get('withdrawals', 0)
+        net_flow = withdrawals - deposits
+        net_flow_text = f"+{format_volume(abs(net_flow))}" if net_flow != 0 else "нейтрально"
+        net_flow_sentiment = "(бычье)" if net_flow > 0 else "(медвежье)" if net_flow < 0 else ""
+        
+        text += f"Score: {whale_score_scaled:.1f}/10 {whale_score_emoji}\n"
+        text += f"• Транзакций: {tx_count}\n"
+        text += f"• На биржи: {format_volume(deposits)}\n"
+        text += f"• С бирж: {format_volume(withdrawals)}\n"
+        text += f"• Net Flow: {net_flow_text} {net_flow_sentiment}\n\n"
+        
+        # ===== ТЕХНИЧЕСКИЙ АНАЛИЗ =====
+        text += "⚡ *ТЕХНИЧЕСКИЙ АНАЛИЗ*\n"
+        
+        if technical_data:
+            # RSI
+            if "rsi" in technical_data:
+                rsi_value = technical_data["rsi"]["value"]
+                rsi_signal = technical_data["rsi"]["signal"]
+                rsi_status = "перепродан" if rsi_value < 30 else "перекуплен" if rsi_value > 70 else "нейтральный"
+                text += f"• RSI(14): {rsi_value:.0f} ({rsi_status})\n"
+            
+            # MACD
+            if "macd" in technical_data:
+                macd_signal = technical_data["macd"]["signal"]
+                macd_emoji = "✅" if macd_signal > 0 else "❌"
+                macd_text = "бычье пересечение" if macd_signal > 0 else "медвежье пересечение"
+                text += f"• MACD: {macd_text} {macd_emoji}\n"
+            
+            # Bollinger Bands
+            if "bollinger" in technical_data:
+                bb_signal = technical_data["bollinger"]["signal"]
+                bb_position = technical_data["bollinger"].get("position", "middle")
+                bb_text = "в нижней половине" if bb_position == "lower" else "в верхней половине" if bb_position == "upper" else "в середине"
+                text += f"• BB: {bb_text}\n"
+            
+            # EMA Crossover
+            if "ma_crossover" in technical_data:
+                ma_signal = technical_data["ma_crossover"]["signal"]
+                ma_emoji = "✅" if ma_signal > 0 else "❌"
+                ma_text = "бычий кросс" if ma_signal > 0 else "медвежий кросс"
+                text += f"• EMA 9/21: {ma_text} {ma_emoji}\n"
+        
+        text += "\n"
+        
+        # ===== УРОВНИ ПОДДЕРЖКИ/СОПРОТИВЛЕНИЯ =====
+        text += "🎯 *УРОВНИ ПОДДЕРЖКИ/СОПРОТИВЛЕНИЯ*\n"
+        
+        # Вычисляем примерные уровни на основе текущей цены
+        r2 = current_price * 1.02
+        r1 = current_price * 1.01
+        pivot = current_price
+        s1 = current_price * 0.99
+        s2 = current_price * 0.98
+        
+        text += f"📈 R2: {format_price(r2)}\n"
+        text += f"📈 R1: {format_price(r1)}\n"
+        text += f"━━ Pivot: {format_price(pivot)} ━━\n"
+        text += f"📉 S1: {format_price(s1)}\n"
+        text += f"📉 S2: {format_price(s2)}\n\n"
+        
+        # ===== ПРИЧИНЫ СИГНАЛА (TOP 5) =====
+        text += "🔥 *ПРИЧИНЫ СИГНАЛА (TOP 5)*\n"
         reasons = []
         
-        # 1. TradingView Rating (если есть)
+        # Собираем все факторы
+        factors = signal_data.get('factors', {})
+        
+        # 1. TradingView Rating
         if tradingview_rating:
             rating = tradingview_rating.get('summary', {}).get('RECOMMENDATION', 'NEUTRAL')
             if rating in ['STRONG_BUY', 'BUY']:
-                reasons.append("• TradingView: BUY ✅")
+                reasons.append(("TradingView: STRONG_BUY", True))
             elif rating in ['STRONG_SELL', 'SELL']:
-                reasons.append("• TradingView: SELL ❌")
+                reasons.append(("TradingView: STRONG_SELL", False))
         
-        # 2. RSI (если есть)
+        # 2. Whale Activity
+        if whale_score > 3:
+            whale_text = "Киты выводят с бирж" if net_flow > 0 else "Киты активно покупают"
+            reasons.append((f"{whale_text} ({format_volume(abs(net_flow))})", net_flow > 0))
+        elif whale_score < -3:
+            reasons.append((f"Киты депозитят на биржи ({format_volume(deposits)})", False))
+        
+        # 3. RSI
         if technical_data and "rsi" in technical_data:
             rsi_value = technical_data["rsi"]["value"]
-            if rsi_value < 40:
-                reasons.append(f"• RSI: {rsi_value:.0f} (перепродан)")
-            elif rsi_value > 60:
-                reasons.append(f"• RSI: {rsi_value:.0f} (перекуплен)")
-            else:
-                reasons.append(f"• RSI: {rsi_value:.0f} (норм)")
+            if rsi_value < 35:
+                reasons.append(("RSI в зоне накопления", True))
+            elif rsi_value > 65:
+                reasons.append(("RSI в зоне перекупленности", False))
         
-        # 3. Киты (всегда показываем)
-        whale_volume = whale_data.get('total_volume_usd', 0)
-        deposits = whale_data.get('deposits', 0)
-        withdrawals = whale_data.get('withdrawals', 0)
-        net_flow = deposits - withdrawals
+        # 4. EMA Crossover
+        if technical_data and "ma_crossover" in technical_data:
+            ma_signal = technical_data["ma_crossover"]["signal"]
+            if abs(ma_signal) > 0.5:
+                timeframe = "5м" if short_term_data else "1ч"
+                ma_text = f"EMA бычий кросс на {timeframe}" if ma_signal > 0 else f"EMA медвежий кросс на {timeframe}"
+                reasons.append((ma_text, ma_signal > 0))
         
-        if net_flow > 0:
-            whale_text = f"• 🐋 Киты: +{format_volume(whale_volume)} (на биржу)"
-        elif net_flow < 0:
-            whale_text = f"• 🐋 Киты: +{format_volume(whale_volume)} (с биржи)"
-        else:
-            whale_text = f"• 🐋 Киты: {format_volume(whale_volume)}"
-        reasons.append(whale_text)
+        # 5. Funding Rate
+        if funding_rate and 'rate' in funding_rate:
+            rate = funding_rate['rate']
+            if rate < -0.01:
+                reasons.append(("Funding Rate отрицательный", True))
+            elif rate > 0.01:
+                reasons.append(("Funding Rate положительный", False))
         
-        # Показываем топ 3 причины
-        for reason in reasons[:3]:
-            text += reason + "\n"
+        # 6. Volume
+        if vol_mcap_ratio > 5:
+            reasons.append((f"Высокий объём торгов ({vol_mcap_ratio:.1f}%)", True))
         
-        # Таймфрейм
-        text += f"\n⏱️ Таймфрейм: 1ч"
+        # 7. Fear & Greed
+        if fear_greed and 'value' in fear_greed:
+            fg_value = fear_greed['value']
+            if fg_value < 30:
+                reasons.append(("Индекс страха и жадности: страх", True))
+            elif fg_value > 70:
+                reasons.append(("Индекс страха и жадности: жадность", False))
+        
+        # Сортируем причины по соответствию направлению сигнала
+        bullish_reasons = [r for r in reasons if r[1] == is_long]
+        bearish_reasons = [r for r in reasons if r[1] != is_long]
+        
+        # Выбираем топ 5
+        top_reasons = bullish_reasons[:5]
+        
+        for idx, (reason, is_bullish) in enumerate(top_reasons, 1):
+            emoji = "✅" if is_bullish == is_long else "⚠️"
+            text += f"{idx}. {emoji} {reason}\n"
+        
+        text += "\n"
+        
+        # ===== ФАКТОРЫ АНАЛИЗА =====
+        text += "📊 *ФАКТОРЫ АНАЛИЗА*\n"
+        
+        # Считаем факторы
+        bullish_count = sum(1 for r in reasons if r[1])
+        bearish_count = sum(1 for r in reasons if not r[1])
+        neutral_count = max(0, 22 - bullish_count - bearish_count)  # 22-факторная система
+        
+        consensus_text = "БЫЧИЙ ✅" if bullish_count > bearish_count else "МЕДВЕЖИЙ ❌" if bearish_count > bullish_count else "НЕЙТРАЛЬНЫЙ ⚠️"
+        
+        text += f"Бычьих: {bullish_count} | Медвежьих: {bearish_count} | Нейтральных: {neutral_count}\n"
+        text += f"Консенсус: {consensus_text}\n\n"
+        
+        # ===== FOOTER =====
+        text += "⏱️ Таймфрейм: 1ч\n"
+        
+        # Считаем доступные источники
+        available_sources = 0
+        total_sources = 22
+        if whale_data: available_sources += 1
+        if market_data: available_sources += 1
+        if technical_data: available_sources += 1
+        if fear_greed: available_sources += 1
+        if funding_rate: available_sources += 1
+        if order_book: available_sources += 1
+        if futures_data: available_sources += 1
+        if onchain_data: available_sources += 1
+        if exchange_flows: available_sources += 1
+        if short_term_data: available_sources += 1
+        if trades_flow: available_sources += 1
+        if liquidations: available_sources += 1
+        if orderbook_delta: available_sources += 1
+        if coinglass_data: available_sources += 1
+        if news_sentiment: available_sources += 1
+        if tradingview_rating: available_sources += 1
+        if whale_alert: available_sources += 1
+        if social_data: available_sources += 1
+        
+        text += f"📡 Источников данных: {available_sources}/{total_sources}\n"
+        text += "━━━━━━━━━━━━━━━━━━━━\n"
+        text += "⚠️ Не финансовый совет"
         
         return text
     

@@ -17,6 +17,7 @@ import asyncio
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Optional
 
 import aiohttp
@@ -33,6 +34,18 @@ from whale.known_wallets import get_ethereum_wallet_label
 from whale.api_keys import get_next_api_key
 
 logger = structlog.get_logger()
+
+
+class TransactionType(str, Enum):
+    """Типы транзакций Ethereum."""
+    DEPOSIT = "DEPOSIT"                         # На биржу
+    WITHDRAWAL = "WITHDRAWAL"                   # С биржи
+    EXCHANGE_TRANSFER = "EXCHANGE_TRANSFER"     # Между биржами
+    WHALE_TRANSFER = "WHALE_TRANSFER"           # Между китами
+    DEX_SWAP = "DEX_SWAP"                       # Свап на DEX
+    CONTRACT_INTERACTION = "CONTRACT_INTERACTION"  # Взаимодействие с контрактом
+    NFT_TRANSFER = "NFT_TRANSFER"               # NFT транзакция
+    UNKNOWN = "UNKNOWN"
 
 
 class EtherscanRateLimiter:
@@ -109,10 +122,23 @@ TRACKED_EXCHANGE_ADDRESSES = [
     # Gemini
     "0xd24400ae8bfebb18ca49be86258a3c749cf46853",
     "0x6fc82a5fe25a5cdb58bc74600a40a69c065263f8",
-    # Huobi
+    # Huobi (HTX)
     "0xab5c66752a9e8167967685f1450532fb96d5d24f",
     "0x6748f50f686bfbca6fe8ad62b22228b87f31ff2b",
     "0xfdb16996831753d5331ff813c29a93c76834a0ad",
+    "0x1062a747393198f70f71ec65a582423dba7e5ab3",
+    "0xe93381fb4c4f14bda253907b18fad305d799241a",
+    # Crypto.com
+    "0x6262998ced04146fa42253a5c0af90ca02dfd2a3",
+    "0x46340b20830761efd32832a74d7169b29feb9758",
+    # MEXC
+    "0x75e89d5979e4f6fba9f97c104c2f0afb3f1dcb88",
+    # Gate.io
+    "0x0d0707963952f2fba59dd06f2b425ace40b492fe",
+    "0x1c4b70a3968436b9a0a9cf5205c787eb81bb558c",
+    # Bitget
+    "0x97b9d2102a9a65a26e1ee82d59e42d1b73b68689",
+    "0x5bdf85216ec1e38d6458c870992a69e38e03f7ef",
 ]
 
 
@@ -349,6 +375,171 @@ class EthereumTracker:
 
         logger.warning("Не удалось получить транзакции ни из одного источника")
         return []
+
+    async def get_internal_transactions(
+        self, 
+        address: str, 
+        limit: int = 50
+    ) -> list[EthereumTransaction]:
+        """
+        Получение внутренних транзакций через Etherscan API.
+
+        Internal transactions - это транзакции, инициированные контрактами,
+        а не обычными адресами.
+
+        Args:
+            address: Адрес для получения внутренних транзакций
+            limit: Максимальное количество транзакций (по умолчанию 50)
+
+        Returns:
+            list[EthereumTransaction]: Список внутренних транзакций
+        """
+        if not self.api_key:
+            logger.warning("Etherscan API key required for internal transactions")
+            return []
+
+        try:
+            await self._rate_limiter.acquire()
+            
+            session = await self._get_session()
+            params = {
+                "module": "account",
+                "action": "txlistinternal",
+                "address": address,
+                "startblock": 0,
+                "endblock": 99999999,
+                "page": 1,
+                "offset": limit,
+                "sort": "desc",
+                "apikey": self.api_key,
+            }
+
+            async with session.get(ETHERSCAN_API_URL, params=params) as response:
+                if response.status != 200:
+                    logger.warning(
+                        "Etherscan API error for internal transactions",
+                        status=response.status,
+                    )
+                    return []
+
+                data = await response.json()
+                if data.get("status") != "1":
+                    logger.debug(
+                        "No internal transactions found",
+                        address=address[:10],
+                    )
+                    return []
+
+                result = data.get("result", [])
+                transactions = []
+
+                await self._update_eth_price()
+
+                for tx in result:
+                    if not isinstance(tx, dict):
+                        continue
+
+                    value_wei = int(tx.get("value", 0))
+                    value_eth = value_wei / 1e18
+                    value_usd = value_eth * self._eth_price
+
+                    # Фильтруем мелкие транзакции
+                    if value_usd < self.min_value_usd:
+                        continue
+
+                    try:
+                        timestamp_val = int(tx.get("timeStamp", 0))
+                        timestamp = datetime.fromtimestamp(timestamp_val, tz=timezone.utc)
+                    except (ValueError, OSError):
+                        timestamp = datetime.now(timezone.utc)
+
+                    tx_obj = EthereumTransaction(
+                        tx_hash=tx.get("hash", ""),
+                        from_address=tx.get("from", "").lower(),
+                        to_address=tx.get("to", "").lower(),
+                        value_eth=value_eth,
+                        value_usd=value_usd,
+                        token_symbol="ETH",
+                        timestamp=timestamp,
+                        block_number=int(tx.get("blockNumber", 0)),
+                        gas_price_gwei=0,  # Internal transactions don't have gas
+                        gas_used=int(tx.get("gas", 0)),
+                        tx_type=0,
+                        is_internal=True,
+                    )
+                    transactions.append(tx_obj)
+
+                logger.info(
+                    "Internal transactions retrieved",
+                    address=address[:10],
+                    count=len(transactions),
+                )
+                return transactions
+
+        except Exception as e:
+            logger.error(
+                "Error getting internal transactions",
+                error=str(e),
+                address=address[:10],
+            )
+            return []
+
+    async def get_gas_prices(self) -> Optional[dict]:
+        """
+        Получение текущих цен на газ через Etherscan Gas Oracle.
+
+        Returns:
+            dict: Словарь с ценами газа в Gwei или None при ошибке
+                {
+                    "SafeGasPrice": "20",      # Низкая цена (медленно)
+                    "ProposeGasPrice": "25",   # Средняя цена (обычно)
+                    "FastGasPrice": "30",      # Высокая цена (быстро)
+                    "suggestBaseFee": "19.5",  # Базовая комиссия EIP-1559
+                    "gasUsedRatio": "0.5,0.6"  # Загрузка сети
+                }
+        """
+        if not self.api_key:
+            logger.warning("Etherscan API key required for gas prices")
+            return None
+
+        try:
+            await self._rate_limiter.acquire()
+            
+            session = await self._get_session()
+            params = {
+                "module": "gastracker",
+                "action": "gasoracle",
+                "apikey": self.api_key,
+            }
+
+            async with session.get(ETHERSCAN_API_URL, params=params) as response:
+                if response.status != 200:
+                    logger.warning(
+                        "Etherscan API error for gas prices",
+                        status=response.status,
+                    )
+                    return None
+
+                data = await response.json()
+                if data.get("status") != "1":
+                    logger.warning("Failed to get gas prices from Etherscan")
+                    return None
+
+                result = data.get("result", {})
+                logger.info(
+                    "Gas prices retrieved",
+                    safe=result.get("SafeGasPrice"),
+                    propose=result.get("ProposeGasPrice"),
+                    fast=result.get("FastGasPrice"),
+                )
+                return result
+
+        except Exception as e:
+            logger.error(
+                "Error getting gas prices",
+                error=str(e),
+            )
+            return None
 
     async def _get_from_etherscan(
         self,
