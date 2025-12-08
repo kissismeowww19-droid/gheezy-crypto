@@ -34,10 +34,16 @@ class TestAISignalAnalyzer:
         assert analyzer.whale_tracker is not None
         assert "BTC" in analyzer.blockchain_mapping
         assert "ETH" in analyzer.blockchain_mapping
+        assert "SOL" in analyzer.blockchain_mapping
+        assert "XRP" in analyzer.blockchain_mapping
         assert "BTC" in analyzer.coingecko_mapping
         assert "ETH" in analyzer.coingecko_mapping
+        assert "SOL" in analyzer.coingecko_mapping
+        assert "XRP" in analyzer.coingecko_mapping
         assert "BTC" in analyzer.bybit_mapping
         assert "ETH" in analyzer.bybit_mapping
+        assert "SOL" in analyzer.bybit_mapping
+        assert "XRP" in analyzer.bybit_mapping
         assert analyzer._cache == {}
         assert analyzer._cache_timestamps == {}
     
@@ -219,7 +225,7 @@ class TestAISignalAnalyzer:
     @pytest.mark.asyncio
     async def test_analyze_coin_unsupported(self, analyzer):
         """Test analyzing unsupported coin."""
-        result = await analyzer.analyze_coin("SOL")
+        result = await analyzer.analyze_coin("DOGE")
         
         assert "❌ *Ошибка*" in result
         assert "не поддерживается" in result

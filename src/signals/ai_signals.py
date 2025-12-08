@@ -101,18 +101,24 @@ class AISignalAnalyzer:
         self.blockchain_mapping = {
             "BTC": "Bitcoin",
             "ETH": "Ethereum",
+            "SOL": "Solana",
+            "XRP": "XRP",
         }
         
         # Маппинг для CoinGecko API
         self.coingecko_mapping = {
             "BTC": "bitcoin",
             "ETH": "ethereum",
+            "SOL": "solana",
+            "XRP": "ripple",
         }
         
         # Маппинг для Bybit
         self.bybit_mapping = {
             "BTC": "BTCUSDT",
             "ETH": "ETHUSDT",
+            "SOL": "SOLUSDT",
+            "XRP": "XRPUSDT",
         }
         
         # Простой кэш для внешних API

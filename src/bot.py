@@ -225,23 +225,13 @@ def get_main_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="💰 Цены", callback_data="menu_prices"),
-            InlineKeyboardButton(text="🎯 AI Сигналы", callback_data="menu_signals"),
-        ],
-        [
-            InlineKeyboardButton(text="📊 Рынок", callback_data="menu_market"),
-            InlineKeyboardButton(text="🔥 Топ", callback_data="menu_top"),
-        ],
-        [
-            InlineKeyboardButton(text="🏦 DeFi", callback_data="menu_defi"),
+            InlineKeyboardButton(text="📡 Сигналы", callback_data="menu_signals"),
             InlineKeyboardButton(text="🐋 Киты", callback_data="menu_whale"),
         ],
         [
-            InlineKeyboardButton(text="📈 Трейдеры", callback_data="menu_traders"),
-            InlineKeyboardButton(text="💼 Портфель", callback_data="menu_portfolio"),
-        ],
-        [
+            InlineKeyboardButton(text="📊 Рынок", callback_data="menu_market"),
             InlineKeyboardButton(text="⚙️ Настройки", callback_data="menu_settings"),
-            InlineKeyboardButton(text="📚 Помощь", callback_data="menu_help"),
+            InlineKeyboardButton(text="💼 Портфель", callback_data="menu_portfolio"),
         ],
     ])
 
@@ -331,6 +321,10 @@ def get_signals_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="⟠ ETH", callback_data="signal_eth"),
         ],
         [
+            InlineKeyboardButton(text="🟣 SOL", callback_data="signal_sol"),
+            InlineKeyboardButton(text="💧 XRP", callback_data="signal_xrp"),
+        ],
+        [
             InlineKeyboardButton(text="🔙 Назад", callback_data="menu_back"),
         ],
     ])
@@ -349,11 +343,11 @@ def get_welcome_text(name: str) -> str:
     text = text + "Давай вместе учиться и зарабатывать 🤩\n\n"
     text = text + "📊 *Мои возможности:*\n\n"
     text = text + "• 💰 Цены — самые популярные криптовалюты\n"
-    text = text + "• 🤖 AI Signals — торговые сигналы\n"
-    text = text + "• 🏦 DeFi — лучшие ставки\n"
-    text = text + "• 🐋 Whales — движения китов\n"
-    text = text + "• 📈 Traders — топ трейдеры\n\n"
-    text = text + "📡 Проверенные источники данных с обновлением в реальном времени ✅\n\n"
+    text = text + "• 🤖 Сигналы — AI торговые сигналы\n"
+    text = text + "• 🐋 Киты — движения китов\n"
+    text = text + "• 📊 Рынок — капитализация и статистика\n"
+    text = text + "• ⚙️ Настройки — настройки бота\n"
+    text = text + "• 💼 Портфель — твой портфель\n\n"
     text = text + "Ну что взлетаем! 🚀🚀🚀\n\n"
     text = text + "👇 *Выбери раздел:*"
     return text
@@ -376,7 +370,7 @@ async def cmd_help(message: Message):
     text = text + "Мем-коины: /not /pepe /wif /bonk\n\n"
     text = text + "L1: /sui /apt /sei /near /ftm\n\n"
     text = text + "L2: /arb /op\n\n"
-    text = text + "DeFi: /inj /xlm /vet /algo /fil /rune\n\n"
+    text = text + "Другие: /inj /xlm /vet /algo /fil /rune\n\n"
     text = text + "*Текстовые команды:*\n\n"
     text = text + "Напиши символ монеты (BTC, NOT, SUI...)\n"
     text = text + "и получи её цену!\n\n"
@@ -1259,8 +1253,7 @@ async def callback_signals(callback: CallbackQuery):
     text = text + "• Рыночные данные\n"
     text = text + "• Объём торгов\n\n"
     text = text + "🔮 _Прогноз на ближайший час_\n\n"
-    text = text + "👇 Выбери монету:\n\n"
-    text = text + "🔜 _Скоро новые монеты_"
+    text = text + "👇 Выбери монету:"
     try:
         await callback.message.edit_text(text, reply_markup=get_signals_keyboard(), parse_mode=ParseMode.MARKDOWN)
     except TelegramBadRequest as e:
@@ -1334,38 +1327,6 @@ async def callback_market(callback: CallbackQuery):
     await callback.message.edit_text(text, reply_markup=get_back_keyboard(), parse_mode=ParseMode. MARKDOWN)
 
 
-@router.callback_query(lambda c: c.data == "menu_top")
-async def callback_top(callback: CallbackQuery):
-    text = "🔥 *Топ монет 24ч*\n\n"
-    text = text + "📈 *Лидеры роста:*\n\n"
-    text = text + "1. 🟢 SOL +12.5%\n"
-    text = text + "2. 🟢 AVAX +8.3%\n"
-    text = text + "3. 🟢 LINK +7.1%\n\n"
-    text = text + "📉 *Лидеры падения:*\n\n"
-    text = text + "1. 🔴 SHIB -5.2%\n"
-    text = text + "2.  🔴 DOGE -4.1%\n"
-    text = text + "3. 🔴 XRP -3.8%"
-    await callback.message.edit_text(text, reply_markup=get_back_keyboard(), parse_mode=ParseMode. MARKDOWN)
-    await callback.answer()
-
-
-@router.callback_query(lambda c: c.data == "menu_defi")
-async def callback_defi(callback: CallbackQuery):
-    text = "🏦 *DeFi Ставки*\n\n"
-    text = text + "🔷 *Lido* (stETH)\n"
-    text = text + "APY: 3.5% • Риск: Низкий\n"
-    text = text + "TVL: $28.5B\n\n"
-    text = text + "🔷 *Aave* (ETH)\n"
-    text = text + "APY: 3.2% • Риск: Низкий\n"
-    text = text + "TVL: $12.3B\n\n"
-    text = text + "🔷 *Compound* (USDC)\n"
-    text = text + "APY: 4.1% • Риск: Низкий\n"
-    text = text + "TVL: $2.8B\n\n"
-    text = text + "💡 _Рекомендация: Lido для ETH_"
-    await callback.message.edit_text(text, reply_markup=get_back_keyboard(), parse_mode=ParseMode.MARKDOWN)
-    await callback. answer()
-
-
 @router.callback_query(lambda c: c.data == "menu_whale")
 async def callback_whale(callback: CallbackQuery):
     """Обработка callback для меню Whale Tracker - показать меню выбора сети."""
@@ -1383,20 +1344,6 @@ async def callback_whale(callback: CallbackQuery):
     )
     await callback.message.edit_text(text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
     await callback.answer()
-
-
-@router.callback_query(lambda c: c.data == "menu_traders")
-async def callback_traders(callback: CallbackQuery):
-    text = "📈 *Топ трейдеры*\n\n"
-    text = text + "🥇 *CryptoKing*\n"
-    text = text + "Прибыль: +156% • Win: 78%\n\n"
-    text = text + "🥈 *WhaleHunter*\n"
-    text = text + "Прибыль: +134% • Win: 72%\n\n"
-    text = text + "🥉 *DiamondHands*\n"
-    text = text + "Прибыль: +98% • Win: 81%\n\n"
-    text = text + "🔜 _Скоро: копирование сделок! _"
-    await callback.message.edit_text(text, reply_markup=get_back_keyboard(), parse_mode=ParseMode.MARKDOWN)
-    await callback. answer()
 
 
 @router.callback_query(lambda c: c. data == "menu_portfolio")
@@ -1429,30 +1376,6 @@ async def callback_settings(callback: CallbackQuery):
     text = text + "💱 Валюта: USD\n"
     text = text + "🌐 Язык: Русский"
     await callback. message.edit_text(text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
-    await callback.answer()
-
-
-@router.callback_query(lambda c: c.data == "menu_help")
-async def callback_help(callback: CallbackQuery):
-    text = "📚 *Справка*\n\n"
-    text = text + "*Быстрые команды (34 монеты):*\n\n"
-    text = text + "Основные: /btc /eth /ton /sol /xrp\n"
-    text = text + "/doge /matic /ltc /shib /avax\n"
-    text = text + "/bnb /ada /dot /link /uni /atom /trx\n\n"
-    text = text + "Мем-коины: /not /pepe /wif /bonk\n\n"
-    text = text + "L1: /sui /apt /sei /near /ftm\n\n"
-    text = text + "L2: /arb /op\n\n"
-    text = text + "DeFi: /inj /xlm /vet /algo /fil /rune\n\n"
-    text = text + "*Текстовые команды:*\n\n"
-    text = text + "Напиши символ монеты (BTC, NOT, SUI...)\n"
-    text = text + "и получи её цену!\n\n"
-    text = text + "*Основные команды:*\n\n"
-    text = text + "/start — главное меню\n"
-    text = text + "/market — обзор рынка\n"
-    text = text + "/prices — все монеты (с пагинацией)\n"
-    text = text + "/help — справка\n\n"
-    text = text + "📡 _5 API: CoinGecko + CoinPaprika + MEXC + Kraken_"
-    await callback.message.edit_text(text, reply_markup=get_back_keyboard(), parse_mode=ParseMode.MARKDOWN)
     await callback.answer()
 
 
@@ -1507,9 +1430,7 @@ async def on_startup(bot: Bot):
     logger.info("Gheezy Crypto Bot запущен с 5 API")
     for admin_id in settings.telegram_admin_ids:
         try:
-            text = "🚀 *Gheezy Crypto* запущен!\n\n"
-            text = text + "📡 API: CoinGecko + CoinPaprika + MEXC + Kraken\n"
-            text = text + "🪙 Монеты: 34 популярных в России"
+            text = "🚀 *Gheezy Crypto* запущен!"
             await bot.send_message(admin_id, text, parse_mode=ParseMode.MARKDOWN)
         except:
             pass
