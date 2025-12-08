@@ -2721,8 +2721,12 @@ class AISignalAnalyzer:
         direction_text = "ЛОНГ" if is_long else "ШОРТ"
         direction_emoji = "📈" if is_long else "📉"
         
-        # Сила сигнала (прогресс бар)
-        signal_strength = min(100, int(probability))
+        # Сила сигнала (рассчитывается из total_score, не probability)
+        # total_score диапазон: -100 до +100
+        # Преобразуем в 0-100%
+        total_score = signal_data.get('total_score', 0)
+        strength_value = abs(total_score)
+        signal_strength = min(100, int(strength_value))
         filled_blocks = int(signal_strength / 10)
         empty_blocks = 10 - filled_blocks
         strength_bar = "█" * filled_blocks + "░" * empty_blocks
@@ -2745,9 +2749,17 @@ class AISignalAnalyzer:
         
         # ===== ТРЕНД ЦЕНЫ =====
         text += "📈 *ТРЕНД ЦЕНЫ*\n"
-        change_1h = market_data.get('price_change_1h', 0)
-        change_24h = market_data.get('price_change_24h', 0)
-        change_7d = market_data.get('price_change_7d', 0)
+        # Получить реальные данные о трендах из market_data
+        change_1h = market_data.get('change_1h', 0) or 0
+        change_24h = market_data.get('change_24h', 0) or market_data.get('price_change_24h', 0) or 0
+        change_7d = market_data.get('change_7d', 0) or market_data.get('price_change_7d', 0) or 0
+        
+        # Если change_1h недоступен, рассчитать из price history (short_term_data)
+        if change_1h == 0 and short_term_data:
+            current = short_term_data.get('current_price', 0)
+            price_1h = short_term_data.get('price_1h_ago', current)
+            if price_1h and price_1h > 0:
+                change_1h = ((current - price_1h) / price_1h) * 100
         
         change_1h_emoji = "🟢" if change_1h >= 0 else "🔴"
         change_24h_emoji = "🟢" if change_24h >= 0 else "🔴"
@@ -2797,7 +2809,6 @@ class AISignalAnalyzer:
             # RSI
             if "rsi" in technical_data:
                 rsi_value = technical_data["rsi"]["value"]
-                rsi_signal = technical_data["rsi"]["signal"]
                 rsi_status = "перепродан" if rsi_value < 30 else "перекуплен" if rsi_value > 70 else "нейтральный"
                 text += f"• RSI(14): {rsi_value:.0f} ({rsi_status})\n"
             
@@ -2816,7 +2827,6 @@ class AISignalAnalyzer:
             
             # Bollinger Bands
             if "bollinger" in technical_data:
-                bb_signal = technical_data["bollinger"]["signal"]
                 bb_position = technical_data["bollinger"].get("position", "middle")
                 bb_text = "в нижней половине" if bb_position == "lower" else "в верхней половине" if bb_position == "upper" else "в середине"
                 text += f"• BB: {bb_text}\n"
@@ -2852,71 +2862,75 @@ class AISignalAnalyzer:
         reasons = []
         
         # Собираем все факторы
-        factors = signal_data.get('factors', {})
         
         # 1. TradingView Rating
         if tradingview_rating:
-            rating = tradingview_rating.get('summary', {}).get('RECOMMENDATION', 'NEUTRAL')
+            summary = tradingview_rating.get('summary', {})
+            rating = summary.get('RECOMMENDATION', 'NEUTRAL')
             if rating in ['STRONG_BUY', 'BUY']:
-                reasons.append(("TradingView: STRONG_BUY", True))
+                reasons.append(f"✅ TradingView: {rating}")
             elif rating in ['STRONG_SELL', 'SELL']:
-                reasons.append(("TradingView: STRONG_SELL", False))
+                reasons.append(f"❌ TradingView: {rating}")
         
-        # 2. Whale Activity
-        if whale_score > 3:
-            whale_text = "Киты выводят с бирж" if net_flow > 0 else "Киты активно покупают"
-            reasons.append((f"{whale_text} ({format_volume(abs(net_flow))})", net_flow > 0))
-        elif whale_score < -3:
-            reasons.append((f"Киты депозитят на биржи ({format_volume(deposits)})", False))
-        
-        # 3. RSI
+        # 2. RSI
         if technical_data and "rsi" in technical_data:
             rsi_value = technical_data["rsi"]["value"]
-            if rsi_value < 35:
-                reasons.append(("RSI в зоне накопления", True))
-            elif rsi_value > 65:
-                reasons.append(("RSI в зоне перекупленности", False))
+            if rsi_value < 30:
+                reasons.append(f"✅ RSI: {rsi_value:.0f} (перепродан)")
+            elif rsi_value > 70:
+                reasons.append(f"⚠️ RSI: {rsi_value:.0f} (перекуплен)")
         
-        # 4. EMA Crossover
-        if technical_data and "ma_crossover" in technical_data:
-            ma_trend = technical_data["ma_crossover"].get("trend", "neutral")
-            ma_crossover_type = technical_data["ma_crossover"].get("crossover", "none")
-            # Check if there's a significant trend or recent crossover
-            if ma_trend in ["bullish", "bearish"] or ma_crossover_type in ["golden_cross", "death_cross"]:
-                timeframe = "5м" if short_term_data else "1ч"
-                ma_text = f"EMA бычий кросс на {timeframe}" if ma_trend == "bullish" else f"EMA медвежий кросс на {timeframe}"
-                reasons.append((ma_text, ma_trend == "bullish"))
+        # 3. Киты
+        if whale_data:
+            deposits_count = whale_data.get('deposits', 0)
+            withdrawals_count = whale_data.get('withdrawals', 0)
+            if withdrawals_count > deposits_count:
+                net_diff = withdrawals_count - deposits_count
+                reasons.append(f"✅ Киты выводят с бирж (+{net_diff} tx)")
+            elif deposits_count > withdrawals_count:
+                net_diff = deposits_count - withdrawals_count
+                reasons.append(f"❌ Киты заводят на биржи (+{net_diff} tx)")
         
-        # 5. Funding Rate
-        if funding_rate and 'rate' in funding_rate:
-            rate = funding_rate['rate']
-            if rate < -0.01:
-                reasons.append(("Funding Rate отрицательный", True))
-            elif rate > 0.01:
-                reasons.append(("Funding Rate положительный", False))
+        # 4. Fear & Greed
+        if fear_greed:
+            fg_value = fear_greed.get('value', 50)
+            fg_class = fear_greed.get('classification', 'Neutral')
+            if fg_value < 25:
+                reasons.append(f"✅ Extreme Fear ({fg_value}) — время покупать")
+            elif fg_value > 75:
+                reasons.append(f"⚠️ Extreme Greed ({fg_value}) — осторожно")
+            else:
+                reasons.append(f"ℹ️ Fear & Greed: {fg_class} ({fg_value})")
         
-        # 6. Volume
-        if vol_mcap_ratio > 5:
-            reasons.append((f"Высокий объём торгов ({vol_mcap_ratio:.1f}%)", True))
+        # 5. MACD
+        if technical_data and "macd" in technical_data:
+            macd_signal = technical_data["macd"].get("signal", "neutral")
+            if macd_signal in ["bullish", "buy"]:
+                reasons.append("✅ MACD: бычье пересечение")
+            elif macd_signal in ["bearish", "sell"]:
+                reasons.append("❌ MACD: медвежье пересечение")
         
-        # 7. Fear & Greed
-        if fear_greed and 'value' in fear_greed:
-            fg_value = fear_greed['value']
-            if fg_value < 30:
-                reasons.append(("Индекс страха и жадности: страх", True))
-            elif fg_value > 70:
-                reasons.append(("Индекс страха и жадности: жадность", False))
+        # 6. Funding Rate
+        if funding_rate:
+            rate = funding_rate.get('rate', 0)
+            # Rate is typically in decimal form (e.g., 0.0001 = 0.01%)
+            rate_percent = rate * 100
+            if rate < -0.0001:  # Less than -0.01%
+                reasons.append(f"✅ Funding Rate: {rate_percent:.4f}% (шорты платят)")
+            elif rate > 0.0005:  # Greater than 0.05%
+                reasons.append(f"⚠️ Funding Rate: {rate_percent:.4f}% (лонги платят)")
         
-        # Сортируем причины по соответствию направлению сигнала
-        bullish_reasons = [r for r in reasons if r[1] == is_long]
-        bearish_reasons = [r for r in reasons if r[1] != is_long]
+        # 7. Trades Flow
+        if trades_flow:
+            ratio = trades_flow.get('flow_ratio', 1.0)
+            if ratio > 1.5:
+                reasons.append(f"✅ Buy/Sell ratio: {ratio:.2f} (покупки)")
+            elif ratio < 0.67:
+                reasons.append(f"❌ Buy/Sell ratio: {ratio:.2f} (продажи)")
         
-        # Выбираем топ 5
-        top_reasons = bullish_reasons[:5]
-        
-        for idx, (reason, is_bullish) in enumerate(top_reasons, 1):
-            emoji = "✅" if is_bullish == is_long else "⚠️"
-            text += f"{idx}. {emoji} {reason}\n"
+        # Показать топ 5 причин
+        for i, reason in enumerate(reasons[:5], 1):
+            text += f"{i}. {reason}\n"
         
         text += "\n"
         
@@ -2959,7 +2973,9 @@ class AISignalAnalyzer:
         
         text += f"📡 Источников данных: {available_sources}/{self.TOTAL_FACTORS}\n"
         text += "━━━━━━━━━━━━━━━━━━━━\n"
-        text += "⚠️ Не финансовый совет"
+        text += "⚠️ *DISCLAIMER*\n"
+        text += "_Это НЕ финансовый совет. Сигналы основаны на техническом анализе и могут быть ошибочными. "
+        text += "Торгуйте только теми средствами, которые готовы потерять. DYOR._"
         
         return text
     

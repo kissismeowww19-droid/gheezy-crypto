@@ -56,8 +56,10 @@ SOLANA_TRACKER_API_URL = "https://data.solanatracker.io"
 # Public Solana RPC endpoints (fallback)
 PUBLIC_SOLANA_RPC_URLS = [
     "https://api.mainnet-beta.solana.com",
+    "https://solana-mainnet.g.alchemy.com/v2/demo",
     "https://rpc.ankr.com/solana",
     "https://solana.publicnode.com",
+    "https://solana-api.projectserum.com",
 ]
 
 
@@ -326,8 +328,8 @@ class SolanaTracker:
             )
 
     @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=10),
+        stop=stop_after_attempt(2),  # Было 3, стало 2
+        wait=wait_exponential(multiplier=0.5, min=0.5, max=5),  # Быстрее
         retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError)),
     )
     async def _make_api_request(
@@ -346,7 +348,7 @@ class SolanaTracker:
             dict | list: Ответ API или None при ошибке
         """
         session = await self._get_session()
-        timeout = aiohttp.ClientTimeout(total=20)
+        timeout = aiohttp.ClientTimeout(total=8)  # Было 20, стало 8
         headers = {
             "Accept": "application/json",
             "User-Agent": "GheezyCrypto/1.0",
@@ -372,13 +374,13 @@ class SolanaTracker:
         Получение крупных SOL транзакций с приоритетным fallback.
 
         Порядок попыток (только бесплатные API без ключей):
-        1. Solana RPC (публичные ноды) - основной
-        2. Jupiter API (бесплатный)
-        3. Solscan Public API (fallback)
+        1. Solana RPC (публичные ноды) - основной, самый надёжный
+        2. Solscan Public API - резервный
         
-        Удалены из цепочки (требуют API ключи):
+        Удалены из цепочки:
         - Helius API (требует ключ)
         - SolanaTracker API (требует ключ)
+        - Jupiter API (не подходит для whale tracking)
 
         Args:
             limit: Максимальное количество транзакций
@@ -389,7 +391,7 @@ class SolanaTracker:
         await self._update_sol_price()
         min_value_sol = self.min_value_usd / self._sol_price
 
-        # Priority 1: Solana RPC (публичные ноды)
+        # Priority 1: Solana RPC (самый надёжный)
         logger.debug("Пробуем получить данные через Solana RPC")
         transactions = await self._get_from_rpc(min_value_sol, limit)
         if transactions:
@@ -399,17 +401,7 @@ class SolanaTracker:
             )
             return transactions
 
-        # Priority 2: Jupiter API (бесплатный, без ключа)
-        logger.debug("Пробуем получить данные через Jupiter API")
-        transactions = await self._get_from_jupiter(min_value_sol, limit)
-        if transactions:
-            logger.info(
-                "Данные получены через Jupiter API",
-                count=len(transactions),
-            )
-            return transactions
-
-        # Priority 3: Solscan Public API (fallback)
+        # Priority 2: Solscan (резервный вариант)
         logger.debug("Пробуем получить данные через Solscan")
         transactions = await self._get_from_solscan(min_value_sol, limit)
         if transactions:
@@ -530,8 +522,6 @@ class SolanaTracker:
             list[SolanaTransaction]: Список транзакций
         """
         try:
-            transactions = []
-
             # Jupiter API больше подходит для цен и свапов, а не для whale tracking
             # Используем stats API для получения крупных свапов
             url = f"{JUPITER_STATS_URL}/tokens/top"
