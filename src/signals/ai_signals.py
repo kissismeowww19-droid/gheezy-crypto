@@ -2913,10 +2913,11 @@ class AISignalAnalyzer:
         # 6. Funding Rate
         if funding_rate:
             rate = funding_rate.get('rate', 0)
-            rate_percent = rate * 100  # Convert to percentage if needed
-            if rate < -0.01:
+            # Rate is typically in decimal form (e.g., 0.0001 = 0.01%)
+            rate_percent = rate * 100
+            if rate < -0.0001:  # Less than -0.01%
                 reasons.append(f"✅ Funding Rate: {rate_percent:.4f}% (шорты платят)")
-            elif rate > 0.05:
+            elif rate > 0.0005:  # Greater than 0.05%
                 reasons.append(f"⚠️ Funding Rate: {rate_percent:.4f}% (лонги платят)")
         
         # 7. Trades Flow

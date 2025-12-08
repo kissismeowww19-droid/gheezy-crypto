@@ -1037,8 +1037,16 @@ async def callback_signal_coin(callback: CallbackQuery):
         await callback.message.edit_text(signal_text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
     except TelegramBadRequest as e:
         if "message to edit not found" in str(e):
-            # Сообщение было удалено, отправляем новое
-            await callback.message.answer(signal_text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+            # Сообщение было удалено, отправляем новое используя bot напрямую
+            try:
+                await callback.bot.send_message(
+                    chat_id=callback.message.chat.id,
+                    text=signal_text,
+                    reply_markup=keyboard,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            except Exception as send_error:
+                logger.error(f"Failed to send new message: {send_error}")
         elif "message is not modified" in str(e):
             # Сообщение не изменилось, игнорируем
             pass
