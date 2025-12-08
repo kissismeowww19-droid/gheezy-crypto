@@ -363,48 +363,25 @@ def format_stats_message(
     total_volume_usd: float,
     deposits: int,
     withdrawals: int,
-    eth_transactions: int,
-    bsc_transactions: int,
     btc_transactions: int,
-    sol_transactions: int = 0,
-    ton_transactions: int = 0,
-    arb_transactions: int = 0,
-    polygon_transactions: int = 0,
-    avax_transactions: int = 0,
-    base_transactions: int = 0,
+    eth_transactions: int,
+    sol_transactions: int,
 ) -> str:
     """
-    Форматирование сообщения со статистикой.
+    Форматирование сообщения со статистикой (только BTC, ETH, SOL).
 
     Args:
         total_transactions: Общее количество транзакций
         total_volume_usd: Общий объём в USD
         deposits: Количество депозитов на биржи
         withdrawals: Количество выводов с бирж
-        eth_transactions: Количество ETH транзакций
-        bsc_transactions: Количество BSC транзакций
         btc_transactions: Количество BTC транзакций
+        eth_transactions: Количество ETH транзакций
         sol_transactions: Количество SOL транзакций
-        ton_transactions: Количество TON транзакций
-        arb_transactions: Количество Arbitrum транзакций
-        polygon_transactions: Количество Polygon транзакций
-        avax_transactions: Количество Avalanche транзакций
-        base_transactions: Количество Base транзакций
 
     Returns:
         str: Форматированное сообщение статистики
     """
-    # L2 networks section (only show if there are transactions)
-    l2_section = ""
-    if arb_transactions or polygon_transactions or avax_transactions or base_transactions:
-        l2_section = (
-            f"\n🌐 *L2 сети:*\n"
-            f"• 🔵 Arbitrum: *{arb_transactions}*\n"
-            f"• 🟣 Polygon: *{polygon_transactions}*\n"
-            f"• 🔺 Avalanche: *{avax_transactions}*\n"
-            f"• 🔵 Base: *{base_transactions}*\n"
-        )
-
     return (
         "🐋 *Whale Tracker - Статистика за день*\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -417,8 +394,5 @@ def format_stats_message(
         f"🔗 *По блокчейнам:*\n"
         f"• 🟠 Bitcoin: *{btc_transactions}*\n"
         f"• 🔷 Ethereum: *{eth_transactions}*\n"
-        f"• 🟡 BSC: *{bsc_transactions}*\n"
         f"• 🟣 Solana: *{sol_transactions}*\n"
-        f"• 💎 TON: *{ton_transactions}*\n"
-        f"{l2_section}"
     )
