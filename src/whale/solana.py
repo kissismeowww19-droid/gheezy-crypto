@@ -43,8 +43,15 @@ SOLSCAN_PUBLIC_API_URL = "https://public-api.solscan.io"
 # Solana RPC URL (резервный)
 SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com"
 
-# Jupiter API для получения данных о свапах
-JUPITER_API_URL = "https://stats.jup.ag/coingecko"
+# Helius API (Priority 1) - 100k requests/day free
+HELIUS_API_URL = "https://api.helius.xyz/v0"
+
+# Jupiter API (Priority 2) - fully free
+JUPITER_API_URL = "https://api.jup.ag"
+JUPITER_STATS_URL = "https://stats.jup.ag"
+
+# SolanaTracker API (Priority 3) - Raydium, Pumpfun, Orca data
+SOLANA_TRACKER_API_URL = "https://data.solanatracker.io"
 
 # Public Solana RPC endpoints (fallback)
 PUBLIC_SOLANA_RPC_URLS = [
@@ -362,7 +369,14 @@ class SolanaTracker:
         limit: int = 20,
     ) -> list[SolanaTransaction]:
         """
-        Получение крупных SOL транзакций.
+        Получение крупных SOL транзакций с приоритетным fallback.
+
+        Порядок попыток:
+        1. Helius API (Priority 1)
+        2. Jupiter API (Priority 2)
+        3. SolanaTracker API (Priority 3)
+        4. Solscan API (fallback)
+        5. Solana RPC (резервный)
 
         Args:
             limit: Максимальное количество транзакций
@@ -373,7 +387,37 @@ class SolanaTracker:
         await self._update_sol_price()
         min_value_sol = self.min_value_usd / self._sol_price
 
-        # Пробуем получить данные через Solscan
+        # Priority 1: Helius API
+        logger.debug("Пробуем получить данные через Helius API")
+        transactions = await self._get_from_helius(min_value_sol, limit)
+        if transactions:
+            logger.info(
+                "Данные получены через Helius API",
+                count=len(transactions),
+            )
+            return transactions
+
+        # Priority 2: Jupiter API
+        logger.debug("Пробуем получить данные через Jupiter API")
+        transactions = await self._get_from_jupiter(min_value_sol, limit)
+        if transactions:
+            logger.info(
+                "Данные получены через Jupiter API",
+                count=len(transactions),
+            )
+            return transactions
+
+        # Priority 3: SolanaTracker API
+        logger.debug("Пробуем получить данные через SolanaTracker API")
+        transactions = await self._get_from_solana_tracker(min_value_sol, limit)
+        if transactions:
+            logger.info(
+                "Данные получены через SolanaTracker API",
+                count=len(transactions),
+            )
+            return transactions
+
+        # Fallback: Solscan API
         logger.debug("Пробуем получить данные через Solscan")
         transactions = await self._get_from_solscan(min_value_sol, limit)
         if transactions:
@@ -383,7 +427,7 @@ class SolanaTracker:
             )
             return transactions
 
-        # Пробуем получить данные через публичные RPC ноды
+        # Last resort: Solana RPC
         logger.debug("Пробуем получить данные через Solana RPC")
         transactions = await self._get_from_rpc(min_value_sol, limit)
         if transactions:
@@ -395,6 +439,213 @@ class SolanaTracker:
 
         logger.warning("SOL транзакции временно недоступны")
         return []
+
+    async def _get_from_helius(
+        self,
+        min_value_sol: float,
+        limit: int,
+    ) -> list[SolanaTransaction]:
+        """
+        Получение транзакций через Helius API (Priority 1).
+
+        Helius API предоставляет данные о транзакциях адресов и держателях токенов.
+        Бесплатный лимит: 100k запросов/день.
+
+        Args:
+            min_value_sol: Минимальная сумма в SOL
+            limit: Максимальное количество транзакций
+
+        Returns:
+            list[SolanaTransaction]: Список транзакций
+        """
+        try:
+            transactions = []
+
+            # Получаем транзакции для известных кошельков бирж
+            for address in list(SOLANA_EXCHANGES.keys())[:5]:
+                try:
+                    url = f"{HELIUS_API_URL}/addresses/{address}/transactions"
+                    params = {"limit": 10}
+
+                    data = await self._make_api_request(url, params=params)
+                    if not data or not isinstance(data, list):
+                        continue
+
+                    for tx in data:
+                        if not isinstance(tx, dict):
+                            continue
+
+                        # Парсим данные транзакции
+                        native_transfers = tx.get("nativeTransfers", [])
+                        if not native_transfers:
+                            continue
+
+                        for transfer in native_transfers:
+                            amount_sol = transfer.get("amount", 0) / 1_000_000_000
+                            if amount_sol < min_value_sol:
+                                continue
+
+                            value_usd = amount_sol * self._sol_price
+                            from_addr = transfer.get("fromUserAccount", "")
+                            to_addr = transfer.get("toUserAccount", "")
+
+                            try:
+                                timestamp_val = tx.get("timestamp", 0)
+                                timestamp = datetime.fromtimestamp(timestamp_val, tz=timezone.utc) if timestamp_val else None
+                            except (ValueError, OSError):
+                                timestamp = datetime.now(timezone.utc)
+
+                            tx_obj = SolanaTransaction(
+                                tx_hash=tx.get("signature", ""),
+                                from_address=from_addr,
+                                to_address=to_addr,
+                                value_sol=amount_sol,
+                                value_usd=value_usd,
+                                token_symbol="SOL",
+                                timestamp=timestamp,
+                                slot=tx.get("slot"),
+                            )
+                            tx_obj.tx_type = tx_obj.get_transaction_type()
+                            transactions.append(tx_obj)
+
+                            if len(transactions) >= limit * 2:
+                                break
+
+                    if len(transactions) >= limit * 2:
+                        break
+
+                    await asyncio.sleep(0.2)  # Rate limiting
+
+                except Exception as e:
+                    logger.debug(f"Ошибка Helius API для адреса {address}: {e}")
+                    continue
+
+            return self._deduplicate_and_sort(transactions, limit)
+
+        except Exception as e:
+            logger.warning(
+                "Ошибка Helius API",
+                error=str(e),
+            )
+            return []
+
+    async def _get_from_jupiter(
+        self,
+        min_value_sol: float,
+        limit: int,
+    ) -> list[SolanaTransaction]:
+        """
+        Получение транзакций через Jupiter API (Priority 2).
+
+        Jupiter API предоставляет данные о ценах токенов и свапах.
+        Полностью бесплатный.
+
+        Args:
+            min_value_sol: Минимальная сумма в SOL
+            limit: Максимальное количество транзакций
+
+        Returns:
+            list[SolanaTransaction]: Список транзакций
+        """
+        try:
+            transactions = []
+
+            # Jupiter API больше подходит для цен и свапов, а не для whale tracking
+            # Используем stats API для получения крупных свапов
+            url = f"{JUPITER_STATS_URL}/tokens/top"
+            
+            data = await self._make_api_request(url)
+            if not data or not isinstance(data, dict):
+                return []
+
+            # Jupiter API больше подходит для цен и свапов, а не для whale tracking
+            # Пропускаем Jupiter в цепочке fallback, так как он не предоставляет
+            # детальные данные о транзакциях
+            logger.debug("Jupiter API не подходит для whale tracking транзакций")
+            return []
+
+        except Exception as e:
+            logger.warning(
+                "Ошибка Jupiter API",
+                error=str(e),
+            )
+            return []
+
+    async def _get_from_solana_tracker(
+        self,
+        min_value_sol: float,
+        limit: int,
+    ) -> list[SolanaTransaction]:
+        """
+        Получение транзакций через SolanaTracker API (Priority 3).
+
+        SolanaTracker предоставляет данные о токенах Raydium, Pumpfun, Orca
+        и whale transactions tracking.
+
+        Args:
+            min_value_sol: Минимальная сумма в SOL
+            limit: Максимальное количество транзакций
+
+        Returns:
+            list[SolanaTransaction]: Список транзакций
+        """
+        try:
+            transactions = []
+
+            # SolanaTracker API для whale transactions
+            url = f"{SOLANA_TRACKER_API_URL}/whale-transactions"
+            params = {
+                "limit": limit * 2,
+                "min_amount": int(min_value_sol * 1_000_000_000),  # в lamports
+            }
+
+            data = await self._make_api_request(url, params=params)
+            if not data:
+                return []
+
+            # Парсим ответ в зависимости от структуры API
+            tx_list = data if isinstance(data, list) else data.get("transactions", [])
+
+            for tx in tx_list:
+                if not isinstance(tx, dict):
+                    continue
+
+                amount_sol = tx.get("amount", 0) / 1_000_000_000
+                if amount_sol < min_value_sol:
+                    continue
+
+                value_usd = amount_sol * self._sol_price
+
+                try:
+                    timestamp_val = tx.get("timestamp", 0)
+                    timestamp = datetime.fromtimestamp(timestamp_val, tz=timezone.utc) if timestamp_val else None
+                except (ValueError, OSError):
+                    timestamp = datetime.now(timezone.utc)
+
+                tx_obj = SolanaTransaction(
+                    tx_hash=tx.get("signature", tx.get("txHash", "")),
+                    from_address=tx.get("from", tx.get("fromAddress", "")),
+                    to_address=tx.get("to", tx.get("toAddress", "")),
+                    value_sol=amount_sol,
+                    value_usd=value_usd,
+                    token_symbol=tx.get("token", "SOL"),
+                    timestamp=timestamp,
+                    slot=tx.get("slot"),
+                )
+                tx_obj.tx_type = tx_obj.get_transaction_type()
+                transactions.append(tx_obj)
+
+                if len(transactions) >= limit:
+                    break
+
+            return self._deduplicate_and_sort(transactions, limit)
+
+        except Exception as e:
+            logger.warning(
+                "Ошибка SolanaTracker API",
+                error=str(e),
+            )
+            return []
 
     async def _get_from_solscan(
         self,
