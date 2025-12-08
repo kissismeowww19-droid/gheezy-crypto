@@ -371,12 +371,14 @@ class SolanaTracker:
         """
         Получение крупных SOL транзакций с приоритетным fallback.
 
-        Порядок попыток:
-        1. Helius API (Priority 1)
-        2. Jupiter API (Priority 2)
-        3. SolanaTracker API (Priority 3)
-        4. Solscan API (fallback)
-        5. Solana RPC (резервный)
+        Порядок попыток (только бесплатные API без ключей):
+        1. Solana RPC (публичные ноды) - основной
+        2. Jupiter API (бесплатный)
+        3. Solscan Public API (fallback)
+        
+        Удалены из цепочки (требуют API ключи):
+        - Helius API (требует ключ)
+        - SolanaTracker API (требует ключ)
 
         Args:
             limit: Максимальное количество транзакций
@@ -387,17 +389,17 @@ class SolanaTracker:
         await self._update_sol_price()
         min_value_sol = self.min_value_usd / self._sol_price
 
-        # Priority 1: Helius API
-        logger.debug("Пробуем получить данные через Helius API")
-        transactions = await self._get_from_helius(min_value_sol, limit)
+        # Priority 1: Solana RPC (публичные ноды)
+        logger.debug("Пробуем получить данные через Solana RPC")
+        transactions = await self._get_from_rpc(min_value_sol, limit)
         if transactions:
             logger.info(
-                "Данные получены через Helius API",
+                "Данные получены через Solana RPC",
                 count=len(transactions),
             )
             return transactions
 
-        # Priority 2: Jupiter API
+        # Priority 2: Jupiter API (бесплатный, без ключа)
         logger.debug("Пробуем получить данные через Jupiter API")
         transactions = await self._get_from_jupiter(min_value_sol, limit)
         if transactions:
@@ -407,32 +409,12 @@ class SolanaTracker:
             )
             return transactions
 
-        # Priority 3: SolanaTracker API
-        logger.debug("Пробуем получить данные через SolanaTracker API")
-        transactions = await self._get_from_solana_tracker(min_value_sol, limit)
-        if transactions:
-            logger.info(
-                "Данные получены через SolanaTracker API",
-                count=len(transactions),
-            )
-            return transactions
-
-        # Fallback: Solscan API
+        # Priority 3: Solscan Public API (fallback)
         logger.debug("Пробуем получить данные через Solscan")
         transactions = await self._get_from_solscan(min_value_sol, limit)
         if transactions:
             logger.info(
                 "Данные получены через Solscan",
-                count=len(transactions),
-            )
-            return transactions
-
-        # Last resort: Solana RPC
-        logger.debug("Пробуем получить данные через Solana RPC")
-        transactions = await self._get_from_rpc(min_value_sol, limit)
-        if transactions:
-            logger.info(
-                "Данные получены через Solana RPC",
                 count=len(transactions),
             )
             return transactions
