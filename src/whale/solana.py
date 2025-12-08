@@ -522,8 +522,6 @@ class SolanaTracker:
             list[SolanaTransaction]: Список транзакций
         """
         try:
-            transactions = []
-
             # Jupiter API больше подходит для цен и свапов, а не для whale tracking
             # Используем stats API для получения крупных свапов
             url = f"{JUPITER_STATS_URL}/tokens/top"

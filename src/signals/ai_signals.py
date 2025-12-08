@@ -2809,7 +2809,6 @@ class AISignalAnalyzer:
             # RSI
             if "rsi" in technical_data:
                 rsi_value = technical_data["rsi"]["value"]
-                rsi_signal = technical_data["rsi"]["signal"]
                 rsi_status = "перепродан" if rsi_value < 30 else "перекуплен" if rsi_value > 70 else "нейтральный"
                 text += f"• RSI(14): {rsi_value:.0f} ({rsi_status})\n"
             
@@ -2828,7 +2827,6 @@ class AISignalAnalyzer:
             
             # Bollinger Bands
             if "bollinger" in technical_data:
-                bb_signal = technical_data["bollinger"]["signal"]
                 bb_position = technical_data["bollinger"].get("position", "middle")
                 bb_text = "в нижней половине" if bb_position == "lower" else "в верхней половине" if bb_position == "upper" else "в середине"
                 text += f"• BB: {bb_text}\n"
@@ -2864,7 +2862,6 @@ class AISignalAnalyzer:
         reasons = []
         
         # Собираем все факторы
-        factors = signal_data.get('factors', {})
         
         # 1. TradingView Rating
         if tradingview_rating:
