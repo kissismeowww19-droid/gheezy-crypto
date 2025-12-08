@@ -225,23 +225,13 @@ def get_main_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="💰 Цены", callback_data="menu_prices"),
-            InlineKeyboardButton(text="🎯 AI Сигналы", callback_data="menu_signals"),
-        ],
-        [
-            InlineKeyboardButton(text="📊 Рынок", callback_data="menu_market"),
-            InlineKeyboardButton(text="🔥 Топ", callback_data="menu_top"),
-        ],
-        [
-            InlineKeyboardButton(text="🏦 DeFi", callback_data="menu_defi"),
+            InlineKeyboardButton(text="📡 Сигналы", callback_data="menu_signals"),
             InlineKeyboardButton(text="🐋 Киты", callback_data="menu_whale"),
         ],
         [
-            InlineKeyboardButton(text="📈 Трейдеры", callback_data="menu_traders"),
-            InlineKeyboardButton(text="💼 Портфель", callback_data="menu_portfolio"),
-        ],
-        [
+            InlineKeyboardButton(text="📊 Рынок", callback_data="menu_market"),
             InlineKeyboardButton(text="⚙️ Настройки", callback_data="menu_settings"),
-            InlineKeyboardButton(text="📚 Помощь", callback_data="menu_help"),
+            InlineKeyboardButton(text="💼 Портфель", callback_data="menu_portfolio"),
         ],
     ])
 
@@ -331,6 +321,10 @@ def get_signals_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="⟠ ETH", callback_data="signal_eth"),
         ],
         [
+            InlineKeyboardButton(text="🟣 SOL", callback_data="signal_sol"),
+            InlineKeyboardButton(text="💧 XRP", callback_data="signal_xrp"),
+        ],
+        [
             InlineKeyboardButton(text="🔙 Назад", callback_data="menu_back"),
         ],
     ])
@@ -349,11 +343,11 @@ def get_welcome_text(name: str) -> str:
     text = text + "Давай вместе учиться и зарабатывать 🤩\n\n"
     text = text + "📊 *Мои возможности:*\n\n"
     text = text + "• 💰 Цены — самые популярные криптовалюты\n"
-    text = text + "• 🤖 AI Signals — торговые сигналы\n"
-    text = text + "• 🏦 DeFi — лучшие ставки\n"
-    text = text + "• 🐋 Whales — движения китов\n"
-    text = text + "• 📈 Traders — топ трейдеры\n\n"
-    text = text + "📡 Проверенные источники данных с обновлением в реальном времени ✅\n\n"
+    text = text + "• 🤖 Сигналы — AI торговые сигналы\n"
+    text = text + "• 🐋 Киты — движения китов\n"
+    text = text + "• 📊 Рынок — капитализация и статистика\n"
+    text = text + "• ⚙️ Настройки — настройки бота\n"
+    text = text + "• 💼 Портфель — твой портфель\n\n"
     text = text + "Ну что взлетаем! 🚀🚀🚀\n\n"
     text = text + "👇 *Выбери раздел:*"
     return text
@@ -1507,9 +1501,7 @@ async def on_startup(bot: Bot):
     logger.info("Gheezy Crypto Bot запущен с 5 API")
     for admin_id in settings.telegram_admin_ids:
         try:
-            text = "🚀 *Gheezy Crypto* запущен!\n\n"
-            text = text + "📡 API: CoinGecko + CoinPaprika + MEXC + Kraken\n"
-            text = text + "🪙 Монеты: 34 популярных в России"
+            text = "🚀 *Gheezy Crypto* запущен!"
             await bot.send_message(admin_id, text, parse_mode=ParseMode.MARKDOWN)
         except:
             pass
