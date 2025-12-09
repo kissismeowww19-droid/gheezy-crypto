@@ -140,6 +140,10 @@ class AISignalAnalyzer:
         self._previous_orderbook = {}  # {"BTC": {...}, "ETH": {...}}
         self._previous_prices = {}  # {"BTC": [(timestamp, price), ...], "ETH": [...]}
         
+        # Память для стабилизации сигналов
+        self.previous_scores: dict[str, float] = {}      # предыдущий score по монете
+        self.previous_direction: dict[str, str] = {}     # предыдущее направление по монете
+        
         logger.info("AISignalAnalyzer initialized with 22-factor system")
     
     def _get_cache(self, key: str, ttl_seconds: int) -> Optional[Dict]:
@@ -2315,7 +2319,7 @@ class AISignalAnalyzer:
             "data_quality": round(data_quality, 2)
         }
     
-    def calculate_signal(self, whale_data: Dict, market_data: Dict, technical_data: Optional[Dict] = None, 
+    def calculate_signal(self, symbol: str, whale_data: Dict, market_data: Dict, technical_data: Optional[Dict] = None, 
                         fear_greed: Optional[Dict] = None, funding_rate: Optional[Dict] = None,
                         order_book: Optional[Dict] = None, trades: Optional[Dict] = None,
                         futures_data: Optional[Dict] = None, onchain_data: Optional[Dict] = None,
@@ -2468,6 +2472,17 @@ class AISignalAnalyzer:
             social_score * self.SOCIAL_WEIGHT
         ) * self.SCORE_SCALE_FACTOR  # Scale to -100 to +100
         
+        # Сглаживание score для стабильности
+        new_score = total_score
+        prev_score = self.previous_scores.get(symbol)
+        
+        if prev_score is not None:
+            alpha = 0.4  # 40% новый + 60% старый
+            total_score = alpha * new_score + (1 - alpha) * prev_score
+        
+        # Сохраняем для следующего раза
+        self.previous_scores[symbol] = total_score
+        
         # Count consensus (22 factors)
         all_scores = {
             # Long-term
@@ -2532,15 +2547,18 @@ class AISignalAnalyzer:
             total_factors=22
         )
         
-        # Determine direction and strength
-        if abs(total_score) < self.WEAK_SIGNAL_THRESHOLD:
-            # Очень слабый сетап, почти нет сигнала
-            direction = "📊 Боковик"
+        # Определяем размер мёртвой зоны (для TON шире)
+        if symbol == "TON":
+            dead_zone = 15  # TON более шумный, нужна широкая зона
+        else:
+            dead_zone = 10  # BTC/ETH
+        
+        # Мёртвая зона — показываем боковик
+        if abs(total_score) < dead_zone:
+            direction = "➡️ Боковик"
             strength = "слабый"
             confidence = "Низкая"
-            # Фиксированная вероятность для очень слабых сигналов
-            probability_data["probability"] = 52
-        elif total_score > 20:
+        elif total_score > 25:
             direction = "📈 ВВЕРХ"
             strength = "сильный"
             confidence = "Высокая"
@@ -2548,7 +2566,7 @@ class AISignalAnalyzer:
             direction = "📈 Вероятно вверх"
             strength = "средний"
             confidence = "Средняя"
-        elif total_score < -20:
+        elif total_score < -25:
             direction = "📉 ВНИЗ"
             strength = "сильный"
             confidence = "Высокая"
@@ -2560,6 +2578,42 @@ class AISignalAnalyzer:
             direction = "➡️ Боковик"
             strength = "слабый"
             confidence = "Низкая"
+        
+        # Преобразуем direction в простой формат для сравнения
+        if "ВВЕРХ" in direction or "вверх" in direction:
+            raw_direction = "long"
+        elif "ВНИЗ" in direction or "вниз" in direction:
+            raw_direction = "short"
+        else:
+            raw_direction = "sideways"
+        
+        # Гистерезис — не разворачиваем сразу
+        prev_dir = self.previous_direction.get(symbol)
+        
+        if prev_dir == "long" and raw_direction == "short":
+            # Был ЛОНГ, хотим ШОРТ — нужен сильный сигнал
+            if abs(total_score) < 30:
+                direction = "➡️ Боковик"
+                strength = "слабый"
+                confidence = "Низкая"
+                raw_direction = "sideways"
+        elif prev_dir == "short" and raw_direction == "long":
+            # Был ШОРТ, хотим ЛОНГ — нужен сильный сигнал
+            if abs(total_score) < 30:
+                direction = "➡️ Боковик"
+                strength = "слабый"
+                confidence = "Низкая"
+                raw_direction = "sideways"
+        
+        # Сохраняем текущее направление
+        self.previous_direction[symbol] = raw_direction
+        
+        # Ограничить вероятность для слабых сигналов
+        if abs(total_score) < dead_zone:
+            probability_data["probability"] = 52  # фиксированная низкая вероятность
+        elif abs(total_score) < 20:
+            probability_data["probability"] = min(probability_data["probability"], 58)  # не выше 58% для средних
+        # else: оставляем как есть для сильных сигналов
         
         # Normalize strength to 0-100%
         strength_percent = min(max((total_score + 100) / 200 * 100, 0), 100)
@@ -3206,6 +3260,7 @@ class AISignalAnalyzer:
             
             # Calculate signal with all available data (22-factor system)
             signal_data = self.calculate_signal(
+                symbol=symbol,
                 whale_data=whale_data,
                 market_data=market_data,
                 technical_data=technical_data,

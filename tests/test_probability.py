@@ -208,7 +208,7 @@ class TestIntegration:
             "market_cap": 1_000_000_000_000
         }
         
-        result = analyzer.calculate_signal(whale_data, market_data)
+        result = analyzer.calculate_signal("BTC", whale_data, market_data)
         
         # Check that probability fields are included
         assert "probability" in result

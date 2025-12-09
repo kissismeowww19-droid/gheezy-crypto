@@ -47,7 +47,7 @@ class TestWeakSignalProbability:
             "volume_24h": 100_000_000,
         }
         
-        result = analyzer.calculate_signal(whale_data, market_data)
+        result = analyzer.calculate_signal("BTC", whale_data, market_data)
         
         total_score = result.get('total_score', 0)
         probability = result.get('probability', 0)
