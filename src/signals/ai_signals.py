@@ -90,6 +90,9 @@ class AISignalAnalyzer:
     TRADES_FLOW_BEARISH_THRESHOLD = 0.67  # Buy/Sell ratio threshold for bearish
     TRADES_FLOW_NEUTRAL_DIVISOR = 0.33    # Normalization divisor for neutral range
     
+    # Signal direction thresholds
+    WEAK_SIGNAL_THRESHOLD = 5  # Порог слабого сигнала (боковик)
+    
     # Supported coins for AI signals
     SUPPORTED_SIGNAL_COINS = {"BTC", "ETH", "TON"}
     
@@ -126,6 +129,7 @@ class AISignalAnalyzer:
             "ETH": "ETHUSDT",
             "SOL": "SOLUSDT",
             "XRP": "XRPUSDT",
+            "TON": "TONUSDT",  # Добавлено для TON
         }
         
         # Простой кэш для внешних API
@@ -2529,7 +2533,12 @@ class AISignalAnalyzer:
         )
         
         # Determine direction and strength
-        if total_score > 20:
+        if abs(total_score) < self.WEAK_SIGNAL_THRESHOLD:
+            # Очень слабый сетап, почти нет сигнала
+            direction = "📊 Боковик"
+            strength = "слабый"
+            confidence = "Низкая"
+        elif total_score > 20:
             direction = "📈 ВВЕРХ"
             strength = "сильный"
             confidence = "Высокая"
@@ -2946,7 +2955,18 @@ class AISignalAnalyzer:
         bearish_count = sum(1 for bullish, _ in reasons if not bullish)
         neutral_count = max(0, self.TOTAL_FACTORS - bullish_count - bearish_count)
         
-        consensus_text = "БЫЧИЙ ✅" if bullish_count > bearish_count else "МЕДВЕЖИЙ ❌" if bearish_count > bullish_count else "НЕЙТРАЛЬНЫЙ ⚠️"
+        if bullish_count <= 1 and bearish_count == 0:
+            # Слишком мало факторов для бычьего консенсуса
+            consensus_text = "НЕЙТРАЛЬНЫЙ ⚠️"
+        elif bearish_count <= 1 and bullish_count == 0:
+            # Слишком мало факторов для медвежьего консенсуса
+            consensus_text = "НЕЙТРАЛЬНЫЙ ⚠️"
+        elif bullish_count > bearish_count:
+            consensus_text = "БЫЧИЙ ✅"
+        elif bearish_count > bullish_count:
+            consensus_text = "МЕДВЕЖИЙ ❌"
+        else:
+            consensus_text = "НЕЙТРАЛЬНЫЙ ⚠️"
         
         text += f"Бычьих: {bullish_count} | Медвежьих: {bearish_count} | Нейтральных: {neutral_count}\n"
         text += f"Консенсус: {consensus_text}\n\n"
