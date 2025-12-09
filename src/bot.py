@@ -646,8 +646,8 @@ async def cmd_rune(message: Message):
 def get_whale_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура для whale tracker с 2 сетями: BTC, ETH."""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="₿ Bitcoin", callback_data="whale_btc")],
-        [InlineKeyboardButton(text="⟠ Ethereum", callback_data="whale_eth")],
+        [InlineKeyboardButton(text="₿ BTC", callback_data="whale_btc")],
+        [InlineKeyboardButton(text="⟠ ETH", callback_data="whale_eth")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")],
     ])
 
