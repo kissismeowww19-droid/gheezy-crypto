@@ -1091,8 +1091,7 @@ async def callback_whale(callback: CallbackQuery):
 Выберите сеть для отслеживания:
 
 • ₿ *BTC* — Bitcoin
-• ⟠ *ETH* — Ethereum  
-• ◎ *SOL* — Solana
+• ⟠ *ETH* — Ethereum
 
 👇 Выберите сеть:
 """
