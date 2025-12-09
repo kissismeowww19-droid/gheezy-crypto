@@ -488,10 +488,8 @@ class WhaleTracker:
         # Используем увеличенный лимит сразу для уменьшения количества запросов
         initial_limit = 100
         
-        # Для ETH увеличиваем количество блоков временно с использованием локальной копии
+        # Получаем транзакции с увеличенным лимитом
         if network == "eth":
-            # Создаём временный увеличенный параметр без модификации трекера
-            # Вместо этого получаем больше транзакций и фильтруем
             txs = await self.get_ethereum_transactions(limit=initial_limit)
         elif network == "btc":
             txs = await self.get_bitcoin_transactions(limit=initial_limit)
@@ -504,8 +502,8 @@ class WhaleTracker:
         # Сортируем по сумме (от большего к меньшему)
         filtered.sort(key=lambda tx: tx.amount_usd, reverse=True)
         
-        # Возвращаем минимум 10, максимум 20 транзакций
-        result_count = max(MIN_WHALE_TX_COUNT, min(20, len(filtered)))
+        # Возвращаем минимум MIN_WHALE_TX_COUNT, максимум 20 транзакций (или все, если меньше)
+        result_count = min(len(filtered), max(MIN_WHALE_TX_COUNT, 20))
         return filtered[:result_count]
 
 
