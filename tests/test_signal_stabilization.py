@@ -1,9 +1,14 @@
 """
-Test AI signal stabilization features:
-- Score smoothing
-- Hysteresis for direction changes
-- Expanded dead zone for TON
-- Probability capping
+Test AI signal stabilization features.
+
+The stabilization system prevents rapid oscillation between LONG/SHORT signals
+by implementing score smoothing, hysteresis, and expanded dead zones.
+
+Features tested:
+- Score smoothing: Exponential moving average with alpha=0.4
+- Hysteresis: Prevents direction reversals below threshold
+- Expanded dead zone: Different thresholds for TON vs BTC/ETH
+- Probability capping: Fixed values for weak/medium signals
 """
 
 import pytest

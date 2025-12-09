@@ -93,6 +93,14 @@ class AISignalAnalyzer:
     # Signal direction thresholds
     WEAK_SIGNAL_THRESHOLD = 5  # Порог слабого сигнала (боковик)
     
+    # Signal stabilization constants
+    SMOOTHING_ALPHA = 0.4  # 40% новый score + 60% старый (для сглаживания)
+    DEAD_ZONE_DEFAULT = 10  # Мёртвая зона для BTC/ETH
+    DEAD_ZONE_TON = 15  # Мёртвая зона для TON (более волатильный)
+    HYSTERESIS_THRESHOLD = 30  # Минимальный score для разворота направления
+    WEAK_SIGNAL_PROBABILITY = 52  # Фиксированная вероятность для слабых сигналов
+    MEDIUM_SIGNAL_MAX_PROBABILITY = 58  # Максимальная вероятность для средних сигналов
+    
     # Supported coins for AI signals
     SUPPORTED_SIGNAL_COINS = {"BTC", "ETH", "TON"}
     
@@ -2477,8 +2485,7 @@ class AISignalAnalyzer:
         prev_score = self.previous_scores.get(symbol)
         
         if prev_score is not None:
-            alpha = 0.4  # 40% новый + 60% старый
-            total_score = alpha * new_score + (1 - alpha) * prev_score
+            total_score = self.SMOOTHING_ALPHA * new_score + (1 - self.SMOOTHING_ALPHA) * prev_score
         
         # Сохраняем для следующего раза
         self.previous_scores[symbol] = total_score
@@ -2549,9 +2556,9 @@ class AISignalAnalyzer:
         
         # Определяем размер мёртвой зоны (для TON шире)
         if symbol == "TON":
-            dead_zone = 15  # TON более шумный, нужна широкая зона
+            dead_zone = self.DEAD_ZONE_TON  # TON более шумный, нужна широкая зона
         else:
-            dead_zone = 10  # BTC/ETH
+            dead_zone = self.DEAD_ZONE_DEFAULT  # BTC/ETH
         
         # Мёртвая зона — показываем боковик
         if abs(total_score) < dead_zone:
@@ -2592,14 +2599,14 @@ class AISignalAnalyzer:
         
         if prev_dir == "long" and raw_direction == "short":
             # Был ЛОНГ, хотим ШОРТ — нужен сильный сигнал
-            if abs(total_score) < 30:
+            if abs(total_score) < self.HYSTERESIS_THRESHOLD:
                 direction = "➡️ Боковик"
                 strength = "слабый"
                 confidence = "Низкая"
                 raw_direction = "sideways"
         elif prev_dir == "short" and raw_direction == "long":
             # Был ШОРТ, хотим ЛОНГ — нужен сильный сигнал
-            if abs(total_score) < 30:
+            if abs(total_score) < self.HYSTERESIS_THRESHOLD:
                 direction = "➡️ Боковик"
                 strength = "слабый"
                 confidence = "Низкая"
@@ -2610,9 +2617,9 @@ class AISignalAnalyzer:
         
         # Ограничить вероятность для слабых сигналов
         if abs(total_score) < dead_zone:
-            probability_data["probability"] = 52  # фиксированная низкая вероятность
+            probability_data["probability"] = self.WEAK_SIGNAL_PROBABILITY  # фиксированная низкая вероятность
         elif abs(total_score) < 20:
-            probability_data["probability"] = min(probability_data["probability"], 58)  # не выше 58% для средних
+            probability_data["probability"] = min(probability_data["probability"], self.MEDIUM_SIGNAL_MAX_PROBABILITY)  # не выше 58% для средних
         # else: оставляем как есть для сильных сигналов
         
         # Normalize strength to 0-100%
