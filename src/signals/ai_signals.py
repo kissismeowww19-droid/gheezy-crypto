@@ -2538,6 +2538,8 @@ class AISignalAnalyzer:
             direction = "📊 Боковик"
             strength = "слабый"
             confidence = "Низкая"
+            # Ограничить вероятность для очень слабых сигналов
+            probability_data["probability"] = 52
         elif total_score > 20:
             direction = "📈 ВВЕРХ"
             strength = "сильный"
@@ -2558,6 +2560,9 @@ class AISignalAnalyzer:
             direction = "➡️ Боковик"
             strength = "слабый"
             confidence = "Низкая"
+            # Ограничить вероятность для боковика
+            if abs(total_score) < self.WEAK_SIGNAL_THRESHOLD:
+                probability_data["probability"] = 52
         
         # Normalize strength to 0-100%
         strength_percent = min(max((total_score + 100) / 200 * 100, 0), 100)
