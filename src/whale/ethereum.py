@@ -49,14 +49,14 @@ class TransactionType(str, Enum):
 
 
 class EtherscanRateLimiter:
-    """Rate limiter для Etherscan API (default 2.5 req/sec for safety margin)."""
+    """Rate limiter для Etherscan API (default 2.0 req/sec for stability)."""
     
-    def __init__(self, calls_per_second: float = 2.5):
+    def __init__(self, calls_per_second: float = 2.0):
         """
         Initialize rate limiter.
         
         Args:
-            calls_per_second: Maximum calls per second (default 2.5 for safety margin)
+            calls_per_second: Maximum calls per second (default 2.0 for stability)
         """
         self.min_interval = 1.0 / calls_per_second
         self.last_call = 0
@@ -206,12 +206,12 @@ class EthereumTracker:
         # Use API key rotation for rate limits
         self.api_key = get_next_api_key()
         self.min_value_usd = settings.whale_min_transaction
-        self.blocks_to_analyze = 80  # Fixed value, not from settings
+        self.blocks_to_analyze = 200  # Увеличено для получения большего количества транзакций
         self.price_cache_ttl = 600  # Increased from 300 to reduce CoinGecko rate limit issues
         self._session: Optional[aiohttp.ClientSession] = None
         self._eth_price: float = 2000.0  # Дефолтная цена ETH
         self._price_last_update: float = 0  # Время последнего обновления цены
-        self._rate_limiter = EtherscanRateLimiter(calls_per_second=2.5)  # Rate limiter for Etherscan API
+        self._rate_limiter = EtherscanRateLimiter(calls_per_second=2.0)  # Rate limiter for Etherscan API (снижено для стабильности)
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Получение HTTP сессии."""
