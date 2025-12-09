@@ -90,6 +90,9 @@ class AISignalAnalyzer:
     TRADES_FLOW_BEARISH_THRESHOLD = 0.67  # Buy/Sell ratio threshold for bearish
     TRADES_FLOW_NEUTRAL_DIVISOR = 0.33    # Normalization divisor for neutral range
     
+    # Signal direction thresholds
+    WEAK_SIGNAL_THRESHOLD = 5  # Порог слабого сигнала (боковик)
+    
     # Supported coins for AI signals
     SUPPORTED_SIGNAL_COINS = {"BTC", "ETH", "TON"}
     
@@ -2530,7 +2533,7 @@ class AISignalAnalyzer:
         )
         
         # Determine direction and strength
-        if abs(total_score) < 5:
+        if abs(total_score) < self.WEAK_SIGNAL_THRESHOLD:
             # Очень слабый сетап, почти нет сигнала
             direction = "📊 Боковик"
             strength = "слабый"

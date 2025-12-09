@@ -25,12 +25,15 @@ def test_weak_signal_logic():
     with open(os.path.join(os.path.dirname(__file__), '..', 'src', 'signals', 'ai_signals.py'), 'r') as f:
         content = f.read()
     
+    # Check that the weak signal threshold constant exists
+    assert 'WEAK_SIGNAL_THRESHOLD = 5' in content, "Weak signal threshold constant should exist"
+    
     # Check that the weak signal check exists
-    assert 'if abs(total_score) < 5:' in content, "Weak signal check should exist"
+    assert 'if abs(total_score) < self.WEAK_SIGNAL_THRESHOLD:' in content, "Weak signal check should use constant"
     assert '# Очень слабый сетап, почти нет сигнала' in content, "Weak signal comment should exist"
     
     # Check that it comes before other direction checks
-    weak_signal_pos = content.find('if abs(total_score) < 5:')
+    weak_signal_pos = content.find('if abs(total_score) < self.WEAK_SIGNAL_THRESHOLD:')
     strong_up_pos = content.find('elif total_score > 20:')
     assert weak_signal_pos < strong_up_pos, "Weak signal check should come before strong signal checks"
     
@@ -83,7 +86,7 @@ def test_all_changes_in_correct_locations():
     ton_mapping_line = None
     
     for i, line in enumerate(lines):
-        if 'if abs(total_score) < 5:' in line:
+        if 'if abs(total_score) < self.WEAK_SIGNAL_THRESHOLD:' in line:
             weak_signal_line = i
         elif 'if bullish_count <= 1 and bearish_count == 0:' in line:
             consensus_line = i
