@@ -139,16 +139,10 @@ def get_blockchain_emoji(blockchain: str) -> str:
     """
     blockchain_lower = blockchain.lower()
     emojis = {
-        "ethereum": "🔷",
-        "eth": "🔷",
-        "bsc": "🟡",
-        "bnb": "🟡",
-        "binance": "🟡",
-        "bitcoin": "🟠",
-        "btc": "🟠",
-        "solana": "🟣",
-        "sol": "🟣",
-        "ton": "💎",
+        "ethereum": "⟠",
+        "eth": "⟠",
+        "bitcoin": "₿",
+        "btc": "₿",
     }
     return emojis.get(blockchain_lower, "💰")
 
