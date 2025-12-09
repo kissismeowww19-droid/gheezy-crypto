@@ -318,7 +318,7 @@ def format_whale_summary(alerts: list[WhaleAlert], period: str = "24ч") -> str:
         f"━━━━━━━━━━━━━━━━━━━━━\n"
     )
 
-    # Последние 10 транзакций (было 5)
+    # Последние 10 транзакций
     recent = sorted(
         alerts,
         key=lambda x: x.timestamp if x.timestamp else datetime.now(),
