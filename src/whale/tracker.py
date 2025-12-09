@@ -83,6 +83,12 @@ NETWORK_TIMEOUTS = {
 # Minimum number of whale transactions to return
 MIN_WHALE_TX_COUNT = 10
 
+# Maximum number of whale transactions to return
+MAX_WHALE_TX_COUNT = 20
+
+# Initial limit for fetching transactions (higher to reduce API calls)
+WHALE_FETCH_LIMIT = 100
+
 
 class TransactionType(str, Enum):
     """Типы транзакций."""
@@ -475,24 +481,23 @@ class WhaleTracker:
 
     async def get_filtered_whale_transactions(self, network: str) -> list[WhaleTransaction]:
         """
-        Получить минимум 10 крупных транзакций, расширяя окно при необходимости.
+        Получить крупные транзакции китов, до 10-20 штук, отсортированных по сумме.
+        
+        Фетчит больше транзакций для гарантии достаточного количества после фильтрации.
         
         Args:
             network: Название сети (btc, eth)
             
         Returns:
-            list[WhaleTransaction]: Минимум 10 транзакций, отсортированных по сумме
+            list[WhaleTransaction]: До 20 транзакций, отсортированных по сумме (может быть меньше)
         """
         min_usd = settings.whale_min_transaction
         
-        # Используем увеличенный лимит сразу для уменьшения количества запросов
-        initial_limit = 100
-        
         # Получаем транзакции с увеличенным лимитом
         if network == "eth":
-            txs = await self.get_ethereum_transactions(limit=initial_limit)
+            txs = await self.get_ethereum_transactions(limit=WHALE_FETCH_LIMIT)
         elif network == "btc":
-            txs = await self.get_bitcoin_transactions(limit=initial_limit)
+            txs = await self.get_bitcoin_transactions(limit=WHALE_FETCH_LIMIT)
         else:
             return []
         
@@ -502,9 +507,8 @@ class WhaleTracker:
         # Сортируем по сумме (от большего к меньшему)
         filtered.sort(key=lambda tx: tx.amount_usd, reverse=True)
         
-        # Возвращаем минимум MIN_WHALE_TX_COUNT, максимум 20 транзакций (или все, если меньше)
-        result_count = min(len(filtered), max(MIN_WHALE_TX_COUNT, 20))
-        return filtered[:result_count]
+        # Возвращаем до MAX_WHALE_TX_COUNT транзакций (или все, если меньше)
+        return filtered[:min(len(filtered), MAX_WHALE_TX_COUNT)]
 
 
     async def get_all_transactions(
