@@ -129,7 +129,7 @@ class Settings(BaseSettings):
         description="Использовать демо-данные вместо реальных API",
     )
     whale_blocks_to_analyze: int = Field(
-        default=200,
+        default=500,
         description="Количество блоков для анализа (больше = больше транзакций)",
     )
     whale_price_cache_ttl: int = Field(

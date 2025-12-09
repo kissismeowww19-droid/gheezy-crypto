@@ -1,12 +1,12 @@
 """
 Gheezy Crypto - Трекер китов
 
-Отслеживание крупных транзакций китов на 3 блокчейнах:
+Отслеживание крупных транзакций китов на 2 блокчейнах:
 - Bitcoin (mempool.space - no key needed) - ✅ РАБОТАЕТ
 - Ethereum (Etherscan V2) - 🔧 ИСПРАВЛЕН
-- Solana (Helius API) - 🆕 НОВЫЙ
 
 Удалённые сети (по требованию PR #2):
+- Solana - удалён (по требованию)
 - BSC - удалён
 - Arbitrum - удалён
 - Polygon - удалён
@@ -17,16 +17,16 @@ Gheezy Crypto - Трекер китов
 Использует несколько источников данных:
 - mempool.space для Bitcoin
 - Etherscan V2 API (3 ключа с ротацией для ETH)
-- Helius API для Solana
 
 Особенности:
 - Ротация 3 API ключей Etherscan для ETH
 - Кэширование транзакций (последние 1000, TTL 1 час)
 - Кэширование цен криптовалют
 - Retry логика с exponential backoff
-- Параллельные запросы к 3 сетям
+- Параллельные запросы к 2 сетям
 - Единая статистика по всем сетям
 - SQLite база данных для сохранения транзакций
+- Минимум 10+ транзакций для каждой сети
 """
 
 import asyncio
@@ -42,7 +42,6 @@ from config import settings
 from database.whale_db import init_whale_db, save_transaction
 from whale.ethereum import EthereumTracker
 from whale.bitcoin import BitcoinTracker
-from whale.solana import SolanaTracker
 # Transaction cache
 from whale.cache import get_transaction_cache
 from whale.known_wallets import (
@@ -72,15 +71,23 @@ from database.whale_db import (
 
 logger = structlog.get_logger()
 
-# Network priority order (fastest first) - Only BTC, ETH, SOL
-NETWORK_PRIORITY = ["btc", "eth", "sol"]
+# Network priority order (fastest first) - Only BTC, ETH
+NETWORK_PRIORITY = ["btc", "eth"]
 
 # Timeouts per network (optimized for parallel approach)
 NETWORK_TIMEOUTS = {
     "btc": 5,
     "eth": 10,
-    "sol": 8,
 }
+
+# Minimum number of whale transactions to return
+MIN_WHALE_TX_COUNT = 10
+
+# Maximum number of whale transactions to return
+MAX_WHALE_TX_COUNT = 20
+
+# Initial limit for fetching transactions (higher to reduce API calls)
+WHALE_FETCH_LIMIT = 100
 
 
 class TransactionType(str, Enum):
@@ -232,10 +239,9 @@ class WhaleTracker:
         # Получаем глобальный кеш результатов китов (2 минуты)
         self._whale_cache = get_whale_cache()
 
-        # Инициализация трекеров для 3 блокчейнов (BTC, ETH, SOL)
+        # Инициализация трекеров для 2 блокчейнов (BTC, ETH)
         self._btc_tracker = BitcoinTracker()  # mempool.space - no key needed
         self._eth_tracker = EthereumTracker()  # Etherscan V2 API with 3 keys rotation
-        self._sol_tracker = SolanaTracker()  # Helius API
 
         # Кэш последних транзакций
         self._last_transactions: list[WhaleTransaction] = []
@@ -250,7 +256,7 @@ class WhaleTracker:
             check_interval=self.check_interval,
             use_demo_data=self.use_demo_data,
             etherscan_key="настроен" if settings.etherscan_api_key else "не настроен",
-            networks=["BTC", "ETH", "SOL"],
+            networks=["BTC", "ETH"],
             database="SQLite",
             tx_cache="enabled",
         )
@@ -265,10 +271,9 @@ class WhaleTracker:
             except asyncio.CancelledError:
                 pass
 
-        # Закрываем трекеры (BTC, ETH, SOL)
+        # Закрываем трекеры (BTC, ETH)
         await self._btc_tracker.close()
         await self._eth_tracker.close()
-        await self._sol_tracker.close()
 
     async def start(self) -> None:
         """Запуск периодического мониторинга."""
@@ -474,51 +479,38 @@ class WhaleTracker:
             )
             return []
 
-    async def get_solana_transactions(
-        self,
-        limit: int = 20,
-    ) -> list[WhaleTransaction]:
+    async def get_filtered_whale_transactions(self, network: str) -> list[WhaleTransaction]:
         """
-        Получение крупных SOL транзакций через Helius API.
-
+        Получить крупные транзакции китов, отсортированных по сумме.
+        
+        Фетчит больше транзакций для повышения вероятности получения достаточного количества
+        после фильтрации по минимальной сумме.
+        
         Args:
-            limit: Максимальное количество транзакций
-
+            network: Название сети (btc, eth)
+            
         Returns:
-            list[WhaleTransaction]: Список транзакций
+            list[WhaleTransaction]: До 20 транзакций, отсортированных по убыванию суммы.
+            Может вернуть меньше (включая 0), если недостаточно транзакций после фильтрации.
         """
-        try:
-            sol_txs = await self._sol_tracker.get_large_transactions(limit=limit)
-
-            transactions = []
-            for tx in sol_txs:
-                transactions.append(
-                    WhaleTransaction(
-                        tx_hash=tx.tx_hash,
-                        blockchain="Solana",
-                        token_symbol=tx.token_symbol,
-                        amount=tx.value_sol,  # SolanaTransaction uses value_sol, not amount
-                        amount_usd=tx.value_usd,  # SolanaTransaction uses value_usd, not amount_usd
-                        from_address=tx.from_address,
-                        to_address=tx.to_address,
-                        from_label=tx.from_label,
-                        to_label=tx.to_label,
-                        timestamp=tx.timestamp,
-                    )
-                )
-
-            logger.debug(
-                "Получены Solana транзакции",
-                count=len(transactions),
-            )
-            return transactions
-
-        except Exception as e:
-            logger.error(
-                "Ошибка Solana трекера",
-                error=str(e),
-            )
+        min_usd = settings.whale_min_transaction
+        
+        # Получаем транзакции с увеличенным лимитом
+        if network == "eth":
+            txs = await self.get_ethereum_transactions(limit=WHALE_FETCH_LIMIT)
+        elif network == "btc":
+            txs = await self.get_bitcoin_transactions(limit=WHALE_FETCH_LIMIT)
+        else:
             return []
+        
+        # Фильтруем по минимальной сумме
+        filtered = [tx for tx in txs if tx.amount_usd >= min_usd]
+        
+        # Сортируем по сумме (от большего к меньшему)
+        filtered.sort(key=lambda tx: tx.amount_usd, reverse=True)
+        
+        # Возвращаем до MAX_WHALE_TX_COUNT транзакций (или все, если меньше)
+        return filtered[:min(len(filtered), MAX_WHALE_TX_COUNT)]
 
 
     async def get_all_transactions(
@@ -526,12 +518,11 @@ class WhaleTracker:
         limit: int = 20,
     ) -> list[WhaleTransaction]:
         """
-        Получение транзакций со всех работающих блокчейнов (3 сети: BTC, ETH, SOL).
+        Получение транзакций со всех работающих блокчейнов (2 сети: BTC, ETH).
 
         Working chains:
         - BTC (mempool.space - no key needed)
         - ETH (Etherscan V2 with key rotation)
-        - SOL (Helius API)
 
         Args:
             limit: Максимальное количество транзакций на блокчейн
@@ -539,7 +530,7 @@ class WhaleTracker:
         Returns:
             list[WhaleTransaction]: Список всех транзакций (без дубликатов)
         """
-        # Parallel approach: run all 3 networks in parallel with individual timeouts
+        # Parallel approach: run both networks in parallel with individual timeouts
         all_transactions = []
         
         # Helper to fetch with timeout
@@ -553,11 +544,10 @@ class WhaleTracker:
                 logger.error(f"{name} error: {e}")
                 return []
         
-        # All 3 networks in parallel
+        # Both networks in parallel
         results = await asyncio.gather(
             fetch_with_timeout("BTC", self.get_bitcoin_transactions(limit), NETWORK_TIMEOUTS["btc"]),
             fetch_with_timeout("ETH", self.get_ethereum_transactions(limit), NETWORK_TIMEOUTS["eth"]),
-            fetch_with_timeout("SOL", self.get_solana_transactions(limit), NETWORK_TIMEOUTS["sol"]),
             return_exceptions=True
         )
         
@@ -611,7 +601,7 @@ class WhaleTracker:
         Получение транзакций для конкретного блокчейна.
 
         Args:
-            blockchain: Название блокчейна (btc, eth, sol)
+            blockchain: Название блокчейна (btc, eth)
             limit: Максимальное количество транзакций
 
         Returns:
@@ -623,10 +613,8 @@ class WhaleTracker:
             return await self.get_bitcoin_transactions(limit=limit)
         elif blockchain_lower in ("eth", "ethereum"):
             return await self.get_ethereum_transactions(limit=limit)
-        elif blockchain_lower in ("sol", "solana"):
-            return await self.get_solana_transactions(limit=limit)
         else:
-            logger.warning(f"Unknown blockchain: {blockchain}. Supported: btc, eth, sol")
+            logger.warning(f"Unknown blockchain: {blockchain}. Supported: btc, eth")
             return []
 
     async def analyze_whale_activity(
@@ -653,7 +641,6 @@ class WhaleTracker:
 
         btc_count = len([tx for tx in transactions if tx.blockchain == "Bitcoin"])
         eth_count = len([tx for tx in transactions if tx.blockchain == "Ethereum"])
-        sol_count = len([tx for tx in transactions if tx.blockchain == "Solana"])
 
         return {
             "total_transactions": len(transactions),
@@ -662,7 +649,6 @@ class WhaleTracker:
             "total_volume_usd": total_volume,
             "btc_transactions": btc_count,
             "eth_transactions": eth_count,
-            "sol_transactions": sol_count,
             "sentiment": "bearish" if deposits > withdrawals else "bullish",
         }
 
@@ -693,9 +679,8 @@ class WhaleTracker:
         
         # Данных в кеше нет, получаем свежие
         if blockchain:
-            transactions = await self.get_transactions_by_blockchain(
-                blockchain, limit=10
-            )
+            # Используем новый метод для гарантии 10+ транзакций
+            transactions = await self.get_filtered_whale_transactions(blockchain)
         else:
             transactions = await self.get_all_transactions(limit=10)
 
@@ -725,7 +710,6 @@ class WhaleTracker:
             withdrawals=analysis["exchange_withdrawals"],
             btc_transactions=analysis["btc_transactions"],
             eth_transactions=analysis["eth_transactions"],
-            sol_transactions=analysis["sol_transactions"],
         )
 
     async def get_all_networks_stats(self) -> WhaleStats:
@@ -748,11 +732,10 @@ class WhaleTracker:
         # Получаем транзакции со всех сетей параллельно
         transactions = await self.get_all_transactions(limit=50)
 
-        # Группируем по сетям (только BTC, ETH, SOL)
+        # Группируем по сетям (только BTC, ETH)
         network_map = {
             "Bitcoin": "BTC",
             "Ethereum": "ETH",
-            "Solana": "SOL",
         }
 
         for network_name, network_key in network_map.items():
@@ -807,7 +790,7 @@ class WhaleTracker:
         Получение статистики по одной сети.
 
         Args:
-            network: Название сети (BTC, ETH, BSC, SOL, TON)
+            network: Название сети (BTC, ETH)
 
         Returns:
             NetworkStats: Статистика сети или None
@@ -929,7 +912,7 @@ class WhaleTracker:
         Получение статистики из базы данных за 24ч/7д/30д.
 
         Args:
-            chain: Фильтр по сети (BTC, ETH, BSC, SOL, TON)
+            chain: Фильтр по сети (BTC, ETH) или None для всех
 
         Returns:
             dict: Статистика по периодам
