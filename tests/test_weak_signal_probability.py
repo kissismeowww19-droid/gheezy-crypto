@@ -1,5 +1,5 @@
 """
-Test that weak signals have probability capped at 52%.
+Test that weak signals have probability fixed at 52%.
 """
 
 import pytest
@@ -14,7 +14,7 @@ from signals.ai_signals import AISignalAnalyzer
 
 
 class TestWeakSignalProbability:
-    """Test that weak signal probability is capped at 52%."""
+    """Test that weak signal probability is fixed at 52%."""
     
     @pytest.fixture
     def mock_whale_tracker(self):
@@ -28,7 +28,7 @@ class TestWeakSignalProbability:
         return AISignalAnalyzer(mock_whale_tracker)
     
     def test_weak_signal_probability_capped_at_52(self, analyzer):
-        """Test that when abs(total_score) < 5, probability is capped at 52%."""
+        """Test that when abs(total_score) < 5, probability is fixed at 52%."""
         # Create minimal data to get a weak signal
         whale_data = {
             "transaction_count": 0,
@@ -62,10 +62,10 @@ class TestWeakSignalProbability:
             print(f"ℹ Score was not weak enough: total_score={total_score}")
     
     def test_strong_signal_probability_not_capped(self, analyzer):
-        """Test that strong signals don't have probability capped at 52%."""
+        """Test that strong signals don't have probability fixed at 52%."""
         # This test is informational only - just verifying that strong signals
-        # aren't affected by the weak signal cap
-        print("ℹ Skipping strong signal test - the weak signal cap is the key change to verify")
+        # aren't affected by the weak signal fix
+        print("ℹ Skipping strong signal test - the weak signal fix is the key change to verify")
 
 
 if __name__ == "__main__":
