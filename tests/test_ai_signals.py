@@ -104,7 +104,7 @@ class TestAISignalAnalyzer:
             "market_cap": 1_000_000_000_000
         }
         
-        result = analyzer.calculate_signal(whale_data, market_data)
+        result = analyzer.calculate_signal("BTC", whale_data, market_data)
         
         # With 10-factor system, we just check that score reflects the bullish data
         assert result["total_score"] > 0
@@ -130,7 +130,7 @@ class TestAISignalAnalyzer:
             "market_cap": 1_000_000_000_000
         }
         
-        result = analyzer.calculate_signal(whale_data, market_data)
+        result = analyzer.calculate_signal("BTC", whale_data, market_data)
         
         # With 10-factor system, we check that score reflects the bearish data
         assert result["total_score"] < 0
@@ -156,7 +156,7 @@ class TestAISignalAnalyzer:
             "market_cap": 1_000_000_000_000
         }
         
-        result = analyzer.calculate_signal(whale_data, market_data)
+        result = analyzer.calculate_signal("BTC", whale_data, market_data)
         
         # Score should be in neutral range (between -20 and 20)
         assert -20 <= result["total_score"] <= 20
@@ -465,7 +465,7 @@ class TestAISignalAnalyzer:
         funding_rate = {"rate": 0.0001, "rate_percent": 0.01}
         
         result = analyzer.calculate_signal(
-            whale_data, market_data, technical_data, fear_greed, funding_rate
+            "BTC", whale_data, market_data, technical_data, fear_greed, funding_rate
         )
         
         assert result is not None
@@ -502,7 +502,7 @@ class TestAISignalAnalyzer:
             "market_cap": 1_000_000_000_000
         }
         
-        result = analyzer.calculate_signal(whale_data, market_data)
+        result = analyzer.calculate_signal("BTC", whale_data, market_data)
         
         assert result is not None
         assert result["trend_score"] == 0.0
