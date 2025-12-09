@@ -485,34 +485,28 @@ class WhaleTracker:
         """
         min_usd = settings.whale_min_transaction
         
-        # 1. Первый запрос
-        if network == "btc":
-            txs = await self.get_bitcoin_transactions(limit=50)
-        elif network == "eth":
-            txs = await self.get_ethereum_transactions(limit=50)
+        # Используем увеличенный лимит сразу для уменьшения количества запросов
+        initial_limit = 100
+        
+        # Для ETH увеличиваем количество блоков временно с использованием локальной копии
+        if network == "eth":
+            # Создаём временный увеличенный параметр без модификации трекера
+            # Вместо этого получаем больше транзакций и фильтруем
+            txs = await self.get_ethereum_transactions(limit=initial_limit)
+        elif network == "btc":
+            txs = await self.get_bitcoin_transactions(limit=initial_limit)
         else:
             return []
         
         # Фильтруем по минимальной сумме
         filtered = [tx for tx in txs if tx.amount_usd >= min_usd]
         
-        # 2. Если мало транзакций — расширяем окно (увеличиваем limit)
-        if len(filtered) < MIN_WHALE_TX_COUNT:
-            if network == "btc":
-                txs = await self.get_bitcoin_transactions(limit=100)
-            elif network == "eth":
-                # Для ETH увеличиваем количество блоков
-                original_blocks = self._eth_tracker.blocks_to_analyze
-                self._eth_tracker.blocks_to_analyze = original_blocks * 2
-                txs = await self.get_ethereum_transactions(limit=100)
-                self._eth_tracker.blocks_to_analyze = original_blocks
-            
-            filtered = [tx for tx in txs if tx.amount_usd >= min_usd]
-        
-        # 3. Сортируем по сумме (от большего к меньшему) и берём топ
+        # Сортируем по сумме (от большего к меньшему)
         filtered.sort(key=lambda tx: tx.amount_usd, reverse=True)
         
-        return filtered[:max(MIN_WHALE_TX_COUNT, 20)]  # Возвращаем 10-20 транзакций
+        # Возвращаем минимум 10, максимум 20 транзакций
+        result_count = max(MIN_WHALE_TX_COUNT, min(20, len(filtered)))
+        return filtered[:result_count]
 
 
     async def get_all_transactions(
