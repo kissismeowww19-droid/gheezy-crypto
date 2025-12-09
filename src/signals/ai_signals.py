@@ -2538,6 +2538,8 @@ class AISignalAnalyzer:
             direction = "📊 Боковик"
             strength = "слабый"
             confidence = "Низкая"
+            # Фиксированная вероятность для очень слабых сигналов
+            probability_data["probability"] = 52
         elif total_score > 20:
             direction = "📈 ВВЕРХ"
             strength = "сильный"
