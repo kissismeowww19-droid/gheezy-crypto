@@ -139,16 +139,10 @@ def get_blockchain_emoji(blockchain: str) -> str:
     """
     blockchain_lower = blockchain.lower()
     emojis = {
-        "ethereum": "🔷",
-        "eth": "🔷",
-        "bsc": "🟡",
-        "bnb": "🟡",
-        "binance": "🟡",
-        "bitcoin": "🟠",
-        "btc": "🟠",
-        "solana": "🟣",
-        "sol": "🟣",
-        "ton": "💎",
+        "ethereum": "⟠",
+        "eth": "⟠",
+        "bitcoin": "₿",
+        "btc": "₿",
     }
     return emojis.get(blockchain_lower, "💰")
 
@@ -304,12 +298,9 @@ def format_whale_summary(alerts: list[WhaleAlert], period: str = "24ч") -> str:
         sentiment = "↔️ *Нейтральный*"
         sentiment_emoji = "🟡"
 
-    # Статистика по блокчейнам
-    eth_count = len([a for a in alerts if a.blockchain.lower() in ("ethereum", "eth")])
-    bsc_count = len([a for a in alerts if a.blockchain.lower() in ("bsc", "bnb")])
+    # Статистика по блокчейнам (только BTC и ETH)
     btc_count = len([a for a in alerts if a.blockchain.lower() in ("bitcoin", "btc")])
-    sol_count = len([a for a in alerts if a.blockchain.lower() in ("solana", "sol")])
-    ton_count = len([a for a in alerts if a.blockchain.lower() == "ton"])
+    eth_count = len([a for a in alerts if a.blockchain.lower() in ("ethereum", "eth")])
 
     message = (
         f"🐋 *Whale Tracker - Сводка за {period}*\n"
@@ -322,20 +313,17 @@ def format_whale_summary(alerts: list[WhaleAlert], period: str = "24ч") -> str:
         f"• Выводы с бирж: *{len(withdrawals)}* ({format_usd(withdrawal_volume)})\n"
         f"• Переводы: *{len(transfers)}*\n\n"
         f"🔗 *По блокчейнам:*\n"
-        f"• 🟠 Bitcoin: *{btc_count}*\n"
-        f"• 🔷 Ethereum: *{eth_count}*\n"
-        f"• 🟡 BSC: *{bsc_count}*\n"
-        f"• 🟣 Solana: *{sol_count}*\n"
-        f"• 💎 TON: *{ton_count}*\n\n"
+        f"• ₿ Bitcoin: *{btc_count}*\n"
+        f"• ⟠ Ethereum: *{eth_count}*\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
     )
 
-    # Последние 5 транзакций
+    # Последние 10 транзакций
     recent = sorted(
         alerts,
         key=lambda x: x.timestamp if x.timestamp else datetime.now(),
         reverse=True
-    )[:5]
+    )[:10]
 
     if recent:
         message += "*🔔 Последние транзакции:*\n\n"
@@ -390,6 +378,6 @@ def format_stats_message(
         f"• 📥 Депозиты на биржи: *{deposits}*\n"
         f"• 📤 Выводы с бирж: *{withdrawals}*\n\n"
         f"🔗 *По блокчейнам:*\n"
-        f"• 🟠 Bitcoin: *{btc_transactions}*\n"
-        f"• 🔷 Ethereum: *{eth_transactions}*\n"
+        f"• ₿ Bitcoin: *{btc_transactions}*\n"
+        f"• ⟠ Ethereum: *{eth_transactions}*\n"
     )
