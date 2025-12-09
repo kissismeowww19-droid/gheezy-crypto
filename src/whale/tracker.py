@@ -483,8 +483,6 @@ class WhaleTracker:
         Returns:
             list[WhaleTransaction]: Минимум 10 транзакций, отсортированных по сумме
         """
-        from config import settings
-        
         min_usd = settings.whale_min_transaction
         
         # 1. Первый запрос

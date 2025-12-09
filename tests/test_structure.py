@@ -88,7 +88,7 @@ def test_tracker_parallel_structure():
                 assert 'for network in NETWORK_PRIORITY' not in source_code
                 
                 print("✓ Tracker uses parallel execution with asyncio.gather for BTC and ETH")
-                print("✓ All 7 networks run in parallel")
+                print("✓ Both BTC and ETH networks run in parallel")
                 print("✓ Individual timeouts per network")
                 break
     
