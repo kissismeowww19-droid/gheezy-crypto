@@ -90,6 +90,9 @@ class AISignalAnalyzer:
     TRADES_FLOW_BEARISH_THRESHOLD = 0.67  # Buy/Sell ratio threshold for bearish
     TRADES_FLOW_NEUTRAL_DIVISOR = 0.33    # Normalization divisor for neutral range
     
+    # Supported coins for AI signals
+    SUPPORTED_SIGNAL_COINS = {"BTC", "ETH", "TON"}
+    
     def __init__(self, whale_tracker):
         """
         Инициализация анализатора.
@@ -114,6 +117,7 @@ class AISignalAnalyzer:
             "ETH": "ethereum",
             "SOL": "solana",
             "XRP": "ripple",
+            "TON": "the-open-network",  # ID TON в CoinGecko
         }
         
         # Маппинг для Bybit
@@ -2790,17 +2794,22 @@ class AISignalAnalyzer:
         withdrawals_count = whale_data.get('withdrawals', 0)  # Number of withdrawal transactions
         total_volume = whale_data.get('total_volume_usd', 0)
         
-        # Net flow: positive when more withdrawals (bullish), negative when more deposits (bearish)
-        net_flow = withdrawals_count - deposits_count
-        net_flow_text = f"+{abs(net_flow)}" if net_flow > 0 else f"{net_flow}" if net_flow < 0 else "0"
-        net_flow_sentiment = "(бычье)" if net_flow > 0 else "(медвежье)" if net_flow < 0 else ""
+        # Нейтральная активность при нулевых потоках
+        if deposits_count == 0 and withdrawals_count == 0:
+            net_flow = 0
+            net_flow_text = "0"
+            net_flow_sentiment = "(нейтрально, явных потоков на/с бирж нет)"
+        else:
+            net_flow = withdrawals_count - deposits_count
+            net_flow_text = f"+{abs(net_flow)}" if net_flow > 0 else f"{net_flow}" if net_flow < 0 else "0"
+            net_flow_sentiment = "(бычье)" if net_flow > 0 else "(медвежье)" if net_flow < 0 else ""
         
         text += f"Score: {whale_score_scaled:.1f}/10 {whale_score_emoji}\n"
         text += f"• Транзакций: {tx_count}\n"
         text += f"• Объём: {format_volume(total_volume)}\n"
         text += f"• На биржи: {deposits_count} тx\n"
         text += f"• С бирж: {withdrawals_count} тx\n"
-        text += f"• Net Flow: {net_flow_text} тx {net_flow_sentiment}\n\n"
+        text += f"• Net Flow: {net_flow_text} tx {net_flow_sentiment}\n\n"
         
         # ===== ТЕХНИЧЕСКИЙ АНАЛИЗ =====
         text += "⚡ *ТЕХНИЧЕСКИЙ АНАЛИЗ*\n"
@@ -2859,7 +2868,7 @@ class AISignalAnalyzer:
         
         # ===== ПРИЧИНЫ СИГНАЛА (TOP 5) =====
         text += "🔥 *ПРИЧИНЫ СИГНАЛА (TOP 5)*\n"
-        reasons = []
+        reasons: list[tuple[bool, str]] = []
         
         # Собираем все факторы
         
@@ -2868,17 +2877,17 @@ class AISignalAnalyzer:
             summary = tradingview_rating.get('summary', {})
             rating = summary.get('RECOMMENDATION', 'NEUTRAL')
             if rating in ['STRONG_BUY', 'BUY']:
-                reasons.append(f"✅ TradingView: {rating}")
+                reasons.append((True, f"✅ TradingView: {rating}"))
             elif rating in ['STRONG_SELL', 'SELL']:
-                reasons.append(f"❌ TradingView: {rating}")
+                reasons.append((False, f"❌ TradingView: {rating}"))
         
         # 2. RSI
         if technical_data and "rsi" in technical_data:
             rsi_value = technical_data["rsi"]["value"]
             if rsi_value < 30:
-                reasons.append(f"✅ RSI: {rsi_value:.0f} (перепродан)")
+                reasons.append((True, f"✅ RSI перепродан: {rsi_value:.1f}"))
             elif rsi_value > 70:
-                reasons.append(f"⚠️ RSI: {rsi_value:.0f} (перекуплен)")
+                reasons.append((False, f"❌ RSI перекуплен: {rsi_value:.1f}"))
         
         # 3. Киты
         if whale_data:
@@ -2886,51 +2895,46 @@ class AISignalAnalyzer:
             withdrawals_count = whale_data.get('withdrawals', 0)
             if withdrawals_count > deposits_count:
                 net_diff = withdrawals_count - deposits_count
-                reasons.append(f"✅ Киты выводят с бирж (+{net_diff} tx)")
+                reasons.append((True, f"✅ Киты выводят с бирж (+{net_diff} tx)"))
             elif deposits_count > withdrawals_count:
                 net_diff = deposits_count - withdrawals_count
-                reasons.append(f"❌ Киты заводят на биржи (+{net_diff} tx)")
+                reasons.append((False, f"❌ Киты заводят на биржи (+{net_diff} tx)"))
         
         # 4. Fear & Greed
         if fear_greed:
             fg_value = fear_greed.get('value', 50)
-            fg_class = fear_greed.get('classification', 'Neutral')
             if fg_value < 25:
-                reasons.append(f"✅ Extreme Fear ({fg_value}) — время покупать")
+                reasons.append((True, f"✅ Extreme Fear: {fg_value} (время покупать)"))
             elif fg_value > 75:
-                reasons.append(f"⚠️ Extreme Greed ({fg_value}) — осторожно")
-            else:
-                reasons.append(f"ℹ️ Fear & Greed: {fg_class} ({fg_value})")
+                reasons.append((False, f"❌ Extreme Greed: {fg_value} (осторожность)"))
         
         # 5. MACD
         if technical_data and "macd" in technical_data:
             macd_signal = technical_data["macd"].get("signal", "neutral")
             if macd_signal in ["bullish", "buy"]:
-                reasons.append("✅ MACD: бычье пересечение")
+                reasons.append((True, f"✅ MACD бычий сигнал"))
             elif macd_signal in ["bearish", "sell"]:
-                reasons.append("❌ MACD: медвежье пересечение")
+                reasons.append((False, f"❌ MACD медвежий сигнал"))
         
         # 6. Funding Rate
         if funding_rate:
             rate = funding_rate.get('rate', 0)
-            # Rate is typically in decimal form (e.g., 0.0001 = 0.01%)
-            rate_percent = rate * 100
-            if rate < -0.0001:  # Less than -0.01%
-                reasons.append(f"✅ Funding Rate: {rate_percent:.4f}% (шорты платят)")
-            elif rate > 0.0005:  # Greater than 0.05%
-                reasons.append(f"⚠️ Funding Rate: {rate_percent:.4f}% (лонги платят)")
+            if rate < -0.01:
+                reasons.append((True, f"✅ Шорты платят: {rate:.4f}"))
+            elif rate > 0.03:
+                reasons.append((False, f"❌ Перегретые лонги: {rate:.4f}"))
         
         # 7. Trades Flow
         if trades_flow:
             ratio = trades_flow.get('flow_ratio', 1.0)
             if ratio > 1.5:
-                reasons.append(f"✅ Buy/Sell ratio: {ratio:.2f} (покупки)")
+                reasons.append((True, f"✅ Buy/Sell ratio: {ratio:.2f} (покупки)"))
             elif ratio < 0.67:
-                reasons.append(f"❌ Buy/Sell ratio: {ratio:.2f} (продажи)")
+                reasons.append((False, f"❌ Buy/Sell ratio: {ratio:.2f} (продажи)"))
         
         # Показать топ 5 причин
-        for i, reason in enumerate(reasons[:5], 1):
-            text += f"{i}. {reason}\n"
+        for i, (_, reason_text) in enumerate(reasons[:5], 1):
+            text += f"{i}. {reason_text}\n"
         
         text += "\n"
         
@@ -2938,8 +2942,8 @@ class AISignalAnalyzer:
         text += "📊 *ФАКТОРЫ АНАЛИЗА*\n"
         
         # Считаем факторы
-        bullish_count = sum(1 for r in reasons if r[1])
-        bearish_count = sum(1 for r in reasons if not r[1])
+        bullish_count = sum(1 for bullish, _ in reasons if bullish)
+        bearish_count = sum(1 for bullish, _ in reasons if not bullish)
         neutral_count = max(0, self.TOTAL_FACTORS - bullish_count - bearish_count)
         
         consensus_text = "БЫЧИЙ ✅" if bullish_count > bearish_count else "МЕДВЕЖИЙ ❌" if bearish_count > bullish_count else "НЕЙТРАЛЬНЫЙ ⚠️"
@@ -2995,11 +2999,13 @@ class AISignalAnalyzer:
         self.clear_cache()
         
         # Проверяем поддержку монеты
-        if symbol not in self.blockchain_mapping:
+        if symbol not in self.SUPPORTED_SIGNAL_COINS:
             return (
                 f"❌ *Ошибка*\n\n"
-                f"Монета {symbol} пока не поддерживается.\n\n"
-                f"Доступны: BTC, ETH"
+                f"AI-сигналы сейчас доступны только для трёх монет:\n"
+                f"• BTC\n"
+                f"• ETH\n"
+                f"• TON\n"
             )
         
         try:
