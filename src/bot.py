@@ -225,7 +225,7 @@ def get_main_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="💰 Цены", callback_data="menu_prices"),
-            InlineKeyboardButton(text="📡 Сигналы", callback_data="menu_signals"),
+            InlineKeyboardButton(text="🎯 Сигналы", callback_data="menu_signals"),
             InlineKeyboardButton(text="🐋 Киты", callback_data="menu_whale"),
         ],
         [
@@ -343,12 +343,12 @@ def get_welcome_text(name: str) -> str:
     text = text + "Давай вместе учиться и зарабатывать 🤩\n\n"
     text = text + "📊 *Мои возможности:*\n\n"
     text = text + "• 💰 Цены — самые популярные криптовалюты\n"
-    text = text + "• 🤖 Сигналы — AI торговые сигналы\n"
+    text = text + "• 🎯 Сигналы — торговые сигналы\n"
     text = text + "• 🐋 Киты — движения китов\n"
     text = text + "• 📊 Рынок — капитализация и статистика\n"
     text = text + "• ⚙️ Настройки — настройки бота\n"
     text = text + "• 💼 Портфель — твой портфель\n\n"
-    text = text + "Ну что взлетаем! 🚀🚀🚀\n\n"
+    text = text + "Ну что, взлетаем! 🚀🚀🚀\n\n"
     text = text + "👇 *Выбери раздел:*"
     return text
 
@@ -646,8 +646,8 @@ async def cmd_rune(message: Message):
 def get_whale_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура для whale tracker с 2 сетями: BTC, ETH."""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="₿ Bitcoin (BTC)", callback_data="whale_btc")],
-        [InlineKeyboardButton(text="⟠ Ethereum (ETH)", callback_data="whale_eth")],
+        [InlineKeyboardButton(text="₿ Bitcoin", callback_data="whale_btc")],
+        [InlineKeyboardButton(text="⟠ Ethereum", callback_data="whale_eth")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")],
     ])
 
@@ -980,7 +980,7 @@ async def callback_price_coin(callback: CallbackQuery):
 
 @router.callback_query(lambda c: c.data == "menu_signals")
 async def callback_signals(callback: CallbackQuery):
-    text = "🎯 *AI Сигналы*\n\n"
+    text = "🎯 *Торговые сигналы*\n\n"
     text = text + "Анализ на основе:\n\n"
     text = text + "• Данные трекера китов\n"
     text = text + "• Депозиты vs выводы с бирж\n"
@@ -1085,16 +1085,13 @@ async def callback_market(callback: CallbackQuery):
 @router.callback_query(lambda c: c.data == "menu_whale")
 async def callback_whale(callback: CallbackQuery):
     """Обработка callback для меню Whale Tracker - показать меню выбора сети."""
-    text = """
-🐋 *Whale Tracker*
-
-Выберите сеть для отслеживания:
-
-• ₿ *BTC* — Bitcoin
-• ⟠ *ETH* — Ethereum
-
-👇 Выберите сеть:
-"""
+    text = "🐋 *Трекер китов*\n\n"
+    text = text + "Отслеживание крупных транзакций:\n\n"
+    text = text + "• Депозиты на биржи\n"
+    text = text + "• Выводы с бирж\n"
+    text = text + "• Whale-to-whale переводы\n\n"
+    text = text + "🔍 _Анализ в реальном времени_\n\n"
+    text = text + "👇 Выбери монету:"
     await callback.message.edit_text(text, reply_markup=get_whale_keyboard(), parse_mode=ParseMode.MARKDOWN)
     await callback.answer()
 
