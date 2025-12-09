@@ -365,10 +365,9 @@ def format_stats_message(
     withdrawals: int,
     btc_transactions: int,
     eth_transactions: int,
-    sol_transactions: int,
 ) -> str:
     """
-    Форматирование сообщения со статистикой (только BTC, ETH, SOL).
+    Форматирование сообщения со статистикой (только BTC, ETH).
 
     Args:
         total_transactions: Общее количество транзакций
@@ -377,7 +376,6 @@ def format_stats_message(
         withdrawals: Количество выводов с бирж
         btc_transactions: Количество BTC транзакций
         eth_transactions: Количество ETH транзакций
-        sol_transactions: Количество SOL транзакций
 
     Returns:
         str: Форматированное сообщение статистики
@@ -394,5 +392,4 @@ def format_stats_message(
         f"🔗 *По блокчейнам:*\n"
         f"• 🟠 Bitcoin: *{btc_transactions}*\n"
         f"• 🔷 Ethereum: *{eth_transactions}*\n"
-        f"• 🟣 Solana: *{sol_transactions}*\n"
     )

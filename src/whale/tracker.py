@@ -794,7 +794,7 @@ class WhaleTracker:
         Получение статистики по одной сети.
 
         Args:
-            network: Название сети (BTC, ETH, BSC, SOL, TON)
+            network: Название сети (BTC, ETH)
 
         Returns:
             NetworkStats: Статистика сети или None
@@ -916,7 +916,7 @@ class WhaleTracker:
         Получение статистики из базы данных за 24ч/7д/30д.
 
         Args:
-            chain: Фильтр по сети (BTC, ETH, BSC, SOL, TON)
+            chain: Фильтр по сети (BTC, ETH) или None для всех
 
         Returns:
             dict: Статистика по периодам
