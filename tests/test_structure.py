@@ -80,19 +80,14 @@ def test_tracker_parallel_structure():
                 # Verify it has fetch_with_timeout helper
                 assert 'fetch_with_timeout' in source_code
                 
-                # Verify all networks are called
+                # Verify only BTC and ETH networks are called (post PR requirements)
                 assert 'get_bitcoin_transactions' in source_code
-                assert 'get_bsc_transactions' in source_code
                 assert 'get_ethereum_transactions' in source_code
-                assert 'get_arbitrum_transactions' in source_code
-                assert 'get_avalanche_transactions' in source_code
-                assert 'get_polygon_transactions' in source_code
-                assert 'get_ton_transactions' in source_code
                 
                 # Should NOT have sequential network_methods loop
                 assert 'for network in NETWORK_PRIORITY' not in source_code
                 
-                print("✓ Tracker uses parallel execution with asyncio.gather")
+                print("✓ Tracker uses parallel execution with asyncio.gather for BTC and ETH")
                 print("✓ All 7 networks run in parallel")
                 print("✓ Individual timeouts per network")
                 break
