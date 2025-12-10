@@ -164,7 +164,7 @@ def test_ton_scenario():
     # Derivatives (3.8): +1.9%
     # Sentiment (10): +5%
     # = 64.73%
-    # Penalty weak factors: -3% (0 factors)
+    # Penalty weak factors: -3% (total_factors < 3, here total_factors = 0)
     # Sideways max: 58%
     # = 58%
     

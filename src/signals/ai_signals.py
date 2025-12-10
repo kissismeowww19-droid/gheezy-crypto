@@ -3140,6 +3140,9 @@ class AISignalAnalyzer:
         self.previous_direction[symbol] = raw_direction
         
         # РЕАЛЬНАЯ ВЕРОЯТНОСТЬ на основе ВСЕХ факторов
+        # Note: trend_score используется для расчёта штрафа "против тренда"
+        # block_trend_score используется для расчёта бонуса от блока тренда
+        # Оба используют одно значение block_trend_score, но для разных целей
         new_probability = self._calculate_probability(
             total_score=total_score,
             direction=raw_direction,
@@ -3147,8 +3150,8 @@ class AISignalAnalyzer:
             bearish_count=consensus_data["bearish_count"],
             data_sources_count=data_sources_available,
             total_sources=self.TOTAL_DATA_SOURCES,
-            trend_score=block_trend_score,
-            # Новые параметры — все 5 блоков
+            trend_score=block_trend_score,  # Для штрафа "против тренда"
+            # Новые параметры — все 5 блоков (для бонусов)
             block_trend_score=block_trend_score,
             block_momentum_score=block_momentum_score,
             block_whales_score=block_whales_score,
