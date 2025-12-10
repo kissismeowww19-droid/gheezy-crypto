@@ -3026,6 +3026,21 @@ class AISignalAnalyzer:
         else:
             raw_direction = "sideways"
         
+        # Проверка направления против явного консенсуса факторов
+        # Не давать направление против консенсуса (если разница >= 2)
+        if consensus_data["bullish_count"] >= consensus_data["bearish_count"] + 2 and raw_direction == "short":
+            # Бычий консенсус, но сигнал шорт → боковик
+            raw_direction = "sideways"
+            direction = "➡️ Боковик"
+            strength = "слабый"
+            confidence = "Низкая"
+        elif consensus_data["bearish_count"] >= consensus_data["bullish_count"] + 2 and raw_direction == "long":
+            # Медвежий консенсус, но сигнал лонг → боковик
+            raw_direction = "sideways"
+            direction = "➡️ Боковик"
+            strength = "слабый"
+            confidence = "Низкая"
+        
         # Гистерезис — не разворачиваем сразу
         prev_dir = self.previous_direction.get(symbol)
         

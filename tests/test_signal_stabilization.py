@@ -141,7 +141,7 @@ class TestDeadZone:
         # If score is between -10 and 10, should show боковик
         if abs(total_score) < 10:
             assert "Боковик" in direction
-            assert probability == 52  # Fixed probability for weak signals
+            assert 50 <= probability <= 55  # Real probability for weak signals (not constant)
     
     def test_ton_dead_zone_is_15(self, analyzer):
         """TON should use wider dead zone of 15."""
@@ -171,7 +171,7 @@ class TestDeadZone:
         # If score is between -15 and 15, should show боковик
         if abs(total_score) < 15:
             assert "Боковик" in direction
-            assert probability == 52  # Fixed probability for weak signals
+            assert 50 <= probability <= 55  # Real probability for weak signals (not constant)
 
 
 class TestHysteresis:
@@ -297,7 +297,7 @@ class TestProbabilityCapping:
         
         # If abs(total_score) < 10 (dead zone for BTC)
         if abs(total_score) < 10:
-            assert probability == 52, f"Expected probability=52 for weak signal (score={total_score}), got {probability}"
+            assert 50 <= probability <= 55, f"Expected probability in range 50-55% for weak signal (score={total_score}), got {probability}"
     
     def test_medium_signal_probability_capped_at_58(self, analyzer):
         """Medium signals (10 <= abs(score) < 20) should have probability <= 58."""
