@@ -2701,7 +2701,6 @@ class AISignalAnalyzer:
             return direction, probability, total_score, is_cross_conflict
         
         btc_direction = btc_signal["direction"]
-        btc_trend = btc_signal["trend_score"]
         btc_total_score = btc_signal["total_score"]
         
         # Определяем силу корреляции
@@ -2726,13 +2725,13 @@ class AISignalAnalyzer:
         
         if abs(adjusted_total_score) < dead_zone:
             new_direction = "sideways"
-        elif adjusted_total_score > 25:
+        elif adjusted_total_score >= 25:
             new_direction = "long"
-        elif adjusted_total_score > 10:
+        elif adjusted_total_score >= dead_zone:
             new_direction = "long"  
-        elif adjusted_total_score < -25:
+        elif adjusted_total_score <= -25:
             new_direction = "short"
-        elif adjusted_total_score < -10:
+        elif adjusted_total_score <= -dead_zone:
             new_direction = "short"
         else:
             new_direction = "sideways"
@@ -2766,7 +2765,7 @@ class AISignalAnalyzer:
         # Штраф за конфликт с BTC (если всё ещё разные направления)
         if new_direction != btc_direction and new_direction in ("long", "short") and btc_direction in ("long", "short"):
             new_probability = max(50, new_probability - 5)
-            is_cross_conflict = True
+            is_cross_conflict = True  # Mark conflict if directions still differ
         
         return new_direction, new_probability, adjusted_total_score, is_cross_conflict
 
