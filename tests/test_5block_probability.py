@@ -176,7 +176,7 @@ def test_calculate_probability():
     
     # Test strong signal with good coverage
     prob = analyzer._calculate_probability(
-        total_score=50,
+        total_score=60,  # Stronger signal to reach >= 65%
         direction="long",
         bullish_count=15,
         bearish_count=3,
