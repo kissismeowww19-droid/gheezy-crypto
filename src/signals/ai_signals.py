@@ -2528,59 +2528,129 @@ class AISignalAnalyzer:
     
     def _calculate_probability(
         self,
-        total_score: float,      # -100..+100 (после сглаживания и факторной модели)
+        total_score: float,      # -100..+100
         direction: str,          # "long"/"short"/"sideways"
         bullish_count: int,
         bearish_count: int,
         data_sources_count: int,
         total_sources: int,
-        trend_score: float,      # -10..+10 (по 1h/4h тренду)
+        trend_score: float,      # -10..+10
+        # Новые параметры для полного расчёта
+        block_trend_score: float = 0,      # -10..+10
+        block_momentum_score: float = 0,   # -10..+10
+        block_whales_score: float = 0,     # -10..+10
+        block_derivatives_score: float = 0, # -10..+10
+        block_sentiment_score: float = 0,  # -10..+10
     ) -> int:
         """
-        РЕАЛЬНЫЙ расчёт вероятности на основе силы сигнала и качества данных.
-        Вероятность рассчитывается по формуле, НЕ жёстко задаётся константой.
+        ПОЛНЫЙ расчёт вероятности на основе ВСЕХ факторов и данных.
+        
+        Компоненты вероятности:
+        1. База: 50%
+        2. Сила сигнала: 0-12%
+        3. Консенсус факторов: 0-12%
+        4. Охват данных: 0-8%
+        5. Тренд (блок): 0-8%
+        6. Импульс (блок): 0-5%
+        7. Киты (блок): 0-5%
+        8. Деривативы (блок): 0-5%
+        9. Настроения (блок): 0-5%
+        
+        Штрафы:
+        - Конфликт факторов: -5%
+        - Против тренда: -8%
+        - Слабый консенсус: -3%
+        
+        Итого: 50-85%
         """
         
-        # 1. База от силы сигнала (0..100 → 50..75)
+        # ====== БАЗА ======
+        base_prob = 50.0
+        
+        # ====== 1. БОНУС ОТ СИЛЫ СИГНАЛА (0-12%) ======
+        # total_score: -100..+100, берём абсолютное значение
         strength = min(100, max(0, abs(total_score)))
-        base_prob = 50 + (strength / 100) * 25
+        strength_bonus = (strength / 100) * 12
         
-        # 2. Ограничение по охвату данных
-        coverage = data_sources_count / max(1, total_sources)
-        if coverage < 0.4:
-            max_prob = 60
-        elif coverage < 0.7:
-            max_prob = 70
+        # ====== 2. БОНУС ОТ КОНСЕНСУСА ФАКТОРОВ (0-12%) ======
+        # Чем больше факторов в одном направлении, тем выше вероятность
+        total_factors = bullish_count + bearish_count
+        if total_factors > 0:
+            # Разница между бычьими и медвежьими
+            consensus_diff = abs(bullish_count - bearish_count)
+            # Нормализуем: если все факторы в одном направлении = 100%
+            consensus_ratio = consensus_diff / total_factors
+            consensus_bonus = consensus_ratio * 12
         else:
-            max_prob = 80
+            consensus_bonus = 0
         
-        prob = min(base_prob, max_prob)
+        # ====== 3. БОНУС ОТ ОХВАТА ДАННЫХ (0-8%) ======
+        # Чем больше источников данных, тем увереннее сигнал
+        coverage = data_sources_count / max(1, total_sources)
+        coverage_bonus = coverage * 8
         
-        # 3. Конфликт факторов
+        # ====== 4. БОНУС ОТ БЛОКА ТРЕНДА (0-8%) ======
+        # block_trend_score: -10..+10
+        # Берём абсолютное значение и нормализуем
+        trend_strength = abs(block_trend_score) / 10
+        trend_bonus = trend_strength * 8
+        
+        # ====== 5. БОНУС ОТ БЛОКА ИМПУЛЬСА (0-5%) ======
+        momentum_strength = abs(block_momentum_score) / 10
+        momentum_bonus = momentum_strength * 5
+        
+        # ====== 6. БОНУС ОТ БЛОКА КИТОВ (0-5%) ======
+        whales_strength = abs(block_whales_score) / 10
+        whales_bonus = whales_strength * 5
+        
+        # ====== 7. БОНУС ОТ БЛОКА ДЕРИВАТИВОВ (0-5%) ======
+        derivatives_strength = abs(block_derivatives_score) / 10
+        derivatives_bonus = derivatives_strength * 5
+        
+        # ====== 8. БОНУС ОТ БЛОКА НАСТРОЕНИЙ (0-5%) ======
+        sentiment_strength = abs(block_sentiment_score) / 10
+        sentiment_bonus = sentiment_strength * 5
+        
+        # ====== СУММИРУЕМ БОНУСЫ ======
+        prob = base_prob + strength_bonus + consensus_bonus + coverage_bonus
+        prob += trend_bonus + momentum_bonus + whales_bonus + derivatives_bonus + sentiment_bonus
+        
+        # ====== ШТРАФЫ ======
+        
+        # 1. Конфликт факторов (есть и бычьи и медвежьи)
         if bullish_count > 0 and bearish_count > 0:
             prob -= 5
         
+        # 2. Равный консенсус (бычьи == медвежьи) — очень неопределённо
         if bullish_count == bearish_count and bullish_count > 0:
-            prob = min(prob, 55)
+            prob -= 3
         
-        # 4. По тренду или против
+        # 3. Слабый консенсус (мало факторов)
+        if total_factors < 3:
+            prob -= 3
+        
+        # 4. Против тренда
         if direction == "long":
-            if trend_score < 0:
-                prob -= 8
-            elif trend_score > 0:
-                prob += 5
-        elif direction == "short":
-            if trend_score > 0:
-                prob -= 8
+            if trend_score < -3:
+                prob -= 8  # Лонг против сильного медвежьего тренда
             elif trend_score < 0:
-                prob += 5
+                prob -= 4  # Лонг против слабого медвежьего тренда
+            elif trend_score > 3:
+                prob += 3  # Лонг по сильному бычьему тренду
+        elif direction == "short":
+            if trend_score > 3:
+                prob -= 8  # Шорт против сильного бычьего тренда
+            elif trend_score > 0:
+                prob -= 4  # Шорт против слабого бычьего тренда
+            elif trend_score < -3:
+                prob += 3  # Шорт по сильному медвежьему тренду
         
-        # 5. Боковик
+        # 5. Боковик — ограничиваем вероятность
         if direction == "sideways":
-            prob = min(prob, 55)
-            prob = max(prob, 50)
+            prob = min(prob, 58)  # Боковик не может быть > 58%
+            prob = max(prob, 50)  # И не < 50%
         
-        # 6. Финальные границы (минимум 50%, максимум 85%)
+        # ====== ФИНАЛЬНЫЕ ГРАНИЦЫ ======
         prob = int(round(max(50, min(85, prob))))
         
         return prob
@@ -2986,45 +3056,52 @@ class AISignalAnalyzer:
             total_factors=22
         )
         
-        # Определяем размер мёртвой зоны (для TON шире)
-        if symbol == "TON":
-            dead_zone = self.DEAD_ZONE_TON  # TON более шумный, нужна широкая зона
-        else:
-            dead_zone = self.DEAD_ZONE_DEFAULT  # BTC/ETH
-        
-        # Мёртвая зона — показываем боковик
-        if abs(total_score) < dead_zone:
+        # Слабый сигнал (сила < 10%) → ВСЕГДА боковик
+        if abs(total_score) < 10:
             direction = "➡️ Боковик"
-            strength = "слабый"
-            confidence = "Низкая"
-        elif total_score > 25:
-            direction = "📈 ВВЕРХ"
-            strength = "сильный"
-            confidence = "Высокая"
-        elif total_score > 10:
-            direction = "📈 Вероятно вверх"
-            strength = "средний"
-            confidence = "Средняя"
-        elif total_score < -25:
-            direction = "📉 ВНИЗ"
-            strength = "сильный"
-            confidence = "Высокая"
-        elif total_score < -10:
-            direction = "📉 Вероятно вниз"
-            strength = "средний"
-            confidence = "Средняя"
-        else:
-            direction = "➡️ Боковик"
-            strength = "слабый"
-            confidence = "Низкая"
-        
-        # Преобразуем direction в простой формат для сравнения
-        if "ВВЕРХ" in direction or "вверх" in direction:
-            raw_direction = "long"
-        elif "ВНИЗ" in direction or "вниз" in direction:
-            raw_direction = "short"
-        else:
             raw_direction = "sideways"
+            strength = "слабый"
+            confidence = "Низкая"
+        else:
+            # Определяем размер мёртвой зоны (для TON шире)
+            if symbol == "TON":
+                dead_zone = self.DEAD_ZONE_TON  # TON более шумный, нужна широкая зона
+            else:
+                dead_zone = self.DEAD_ZONE_DEFAULT  # BTC/ETH
+            
+            # Мёртвая зона — показываем боковик
+            if abs(total_score) < dead_zone:
+                direction = "➡️ Боковик"
+                strength = "слабый"
+                confidence = "Низкая"
+            elif total_score > 25:
+                direction = "📈 ВВЕРХ"
+                strength = "сильный"
+                confidence = "Высокая"
+            elif total_score > 10:
+                direction = "📈 Вероятно вверх"
+                strength = "средний"
+                confidence = "Средняя"
+            elif total_score < -25:
+                direction = "📉 ВНИЗ"
+                strength = "сильный"
+                confidence = "Высокая"
+            elif total_score < -10:
+                direction = "📉 Вероятно вниз"
+                strength = "средний"
+                confidence = "Средняя"
+            else:
+                direction = "➡️ Боковик"
+                strength = "слабый"
+                confidence = "Низкая"
+            
+            # Преобразуем direction в простой формат для сравнения
+            if "ВВЕРХ" in direction or "вверх" in direction:
+                raw_direction = "long"
+            elif "ВНИЗ" in direction or "вниз" in direction:
+                raw_direction = "short"
+            else:
+                raw_direction = "sideways"
         
         # Проверка направления против явного консенсуса факторов
         # Не давать направление против консенсуса (если разница >= 2)
@@ -3062,8 +3139,10 @@ class AISignalAnalyzer:
         # Сохраняем текущее направление
         self.previous_direction[symbol] = raw_direction
         
-        # РЕАЛЬНАЯ ВЕРОЯТНОСТЬ (вместо старого метода calculate_probability)
-        # Используем новый метод _calculate_probability с 5 блоками
+        # РЕАЛЬНАЯ ВЕРОЯТНОСТЬ на основе ВСЕХ факторов
+        # Note: trend_score используется для расчёта штрафа "против тренда"
+        # block_trend_score используется для расчёта бонуса от блока тренда
+        # Оба используют одно значение block_trend_score, но для разных целей
         new_probability = self._calculate_probability(
             total_score=total_score,
             direction=raw_direction,
@@ -3071,7 +3150,13 @@ class AISignalAnalyzer:
             bearish_count=consensus_data["bearish_count"],
             data_sources_count=data_sources_available,
             total_sources=self.TOTAL_DATA_SOURCES,
-            trend_score=block_trend_score,
+            trend_score=block_trend_score,  # Для штрафа "против тренда"
+            # Новые параметры — все 5 блоков (для бонусов)
+            block_trend_score=block_trend_score,
+            block_momentum_score=block_momentum_score,
+            block_whales_score=block_whales_score,
+            block_derivatives_score=block_derivatives_score,
+            block_sentiment_score=block_sentiment_score,
         )
         
         # Обновляем probability_data с новой вероятностью
