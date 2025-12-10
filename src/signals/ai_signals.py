@@ -2538,25 +2538,26 @@ class AISignalAnalyzer:
     ) -> int:
         """Расчёт РЕАЛЬНОЙ вероятности на основе данных."""
         
-        # 1. База от силы сигнала
+        # 1. База от силы сигнала (50-80% range instead of 50-80)
         strength = min(100, max(0, abs(total_score)))
-        base_prob = 50 + (strength / 100) * 30
+        base_prob = 50 + (strength / 100) * 35  # Increased from 30 to 35
         
         # 2. Ограничение по охвату данных
         coverage = data_sources_count / max(1, total_sources)
         
         if coverage < 0.4:
-            max_prob = 60
+            max_prob = 65  # Increased from 60
         elif coverage < 0.7:
-            max_prob = 70
+            max_prob = 75  # Increased from 70
         else:
-            max_prob = 80
+            max_prob = 85  # Increased from 80
         
         prob = min(base_prob, max_prob)
         
         # 3. Коррекция за конфликт факторов
         if bullish_count > 0 and bearish_count > 0:
-            prob -= 5
+            conflict_penalty = min(5, abs(bullish_count - bearish_count))  # Less penalty if one side dominates
+            prob -= conflict_penalty
         
         if bullish_count == bearish_count and bullish_count > 0:
             prob = min(prob, 55)
@@ -2567,19 +2568,23 @@ class AISignalAnalyzer:
                 prob -= 10
             elif trend_score < 0:
                 prob -= 5
+            elif trend_score > 5:  # Strong trend bonus
+                prob += 8
             elif trend_score > 3:
                 prob += 5
             elif trend_score > 0:
-                prob += 2
+                prob += 3  # Increased from 2
         elif direction == "short":
             if trend_score > 3:
                 prob -= 10
             elif trend_score > 0:
                 prob -= 5
+            elif trend_score < -5:  # Strong trend bonus
+                prob += 8
             elif trend_score < -3:
                 prob += 5
             elif trend_score < 0:
-                prob += 2
+                prob += 3  # Increased from 2
         
         # 5. Боковик = 50-55%
         if direction == "sideways":
