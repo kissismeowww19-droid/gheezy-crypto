@@ -2736,8 +2736,8 @@ class AISignalAnalyzer:
         else:
             new_direction = "sideways"
         
-        # Проверяем был ли конфликт
-        if direction != new_direction and direction in ("long", "short") and new_direction in ("long", "short"):
+        # Проверяем был ли конфликт (изменение направления с long/short на другое)
+        if direction in ("long", "short") and direction != new_direction:
             is_cross_conflict = True
         
         # ====== ПЕРЕСЧЁТ ВЕРОЯТНОСТИ С УЧЁТОМ BTC ======
@@ -2765,7 +2765,7 @@ class AISignalAnalyzer:
         # Штраф за конфликт с BTC (если всё ещё разные направления)
         if new_direction != btc_direction and new_direction in ("long", "short") and btc_direction in ("long", "short"):
             new_probability = max(50, new_probability - 5)
-            is_cross_conflict = True  # Mark conflict if directions still differ
+            is_cross_conflict = True  # Also mark as conflict if final directions differ
         
         return new_direction, new_probability, adjusted_total_score, is_cross_conflict
 
@@ -3278,7 +3278,6 @@ class AISignalAnalyzer:
         
         # ====== МЕЖМОНЕТНАЯ КОРРЕЛЯЦИЯ ======
         # Корректируем сигнал с учётом BTC (ведущий индикатор рынка)
-        raw_direction_before = raw_direction
         adjusted_direction, adjusted_probability, adjusted_total_score, is_cross_conflict = self._cross_asset_correlation_check(
             symbol=symbol,
             direction=raw_direction,
