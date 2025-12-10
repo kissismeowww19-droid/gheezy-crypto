@@ -101,8 +101,8 @@ class TestDirectionConsensusValidation:
         
         result = analyzer.calculate_signal("BTC", whale_data, market_data)
         
-        # Very weak signal should be sideways
-        if abs(result["total_score"]) < analyzer.WEAK_SIGNAL_THRESHOLD:
+        # Very weak signal should be sideways (dead zone is 10 for BTC)
+        if abs(result["total_score"]) < 10:
             assert "Боковик" in result["direction"]
     
     def test_strong_signal_with_consensus_allowed(self, analyzer):

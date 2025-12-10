@@ -1,5 +1,5 @@
 """
-Test that weak signals have probability fixed at 52%.
+Test that weak signals have probability in range 50-55%.
 """
 
 import pytest
@@ -14,7 +14,7 @@ from signals.ai_signals import AISignalAnalyzer
 
 
 class TestWeakSignalProbability:
-    """Test that weak signal probability is fixed at 52%."""
+    """Test that weak signal probability is in range 50-55%."""
     
     @pytest.fixture
     def mock_whale_tracker(self):
