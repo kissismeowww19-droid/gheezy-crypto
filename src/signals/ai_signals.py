@@ -3498,10 +3498,13 @@ class AISignalAnalyzer:
         # Проверяем, торгуем ли сигнал
         data_sources_count = signal_data.get('data_sources_count', 0)
         coverage = data_sources_count / self.TOTAL_DATA_SOURCES
-        is_tradeable = abs(total_score) >= 20 and probability >= 65 and coverage >= 0.5
         
-        if not is_tradeable:
-            text += "⚠️ *Сигнал слабый. Рекомендуется ПРОПУСТИТЬ.*\n\n"
+        # Определение слабого сигнала
+        signal_strength = int(min(100, max(0, abs(total_score))))
+        is_weak = signal_strength < 20 or probability < 60
+        
+        if is_weak:
+            text += "⚠️ *Сигнал слабый. Рекомендуется ПРОПУСТИТЬ этот сетап.*\n\n"
         
         # ===== FOOTER =====
         text += "⏱️ Таймфрейм: 1ч\n"
