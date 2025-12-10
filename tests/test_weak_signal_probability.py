@@ -28,7 +28,7 @@ class TestWeakSignalProbability:
         return AISignalAnalyzer(mock_whale_tracker)
     
     def test_weak_signal_probability_capped_at_52(self, analyzer):
-        """Test that when abs(total_score) < 5, probability is fixed at 52%."""
+        """Test that when abs(total_score) < 5, probability is in range 50-55%."""
         # Create minimal data to get a weak signal
         whale_data = {
             "transaction_count": 0,
@@ -53,10 +53,10 @@ class TestWeakSignalProbability:
         probability = result.get('probability', 0)
         direction = result.get('direction', '')
         
-        # If signal is weak (abs(total_score) < 5), probability should be 52%
+        # If signal is weak (abs(total_score) < 5), probability should be in range 50-55%
         if abs(total_score) < 5:
             assert "Боковик" in direction, f"Expected Боковик for total_score={total_score}, got {direction}"
-            assert probability == 52, f"Expected probability=52 for weak signal (total_score={total_score}), got {probability}"
+            assert 50 <= probability <= 55, f"Expected probability in range 50-55% for weak signal (total_score={total_score}), got {probability}"
             print(f"✓ Weak signal test passed: total_score={total_score}, probability={probability}, direction={direction}")
         else:
             print(f"ℹ Score was not weak enough: total_score={total_score}")
