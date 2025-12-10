@@ -78,9 +78,14 @@ class AISignalAnalyzer:
     
     # Total factors in the analysis system
     TOTAL_FACTORS = 22  # 10 long-term + 5 short-term + 6 new sources + sentiment
+    TOTAL_DATA_SOURCES = 22  # Total number of data sources for probability calculation
     
     # Scaling factor for final score calculation
     SCORE_SCALE_FACTOR = 10  # Scale weighted sum from -10/+10 to -100/+100
+    
+    # Block score calculation constants
+    BLOCK_SCORE_MULTIPLIER = 2.0  # Default multiplier for scaling block scores
+    DERIVATIVES_SCORE_MULTIPLIER = 1.5  # Special multiplier for derivatives (more factors involved)
     
     # Short-term analysis constants
     EMA_CROSSOVER_THRESHOLD = 0.001  # 0.1% threshold for EMA crossover detection
@@ -2211,6 +2216,274 @@ class AISignalAnalyzer:
             # Gradient
             return (50 - fg_value) / 5
     
+    def _clamp_block_score(self, score: float, factors: int, multiplier: float = None) -> float:
+        """
+        Helper method to normalize and clamp block scores to [-10, +10] range.
+        
+        Args:
+            score: Raw accumulated score
+            factors: Number of factors that contributed to the score
+            multiplier: Scaling multiplier (defaults to BLOCK_SCORE_MULTIPLIER)
+            
+        Returns:
+            Clamped score in range [-10, +10]
+        """
+        if factors == 0:
+            return 0.0
+        
+        if multiplier is None:
+            multiplier = self.BLOCK_SCORE_MULTIPLIER
+        
+        normalized_score = score / factors * multiplier
+        return max(-10, min(10, normalized_score))
+
+    def _calc_trend_score(
+        self,
+        ema_data: Optional[Dict],
+        macd_data: Optional[Dict],
+        price_change_24h: Optional[float],
+        price_change_7d: Optional[float],
+    ) -> float:
+        """Расчёт score по тренду: EMA 50/200, MACD, изменение цены."""
+        score = 0.0
+        factors = 0
+        
+        if ema_data:
+            ema_50 = ema_data.get("ema_50")
+            ema_200 = ema_data.get("ema_200")
+            current_price = ema_data.get("current_price")
+            
+            if ema_50 and ema_200 and current_price:
+                factors += 1
+                if current_price > ema_50 > ema_200:
+                    score += 10
+                elif current_price > ema_50:
+                    score += 5
+                elif current_price < ema_50 < ema_200:
+                    score -= 10
+                elif current_price < ema_50:
+                    score -= 5
+        
+        if macd_data:
+            macd_signal = macd_data.get("signal")
+            factors += 1
+            if macd_signal == "bullish":
+                score += 7
+            elif macd_signal == "bearish":
+                score -= 7
+        
+        if price_change_24h is not None:
+            factors += 1
+            if price_change_24h > 5:
+                score += 5
+            elif price_change_24h > 2:
+                score += 3
+            elif price_change_24h < -5:
+                score -= 5
+            elif price_change_24h < -2:
+                score -= 3
+        
+        if price_change_7d is not None:
+            factors += 1
+            if price_change_7d > 10:
+                score += 5
+            elif price_change_7d > 5:
+                score += 3
+            elif price_change_7d < -10:
+                score -= 5
+            elif price_change_7d < -5:
+                score -= 3
+        
+        return self._clamp_block_score(score, factors)
+
+    def _calc_momentum_score(
+        self,
+        rsi: Optional[float],
+        rsi_5m: Optional[float],
+        rsi_15m: Optional[float],
+        price_momentum_10min: Optional[float],
+    ) -> float:
+        """Расчёт score по импульсу: RSI разных ТФ."""
+        score = 0.0
+        factors = 0
+        
+        if rsi is not None:
+            factors += 1
+            if rsi < 30:
+                score += 8
+            elif rsi < 40:
+                score += 4
+            elif rsi > 70:
+                score -= 8
+            elif rsi > 60:
+                score -= 4
+        
+        if rsi_5m is not None:
+            factors += 1
+            if rsi_5m < 30:
+                score += 5
+            elif rsi_5m > 70:
+                score -= 5
+        
+        if rsi_15m is not None:
+            factors += 1
+            if rsi_15m < 30:
+                score += 5
+            elif rsi_15m > 70:
+                score -= 5
+        
+        if price_momentum_10min is not None:
+            factors += 1
+            if price_momentum_10min > 1:
+                score += 6
+            elif price_momentum_10min > 0.5:
+                score += 3
+            elif price_momentum_10min < -1:
+                score -= 6
+            elif price_momentum_10min < -0.5:
+                score -= 3
+        
+        return self._clamp_block_score(score, factors)
+
+    def _calc_whales_score(
+        self,
+        whale_data: Optional[Dict],
+        exchange_netflow: Optional[float],
+    ) -> float:
+        """Расчёт score по китам: ончейн потоки."""
+        score = 0.0
+        factors = 0
+        
+        if whale_data:
+            deposits = whale_data.get("deposits", 0)
+            withdrawals = whale_data.get("withdrawals", 0)
+            
+            if deposits > 0 or withdrawals > 0:
+                factors += 1
+                net_flow = withdrawals - deposits
+                
+                if net_flow > 5:
+                    score += 10
+                elif net_flow > 2:
+                    score += 6
+                elif net_flow < -5:
+                    score -= 10
+                elif net_flow < -2:
+                    score -= 6
+        
+        if exchange_netflow is not None:
+            factors += 1
+            if exchange_netflow < -1000000:
+                score += 8
+            elif exchange_netflow < -100000:
+                score += 4
+            elif exchange_netflow > 1000000:
+                score -= 8
+            elif exchange_netflow > 100000:
+                score -= 4
+        
+        return self._clamp_block_score(score, factors)
+
+    def _calc_derivatives_score(
+        self,
+        oi_change: Optional[float],
+        funding_rate: Optional[float],
+        long_short_ratio: Optional[float],
+        liquidations: Optional[Dict],
+        price_change: Optional[float],
+    ) -> float:
+        """Расчёт score по деривативам с составными правилами."""
+        score = 0.0
+        factors = 0
+        
+        oi_up = oi_change is not None and oi_change > 2
+        oi_down = oi_change is not None and oi_change < -2
+        price_up = price_change is not None and price_change > 0
+        price_down = price_change is not None and price_change < 0
+        funding_high = funding_rate is not None and funding_rate > 0.03
+        funding_normal = funding_rate is not None and -0.01 <= funding_rate <= 0.03
+        
+        # СОСТАВНЫЕ ПРАВИЛА
+        if oi_up and price_up and funding_normal:
+            score += 8
+            factors += 1
+        elif oi_up and price_up and funding_high:
+            score -= 3
+            factors += 1
+        elif oi_up and price_down:
+            score += 5
+            factors += 1
+        elif oi_down and price_down:
+            score += 6
+            factors += 1
+        elif oi_down and price_up:
+            score += 2
+            factors += 1
+        
+        if funding_rate is not None:
+            factors += 1
+            if funding_rate < -0.02:
+                score += 7
+            elif funding_rate < -0.01:
+                score += 4
+            elif funding_rate > 0.05:
+                score -= 7
+            elif funding_rate > 0.03:
+                score -= 4
+        
+        if long_short_ratio is not None:
+            factors += 1
+            if long_short_ratio < 0.8:
+                score += 5
+            elif long_short_ratio > 1.5:
+                score -= 5
+        
+        if liquidations:
+            long_liqs = liquidations.get("long_liquidations", 0)
+            short_liqs = liquidations.get("short_liquidations", 0)
+            if long_liqs > 0 or short_liqs > 0:
+                factors += 1
+                if short_liqs > long_liqs * 2:
+                    score += 5
+                elif long_liqs > short_liqs * 2:
+                    score -= 5
+        
+        return self._clamp_block_score(score, factors, self.DERIVATIVES_SCORE_MULTIPLIER)
+
+    def _calc_sentiment_score(
+        self,
+        fear_greed: Optional[int],
+        tradingview_rating: Optional[str],
+    ) -> float:
+        """Расчёт score по настроениям."""
+        score = 0.0
+        factors = 0
+        
+        if fear_greed is not None:
+            factors += 1
+            if fear_greed < 20:
+                score += 10
+            elif fear_greed < 35:
+                score += 5
+            elif fear_greed > 80:
+                score -= 10
+            elif fear_greed > 65:
+                score -= 5
+        
+        if tradingview_rating:
+            factors += 1
+            rating = tradingview_rating.upper()
+            if rating == "STRONG_BUY":
+                score += 10
+            elif rating == "BUY":
+                score += 5
+            elif rating == "STRONG_SELL":
+                score -= 10
+            elif rating == "SELL":
+                score -= 5
+        
+        return self._clamp_block_score(score, factors)
+
     def count_consensus(self, scores: Dict) -> Dict:
         """
         Подсчёт консенсуса факторов.
@@ -2253,6 +2526,74 @@ class AISignalAnalyzer:
             "consensus": consensus
         }
     
+    def _calculate_probability(
+        self,
+        total_score: float,
+        direction: str,
+        bullish_count: int,
+        bearish_count: int,
+        data_sources_count: int,
+        total_sources: int,
+        trend_score: float,
+    ) -> int:
+        """Расчёт РЕАЛЬНОЙ вероятности на основе данных."""
+        
+        # 1. База от силы сигнала (50-80% range instead of 50-80)
+        strength = min(100, max(0, abs(total_score)))
+        base_prob = 50 + (strength / 100) * 35  # Increased from 30 to 35
+        
+        # 2. Ограничение по охвату данных
+        coverage = data_sources_count / max(1, total_sources)
+        
+        if coverage < 0.4:
+            max_prob = 65  # Increased from 60
+        elif coverage < 0.7:
+            max_prob = 75  # Increased from 70
+        else:
+            max_prob = 85  # Increased from 80
+        
+        prob = min(base_prob, max_prob)
+        
+        # 3. Коррекция за конфликт факторов
+        if bullish_count > 0 and bearish_count > 0:
+            conflict_penalty = min(5, abs(bullish_count - bearish_count))  # Less penalty if one side dominates
+            prob -= conflict_penalty
+        
+        if bullish_count == bearish_count and bullish_count > 0:
+            prob = min(prob, 55)
+        
+        # 4. По тренду или против
+        if direction == "long":
+            if trend_score < -3:
+                prob -= 10
+            elif trend_score < 0:
+                prob -= 5
+            elif trend_score > 5:  # Strong trend bonus
+                prob += 8
+            elif trend_score > 3:
+                prob += 5
+            elif trend_score > 0:
+                prob += 3  # Increased from 2
+        elif direction == "short":
+            if trend_score > 3:
+                prob -= 10
+            elif trend_score > 0:
+                prob -= 5
+            elif trend_score < -5:  # Strong trend bonus
+                prob += 8
+            elif trend_score < -3:
+                prob += 5
+            elif trend_score < 0:
+                prob += 3  # Increased from 2
+        
+        # 5. Боковик = 50-55%
+        if direction == "sideways":
+            prob = min(prob, 55)
+            prob = max(prob, 50)
+        
+        # 6. Границы
+        return int(round(max(50, min(85, prob))))
+
     def calculate_probability(self, 
         total_score: float,
         data_sources_count: int,
@@ -2490,6 +2831,106 @@ class AISignalAnalyzer:
         # Сохраняем для следующего раза
         self.previous_scores[symbol] = total_score
         
+        # РАСЧЁТ 5 БЛОКОВ для нового расчёта вероятности
+        # Подготовка данных для блоков
+        
+        # 1. Trend block data
+        ema_data = None
+        if technical_data and "ma_crossover" in technical_data:
+            # Extract EMA data if available
+            ema_data = {
+                "ema_50": technical_data.get("ema_50"),
+                "ema_200": technical_data.get("ema_200"),
+                "current_price": market_data.get("price_usd"),
+            }
+        
+        macd_data = None
+        if technical_data and "macd" in technical_data:
+            macd_data = {"signal": technical_data["macd"].get("signal")}
+        
+        price_change_24h = market_data.get("change_24h") or market_data.get("price_change_24h")
+        price_change_7d = market_data.get("change_7d") or market_data.get("price_change_7d")
+        
+        block_trend_score = self._calc_trend_score(ema_data, macd_data, price_change_24h, price_change_7d)
+        
+        # 2. Momentum block data
+        rsi = None
+        rsi_5m = None
+        rsi_15m = None
+        if technical_data and "rsi" in technical_data:
+            rsi = technical_data["rsi"].get("value")
+        if short_term_data:
+            rsi_5m = short_term_data.get("rsi_5m")
+            rsi_15m = short_term_data.get("rsi_15m")
+        
+        price_momentum_10min = None
+        if short_term_data:
+            current_price_st = short_term_data.get("current_price")
+            price_10min_ago = short_term_data.get("price_10min_ago")
+            if current_price_st and price_10min_ago and price_10min_ago > 0:
+                price_momentum_10min = ((current_price_st - price_10min_ago) / price_10min_ago) * 100
+        
+        block_momentum_score = self._calc_momentum_score(rsi, rsi_5m, rsi_15m, price_momentum_10min)
+        
+        # 3. Whales block data
+        exchange_netflow_value = None
+        if exchange_flows:
+            exchange_netflow_value = exchange_flows.get("net_flow_usd")
+        
+        block_whales_score = self._calc_whales_score(whale_data, exchange_netflow_value)
+        
+        # 4. Derivatives block data
+        oi_change_value = None
+        if coinglass_data:
+            oi_change_value = coinglass_data.get("oi_change_24h")
+        
+        funding_rate_value = None
+        if funding_rate:
+            funding_rate_value = funding_rate.get("rate") or funding_rate.get("rate_percent")
+        
+        long_short_ratio_value = None
+        if futures_data:
+            long_short_ratio_value = futures_data.get("long_short_ratio")
+        
+        liquidations_data = liquidations
+        price_change_for_deriv = market_data.get("change_24h") or market_data.get("price_change_24h")
+        
+        block_derivatives_score = self._calc_derivatives_score(
+            oi_change_value, funding_rate_value, long_short_ratio_value, liquidations_data, price_change_for_deriv
+        )
+        
+        # 5. Sentiment block data
+        fear_greed_value = None
+        if fear_greed:
+            fear_greed_value = fear_greed.get("value")
+        
+        tradingview_rating_value = None
+        if tradingview_rating:
+            summary = tradingview_rating.get("summary", {})
+            tradingview_rating_value = summary.get("RECOMMENDATION")
+        
+        block_sentiment_score = self._calc_sentiment_score(fear_greed_value, tradingview_rating_value)
+        
+        # Apply weights to 5 blocks (total should equal 1.0)
+        weights = {
+            "trend": 0.25,
+            "momentum": 0.20,
+            "whales": 0.20,
+            "derivatives": 0.25,
+            "sentiment": 0.10
+        }
+        
+        factor_score = (
+            block_trend_score * weights["trend"] +
+            block_momentum_score * weights["momentum"] +
+            block_whales_score * weights["whales"] +
+            block_derivatives_score * weights["derivatives"] +
+            block_sentiment_score * weights["sentiment"]
+        )
+        
+        # Scale to -100..+100 for compatibility
+        raw_total_score_5blocks = factor_score * 10
+        
         # Count consensus (22 factors)
         all_scores = {
             # Long-term
@@ -2615,12 +3056,20 @@ class AISignalAnalyzer:
         # Сохраняем текущее направление
         self.previous_direction[symbol] = raw_direction
         
-        # Ограничить вероятность для слабых сигналов
-        if abs(total_score) < dead_zone:
-            probability_data["probability"] = self.WEAK_SIGNAL_PROBABILITY  # фиксированная низкая вероятность
-        elif abs(total_score) < 20:
-            probability_data["probability"] = min(probability_data["probability"], self.MEDIUM_SIGNAL_MAX_PROBABILITY)  # не выше 58% для средних
-        # else: оставляем как есть для сильных сигналов
+        # РЕАЛЬНАЯ ВЕРОЯТНОСТЬ (вместо старого метода calculate_probability)
+        # Используем новый метод _calculate_probability с 5 блоками
+        new_probability = self._calculate_probability(
+            total_score=total_score,
+            direction=raw_direction,
+            bullish_count=consensus_data["bullish_count"],
+            bearish_count=consensus_data["bearish_count"],
+            data_sources_count=data_sources_available,
+            total_sources=self.TOTAL_DATA_SOURCES,
+            trend_score=block_trend_score,
+        )
+        
+        # Обновляем probability_data с новой вероятностью
+        probability_data["probability"] = new_probability
         
         # Normalize strength to 0-100%
         strength_percent = min(max((total_score + 100) / 200 * 100, 0), 100)
@@ -2666,6 +3115,12 @@ class AISignalAnalyzer:
             "neutral_count": consensus_data["neutral_count"],
             "consensus": consensus_data["consensus"],
             "data_sources_count": data_sources_available,
+            # Add 5 block scores for display
+            "block_trend_score": round(block_trend_score, 2),
+            "block_momentum_score": round(block_momentum_score, 2),
+            "block_whales_score": round(block_whales_score, 2),
+            "block_derivatives_score": round(block_derivatives_score, 2),
+            "block_sentiment_score": round(block_sentiment_score, 2),
         }
     
     @staticmethod
@@ -2815,6 +3270,20 @@ class AISignalAnalyzer:
         text += "📊 *НАПРАВЛЕНИЕ*\n"
         text += f"{direction_emoji} {direction_text} ({probability}% вероятность)\n"
         text += f"Сила сигнала: {strength_bar} {signal_strength}%\n\n"
+        
+        # ===== РАЗБИВКА ПО БЛОКАМ =====
+        block_trend = signal_data.get('block_trend_score', 0)
+        block_momentum = signal_data.get('block_momentum_score', 0)
+        block_whales = signal_data.get('block_whales_score', 0)
+        block_derivatives = signal_data.get('block_derivatives_score', 0)
+        block_sentiment = signal_data.get('block_sentiment_score', 0)
+        
+        text += f"📈 *РАЗБИВКА ПО БЛОКАМ*\n"
+        text += f"• Тренд: {'+' if block_trend > 0 else ''}{block_trend:.1f}/10\n"
+        text += f"• Импульс: {'+' if block_momentum > 0 else ''}{block_momentum:.1f}/10\n"
+        text += f"• Киты: {'+' if block_whales > 0 else ''}{block_whales:.1f}/10\n"
+        text += f"• Деривативы: {'+' if block_derivatives > 0 else ''}{block_derivatives:.1f}/10\n"
+        text += f"• Настроения: {'+' if block_sentiment > 0 else ''}{block_sentiment:.1f}/10\n\n"
         
         # ===== ЦЕНА И УРОВНИ =====
         text += "💰 *ЦЕНА И УРОВНИ*\n"
@@ -3033,6 +3502,15 @@ class AISignalAnalyzer:
         
         text += f"Бычьих: {bullish_count} | Медвежьих: {bearish_count} | Нейтральных: {neutral_count}\n"
         text += f"Консенсус: {consensus_text}\n\n"
+        
+        # ===== ПРЕДУПРЕЖДЕНИЕ О ТОРГУЕМОСТИ =====
+        # Проверяем, торгуем ли сигнал
+        data_sources_count = signal_data.get('data_sources_count', 0)
+        coverage = data_sources_count / self.TOTAL_DATA_SOURCES
+        is_tradeable = abs(total_score) >= 20 and probability >= 65 and coverage >= 0.5
+        
+        if not is_tradeable:
+            text += "⚠️ *Сигнал слабый. Рекомендуется ПРОПУСТИТЬ.*\n\n"
         
         # ===== FOOTER =====
         text += "⏱️ Таймфрейм: 1ч\n"
