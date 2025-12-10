@@ -2528,71 +2528,62 @@ class AISignalAnalyzer:
     
     def _calculate_probability(
         self,
-        total_score: float,
-        direction: str,
+        total_score: float,      # -100..+100 (после сглаживания и факторной модели)
+        direction: str,          # "long"/"short"/"sideways"
         bullish_count: int,
         bearish_count: int,
         data_sources_count: int,
         total_sources: int,
-        trend_score: float,
+        trend_score: float,      # -10..+10 (по 1h/4h тренду)
     ) -> int:
-        """Расчёт РЕАЛЬНОЙ вероятности на основе данных."""
+        """
+        Расчёт РЕАЛЬНОЙ вероятности на основе силы сигнала и качества данных.
+        НЕ константа 50% для всех!
+        """
         
-        # 1. База от силы сигнала (50-80% range instead of 50-80)
-        strength = min(100, max(0, abs(total_score)))
-        base_prob = 50 + (strength / 100) * 35  # Increased from 30 to 35
-        
-        # 2. Ограничение по охвату данных
+        # 1. Сила сигнала → базовая вероятность
+        strength = min(100, max(0, abs(total_score)))  # 0..100
+        base_prob = 50 + (strength / 100) * 25         # 50..75
+
+        # 2. Качество данных (coverage)
         coverage = data_sources_count / max(1, total_sources)
-        
         if coverage < 0.4:
-            max_prob = 65  # Increased from 60
+            max_prob = 60   # Мало данных — не можем быть уверены
         elif coverage < 0.7:
-            max_prob = 75  # Increased from 70
+            max_prob = 70
         else:
-            max_prob = 85  # Increased from 80
-        
+            max_prob = 80   # Много данных — можем быть увереннее
+
         prob = min(base_prob, max_prob)
-        
-        # 3. Коррекция за конфликт факторов
+
+        # 3. Конфликт факторов снижает уверенность
         if bullish_count > 0 and bearish_count > 0:
-            conflict_penalty = min(5, abs(bullish_count - bearish_count))  # Less penalty if one side dominates
-            prob -= conflict_penalty
-        
+            prob -= 5
+
+        # Если бычьи и медвежьи равны — спорный сигнал
         if bullish_count == bearish_count and bullish_count > 0:
             prob = min(prob, 55)
-        
+
         # 4. По тренду или против
         if direction == "long":
-            if trend_score < -3:
-                prob -= 10
-            elif trend_score < 0:
-                prob -= 5
-            elif trend_score > 5:  # Strong trend bonus
-                prob += 8
-            elif trend_score > 3:
-                prob += 5
+            if trend_score < 0:
+                prob -= 8   # Лонг против тренда — меньше уверенности
             elif trend_score > 0:
-                prob += 3  # Increased from 2
+                prob += 5   # Лонг по тренду — больше уверенности
         elif direction == "short":
-            if trend_score > 3:
-                prob -= 10
-            elif trend_score > 0:
-                prob -= 5
-            elif trend_score < -5:  # Strong trend bonus
-                prob += 8
-            elif trend_score < -3:
-                prob += 5
+            if trend_score > 0:
+                prob -= 8   # Шорт против тренда
             elif trend_score < 0:
-                prob += 3  # Increased from 2
-        
-        # 5. Боковик = 50-55%
+                prob += 5   # Шорт по тренду
+
+        # 5. Боковик — всегда около 50-55%
         if direction == "sideways":
             prob = min(prob, 55)
             prob = max(prob, 50)
-        
-        # 6. Границы
-        return int(round(max(50, min(85, prob))))
+
+        # 6. Финальные границы
+        prob = int(round(max(50, min(85, prob))))
+        return prob
 
     def calculate_probability(self, 
         total_score: float,
