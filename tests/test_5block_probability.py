@@ -8,13 +8,12 @@ import os
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-# Test constant for total data sources (should match AISignalAnalyzer.TOTAL_DATA_SOURCES)
-TOTAL_DATA_SOURCES = 22
+from signals.ai_signals import AISignalAnalyzer
+
 
 
 def test_calc_trend_score():
     """Test _calc_trend_score method with various inputs."""
-    from signals.ai_signals import AISignalAnalyzer
     
     # Mock whale tracker
     class MockWhaleTracker:
@@ -52,7 +51,7 @@ def test_calc_trend_score():
 
 def test_calc_momentum_score():
     """Test _calc_momentum_score method."""
-    from signals.ai_signals import AISignalAnalyzer
+    
     
     class MockWhaleTracker:
         pass
@@ -76,7 +75,7 @@ def test_calc_momentum_score():
 
 def test_calc_whales_score():
     """Test _calc_whales_score method."""
-    from signals.ai_signals import AISignalAnalyzer
+    
     
     class MockWhaleTracker:
         pass
@@ -108,7 +107,7 @@ def test_calc_whales_score():
 
 def test_calc_derivatives_score():
     """Test _calc_derivatives_score method with composite rules."""
-    from signals.ai_signals import AISignalAnalyzer
+    
     
     class MockWhaleTracker:
         pass
@@ -144,7 +143,7 @@ def test_calc_derivatives_score():
 
 def test_calc_sentiment_score():
     """Test _calc_sentiment_score method."""
-    from signals.ai_signals import AISignalAnalyzer
+    
     
     class MockWhaleTracker:
         pass
@@ -168,7 +167,7 @@ def test_calc_sentiment_score():
 
 def test_calculate_probability():
     """Test _calculate_probability method for real probability calculation."""
-    from signals.ai_signals import AISignalAnalyzer
+    
     
     class MockWhaleTracker:
         pass
@@ -182,7 +181,7 @@ def test_calculate_probability():
         bullish_count=15,
         bearish_count=3,
         data_sources_count=18,
-        total_sources=TOTAL_DATA_SOURCES,
+        total_sources=AISignalAnalyzer.TOTAL_DATA_SOURCES,
         trend_score=7.0
     )
     assert 50 <= prob <= 85, f"Probability {prob} out of range"
@@ -195,7 +194,7 @@ def test_calculate_probability():
         bullish_count=5,
         bearish_count=5,
         data_sources_count=8,
-        total_sources=TOTAL_DATA_SOURCES,
+        total_sources=AISignalAnalyzer.TOTAL_DATA_SOURCES,
         trend_score=0.0
     )
     assert 50 <= prob_weak <= 60, f"Weak signal should have low probability, got {prob_weak}"
@@ -207,7 +206,7 @@ def test_calculate_probability():
         bullish_count=10,
         bearish_count=5,
         data_sources_count=15,
-        total_sources=TOTAL_DATA_SOURCES,
+        total_sources=AISignalAnalyzer.TOTAL_DATA_SOURCES,
         trend_score=-5.0  # Bearish trend
     )
     assert prob_against < 70, "Signal against trend should have reduced probability"
@@ -219,7 +218,7 @@ def test_calculate_probability():
         bullish_count=8,
         bearish_count=8,
         data_sources_count=20,
-        total_sources=TOTAL_DATA_SOURCES,
+        total_sources=AISignalAnalyzer.TOTAL_DATA_SOURCES,
         trend_score=0.0
     )
     assert 50 <= prob_sideways <= 55, f"Sideways should be 50-55%, got {prob_sideways}"
@@ -229,7 +228,7 @@ def test_calculate_probability():
 
 def test_5block_integration():
     """Test that 5 blocks are properly integrated in calculate_signal."""
-    from signals.ai_signals import AISignalAnalyzer
+    
     
     class MockWhaleTracker:
         pass
