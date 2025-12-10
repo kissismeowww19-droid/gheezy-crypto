@@ -2537,52 +2537,53 @@ class AISignalAnalyzer:
         trend_score: float,      # -10..+10 (по 1h/4h тренду)
     ) -> int:
         """
-        Расчёт РЕАЛЬНОЙ вероятности на основе силы сигнала и качества данных.
-        НЕ константа 50% для всех!
+        РЕАЛЬНЫЙ расчёт вероятности.
+        ЗАПРЕЩЕНО возвращать константу 50!
         """
         
-        # 1. Сила сигнала → базовая вероятность
-        strength = min(100, max(0, abs(total_score)))  # 0..100
-        base_prob = 50 + (strength / 100) * 25         # 50..75
-
-        # 2. Качество данных (coverage)
+        # 1. База от силы сигнала (0..100 → 50..75)
+        strength = min(100, max(0, abs(total_score)))
+        base_prob = 50 + (strength / 100) * 25
+        
+        # 2. Ограничение по охвату данных
         coverage = data_sources_count / max(1, total_sources)
         if coverage < 0.4:
-            max_prob = 60   # Мало данных — не можем быть уверены
+            max_prob = 60
         elif coverage < 0.7:
             max_prob = 70
         else:
-            max_prob = 80   # Много данных — можем быть увереннее
-
+            max_prob = 80
+        
         prob = min(base_prob, max_prob)
-
-        # 3. Конфликт факторов снижает уверенность
+        
+        # 3. Конфликт факторов
         if bullish_count > 0 and bearish_count > 0:
             prob -= 5
-
-        # Если бычьи и медвежьи равны — спорный сигнал
+        
         if bullish_count == bearish_count and bullish_count > 0:
             prob = min(prob, 55)
-
+        
         # 4. По тренду или против
         if direction == "long":
             if trend_score < 0:
-                prob -= 8   # Лонг против тренда — меньше уверенности
+                prob -= 8
             elif trend_score > 0:
-                prob += 5   # Лонг по тренду — больше уверенности
+                prob += 5
         elif direction == "short":
             if trend_score > 0:
-                prob -= 8   # Шорт против тренда
+                prob -= 8
             elif trend_score < 0:
-                prob += 5   # Шорт по тренду
-
-        # 5. Боковик — всегда около 50-55%
+                prob += 5
+        
+        # 5. Боковик
         if direction == "sideways":
             prob = min(prob, 55)
             prob = max(prob, 50)
-
+        
         # 6. Финальные границы
         prob = int(round(max(50, min(85, prob))))
+        
+        # ЗАПРЕЩЕНО: return 50
         return prob
 
     def calculate_probability(self, 
