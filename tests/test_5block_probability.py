@@ -8,6 +8,9 @@ import os
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
+# Test constant for total data sources (should match AISignalAnalyzer.TOTAL_DATA_SOURCES)
+TOTAL_DATA_SOURCES = 22
+
 
 def test_calc_trend_score():
     """Test _calc_trend_score method with various inputs."""
@@ -179,7 +182,7 @@ def test_calculate_probability():
         bullish_count=15,
         bearish_count=3,
         data_sources_count=18,
-        total_sources=22,
+        total_sources=TOTAL_DATA_SOURCES,
         trend_score=7.0
     )
     assert 50 <= prob <= 85, f"Probability {prob} out of range"
@@ -192,7 +195,7 @@ def test_calculate_probability():
         bullish_count=5,
         bearish_count=5,
         data_sources_count=8,
-        total_sources=22,
+        total_sources=TOTAL_DATA_SOURCES,
         trend_score=0.0
     )
     assert 50 <= prob_weak <= 60, f"Weak signal should have low probability, got {prob_weak}"
@@ -204,7 +207,7 @@ def test_calculate_probability():
         bullish_count=10,
         bearish_count=5,
         data_sources_count=15,
-        total_sources=22,
+        total_sources=TOTAL_DATA_SOURCES,
         trend_score=-5.0  # Bearish trend
     )
     assert prob_against < 70, "Signal against trend should have reduced probability"
@@ -216,7 +219,7 @@ def test_calculate_probability():
         bullish_count=8,
         bearish_count=8,
         data_sources_count=20,
-        total_sources=22,
+        total_sources=TOTAL_DATA_SOURCES,
         trend_score=0.0
     )
     assert 50 <= prob_sideways <= 55, f"Sideways should be 50-55%, got {prob_sideways}"

@@ -78,9 +78,14 @@ class AISignalAnalyzer:
     
     # Total factors in the analysis system
     TOTAL_FACTORS = 22  # 10 long-term + 5 short-term + 6 new sources + sentiment
+    TOTAL_DATA_SOURCES = 22  # Total number of data sources for probability calculation
     
     # Scaling factor for final score calculation
     SCORE_SCALE_FACTOR = 10  # Scale weighted sum from -10/+10 to -100/+100
+    
+    # Block score calculation constants
+    BLOCK_SCORE_MULTIPLIER = 2.0  # Default multiplier for scaling block scores
+    DERIVATIVES_SCORE_MULTIPLIER = 1.5  # Special multiplier for derivatives (more factors involved)
     
     # Short-term analysis constants
     EMA_CROSSOVER_THRESHOLD = 0.001  # 0.1% threshold for EMA crossover detection
@@ -2211,6 +2216,27 @@ class AISignalAnalyzer:
             # Gradient
             return (50 - fg_value) / 5
     
+    def _clamp_block_score(self, score: float, factors: int, multiplier: float = None) -> float:
+        """
+        Helper method to normalize and clamp block scores to [-10, +10] range.
+        
+        Args:
+            score: Raw accumulated score
+            factors: Number of factors that contributed to the score
+            multiplier: Scaling multiplier (defaults to BLOCK_SCORE_MULTIPLIER)
+            
+        Returns:
+            Clamped score in range [-10, +10]
+        """
+        if factors == 0:
+            return 0.0
+        
+        if multiplier is None:
+            multiplier = self.BLOCK_SCORE_MULTIPLIER
+        
+        normalized_score = score / factors * multiplier
+        return max(-10, min(10, normalized_score))
+
     def _calc_trend_score(
         self,
         ema_data: Optional[Dict],
@@ -2268,9 +2294,7 @@ class AISignalAnalyzer:
             elif price_change_7d < -5:
                 score -= 3
         
-        if factors > 0:
-            return max(-10, min(10, score / factors * 2))
-        return 0.0
+        return self._clamp_block_score(score, factors)
 
     def _calc_momentum_score(
         self,
@@ -2319,9 +2343,7 @@ class AISignalAnalyzer:
             elif price_momentum_10min < -0.5:
                 score -= 3
         
-        if factors > 0:
-            return max(-10, min(10, score / factors * 2))
-        return 0.0
+        return self._clamp_block_score(score, factors)
 
     def _calc_whales_score(
         self,
@@ -2360,9 +2382,7 @@ class AISignalAnalyzer:
             elif exchange_netflow > 100000:
                 score -= 4
         
-        if factors > 0:
-            return max(-10, min(10, score / factors * 2))
-        return 0.0
+        return self._clamp_block_score(score, factors)
 
     def _calc_derivatives_score(
         self,
@@ -2428,9 +2448,7 @@ class AISignalAnalyzer:
                 elif long_liqs > short_liqs * 2:
                     score -= 5
         
-        if factors > 0:
-            return max(-10, min(10, score / factors * 1.5))
-        return 0.0
+        return self._clamp_block_score(score, factors, self.DERIVATIVES_SCORE_MULTIPLIER)
 
     def _calc_sentiment_score(
         self,
@@ -2464,9 +2482,7 @@ class AISignalAnalyzer:
             elif rating == "SELL":
                 score -= 5
         
-        if factors > 0:
-            return max(-10, min(10, score / factors * 2))
-        return 0.0
+        return self._clamp_block_score(score, factors)
 
     def count_consensus(self, scores: Dict) -> Dict:
         """
@@ -3043,7 +3059,7 @@ class AISignalAnalyzer:
             bullish_count=consensus_data["bullish_count"],
             bearish_count=consensus_data["bearish_count"],
             data_sources_count=data_sources_available,
-            total_sources=22,
+            total_sources=self.TOTAL_DATA_SOURCES,
             trend_score=block_trend_score,
         )
         
@@ -3485,7 +3501,7 @@ class AISignalAnalyzer:
         # ===== ПРЕДУПРЕЖДЕНИЕ О ТОРГУЕМОСТИ =====
         # Проверяем, торгуем ли сигнал
         data_sources_count = signal_data.get('data_sources_count', 0)
-        coverage = data_sources_count / 22
+        coverage = data_sources_count / self.TOTAL_DATA_SOURCES
         is_tradeable = abs(total_score) >= 20 and probability >= 65 and coverage >= 0.5
         
         if not is_tradeable:
