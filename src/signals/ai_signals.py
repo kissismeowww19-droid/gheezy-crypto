@@ -3427,6 +3427,9 @@ class AISignalAnalyzer:
         else:
             confidence = "Низкая"
         
+        # Save direction for next time (for hysteresis tracking, though not actively used in honest signals)
+        self.previous_direction[symbol] = final_direction
+        
         # ====== СОХРАНЯЕМ СИГНАЛ ДЛЯ МЕЖМОНЕТНОЙ ПРОВЕРКИ ======
         current_time = time.time()
         

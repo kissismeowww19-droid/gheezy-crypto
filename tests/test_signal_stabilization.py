@@ -114,7 +114,7 @@ class TestDeadZone:
         return AISignalAnalyzer(mock_whale_tracker)
     
     def test_btc_dead_zone_is_10(self, analyzer):
-        """BTC should use dead zone of 10."""
+        """BTC should show sideways for abs(score) < 10."""
         # Create minimal data to get a score near zero
         whale_data = {
             "transaction_count": 0,
@@ -141,10 +141,11 @@ class TestDeadZone:
         # If score is between -10 and 10, should show боковик
         if abs(total_score) < 10:
             assert "Боковик" in direction
-            assert 50 <= probability <= 58  # Sideways direction capped at 58% in new system
+            # With honest signals: very weak sideways (near 0) gets ~68% probability
+            assert 50 <= probability <= 85
     
     def test_ton_dead_zone_is_15(self, analyzer):
-        """TON should use wider dead zone of 15."""
+        """TON should show sideways for abs(score) < 10 (same as BTC in honest signals)."""
         # Create minimal data to get a score near zero
         whale_data = {
             "transaction_count": 0,
@@ -168,10 +169,11 @@ class TestDeadZone:
         total_score = result.get('total_score', 0)
         probability = result.get('probability', 0)
         
-        # If score is between -15 and 15, should show боковик
-        if abs(total_score) < 15:
+        # With honest signals, direction is based strictly on score (threshold = 10)
+        if abs(total_score) < 10:
             assert "Боковик" in direction
-            assert 50 <= probability <= 58  # Sideways direction capped at 58% in new system
+            # With honest signals: very weak sideways (near 0) gets ~68% probability
+            assert 50 <= probability <= 85
 
 
 class TestHysteresis:
@@ -273,7 +275,7 @@ class TestProbabilityCapping:
         return AISignalAnalyzer(mock_whale_tracker)
     
     def test_weak_signal_probability_capped_at_52(self, analyzer):
-        """Weak signals (abs(score) < dead_zone) should become sideways with probability capped at 58%."""
+        """Weak signals (abs(score) < 10) should become sideways with honest probability based on score."""
         whale_data = {
             "transaction_count": 0,
             "total_volume_usd": 0,
@@ -296,11 +298,12 @@ class TestProbabilityCapping:
         probability = result.get('probability', 0)
         direction = result.get('direction', '')
         
-        # If abs(total_score) < 10 (dead zone for BTC)
+        # If abs(total_score) < 10 (sideways threshold)
         if abs(total_score) < 10:
-            # Weak signals become sideways with probability capped at 58%
+            # Weak signals become sideways
             assert "Боковик" in direction or "sideways" in direction.lower(), f"Expected sideways direction for weak signal"
-            assert 50 <= probability <= 58, f"Expected probability in range 50-58% for weak signal (score={total_score}), got {probability}"
+            # With honest signals: very weak sideways (near 0) gets ~68% probability, closer to 10 gets ~51%
+            assert 50 <= probability <= 85, f"Expected probability in range 50-85% for weak signal (score={total_score}), got {probability}"
     
     def test_medium_signal_probability_capped_at_58(self, analyzer):
         """Medium signals (10 <= abs(score) < 20) should have probability <= 58."""

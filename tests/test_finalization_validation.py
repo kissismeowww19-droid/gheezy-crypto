@@ -109,11 +109,10 @@ def test_direction_emoji():
     with open(os.path.join(os.path.dirname(__file__), '..', 'src', 'signals', 'ai_signals.py'), 'r') as f:
         content = f.read()
     
-    # Check for both боковик directions with correct emojis
-    assert 'direction = "📊 Боковик"' in content, "Should have 📊 Боковик for very weak signal"
-    assert 'direction = "➡️ Боковик"' in content, "Should have ➡️ Боковик for moderate weak signal"
+    # Check for боковик direction with correct emoji (according to honest signals fix)
+    assert 'direction = "➡️ Боковик"' in content, "Should have ➡️ Боковик for sideways signal"
     
-    print("✓ Боковик directions use correct emojis")
+    print("✓ Боковик direction uses correct emoji")
 
 
 if __name__ == "__main__":
