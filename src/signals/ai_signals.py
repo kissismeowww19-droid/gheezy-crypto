@@ -157,6 +157,9 @@ class AISignalAnalyzer:
         self.previous_scores: dict[str, float] = {}      # предыдущий score по монете
         self.previous_direction: dict[str, str] = {}     # предыдущее направление по монете
         
+        # Хранение последних сигналов для межмонетной проверки
+        self.last_symbol_signals: dict[str, dict] = {}
+        
         logger.info("AISignalAnalyzer initialized with 22-factor system")
     
     def _get_cache(self, key: str, ttl_seconds: int) -> Optional[Dict]:
@@ -2654,6 +2657,117 @@ class AISignalAnalyzer:
         prob = int(round(max(50, min(85, prob))))
         
         return prob
+    
+    def _cross_asset_correlation_check(
+        self,
+        symbol: str,
+        direction: str,
+        probability: int,
+        total_score: float,
+        trend_score: float,
+        block_trend_score: float,
+        block_momentum_score: float,
+        block_whales_score: float,
+        block_derivatives_score: float,
+        block_sentiment_score: float,
+        bullish_count: int,
+        bearish_count: int,
+        data_sources_count: int,
+    ) -> tuple[str, int, float, bool]:
+        """
+        Проверка согласованности сигналов между BTC/ETH/TON с учётом корреляции рынка.
+        
+        BTC — ведущий индикатор рынка. Его тренд влияет на ETH и TON.
+        
+        Корреляции:
+        - BTC/ETH: ~90%
+        - BTC/TON: ~70%
+        
+        Возвращает:
+        - скорректированное direction
+        - скорректированную probability  
+        - скорректированный total_score
+        - флаг is_cross_conflict
+        """
+        is_cross_conflict = False
+        
+        # BTC рассчитывается без корректировок — он ведущий
+        if symbol == "BTC":
+            return direction, probability, total_score, is_cross_conflict
+        
+        # Получаем сигнал BTC
+        btc_signal = self.last_symbol_signals.get("BTC")
+        if not btc_signal:
+            return direction, probability, total_score, is_cross_conflict
+        
+        btc_direction = btc_signal["direction"]
+        btc_total_score = btc_signal["total_score"]
+        
+        # Определяем силу корреляции
+        if symbol == "ETH":
+            correlation = 0.35  # 35% влияние BTC на ETH
+        elif symbol == "TON":
+            correlation = 0.25  # 25% влияние BTC на TON
+        else:
+            correlation = 0.2
+        
+        # ====== КОРРЕКТИРОВКА TOTAL_SCORE С УЧЁТОМ BTC ======
+        # BTC тренд влияет на общий score монеты
+        btc_influence = btc_total_score * correlation
+        adjusted_total_score = total_score + btc_influence
+        
+        # ====== ПЕРЕСЧЁТ НАПРАВЛЕНИЯ ======
+        # Используем скорректированный score для определения направления
+        if symbol == "TON":
+            dead_zone = 15  # TON более волатильный
+        else:
+            dead_zone = 10
+        
+        if abs(adjusted_total_score) < dead_zone:
+            new_direction = "sideways"
+        elif adjusted_total_score >= 25:
+            new_direction = "long"
+        elif adjusted_total_score >= dead_zone:
+            new_direction = "long"  
+        elif adjusted_total_score <= -25:
+            new_direction = "short"
+        elif adjusted_total_score <= -dead_zone:
+            new_direction = "short"
+        else:
+            new_direction = "sideways"
+        
+        # Проверяем был ли конфликт (изменение направления с long/short на другое)
+        if direction in ("long", "short") and direction != new_direction:
+            is_cross_conflict = True
+        
+        # ====== ПЕРЕСЧЁТ ВЕРОЯТНОСТИ С УЧЁТОМ BTC ======
+        new_probability = self._calculate_probability(
+            total_score=adjusted_total_score,
+            direction=new_direction,
+            bullish_count=bullish_count,
+            bearish_count=bearish_count,
+            data_sources_count=data_sources_count,
+            total_sources=self.TOTAL_DATA_SOURCES,
+            trend_score=trend_score,
+            block_trend_score=block_trend_score,
+            block_momentum_score=block_momentum_score,
+            block_whales_score=block_whales_score,
+            block_derivatives_score=block_derivatives_score,
+            block_sentiment_score=block_sentiment_score,
+        )
+        
+        # ====== ДОПОЛНИТЕЛЬНЫЕ КОРРЕКТИРОВКИ ======
+        
+        # Бонус за согласованность с BTC
+        if new_direction == btc_direction and new_direction in ("long", "short"):
+            new_probability = min(85, new_probability + 3)
+        
+        # Штраф за конфликт с BTC (если всё ещё разные направления)
+        if new_direction != btc_direction and new_direction in ("long", "short") and btc_direction in ("long", "short"):
+            new_probability = max(50, new_probability - 5)
+            is_cross_conflict = True  # Also mark as conflict if final directions differ
+        
+        return new_direction, new_probability, adjusted_total_score, is_cross_conflict
 
     def calculate_probability(self, 
         total_score: float,
@@ -3162,6 +3276,65 @@ class AISignalAnalyzer:
         # Обновляем probability_data с новой вероятностью
         probability_data["probability"] = new_probability
         
+        # ====== МЕЖМОНЕТНАЯ КОРРЕЛЯЦИЯ ======
+        # Корректируем сигнал с учётом BTC (ведущий индикатор рынка)
+        adjusted_direction, adjusted_probability, adjusted_total_score, is_cross_conflict = self._cross_asset_correlation_check(
+            symbol=symbol,
+            direction=raw_direction,
+            probability=new_probability,
+            total_score=total_score,
+            trend_score=block_trend_score,
+            block_trend_score=block_trend_score,
+            block_momentum_score=block_momentum_score,
+            block_whales_score=block_whales_score,
+            block_derivatives_score=block_derivatives_score,
+            block_sentiment_score=block_sentiment_score,
+            bullish_count=consensus_data["bullish_count"],
+            bearish_count=consensus_data["bearish_count"],
+            data_sources_count=data_sources_available,
+        )
+        
+        # Применяем корректировки
+        raw_direction = adjusted_direction
+        new_probability = adjusted_probability
+        total_score = adjusted_total_score
+        
+        # Обновляем текстовое направление
+        if raw_direction == "long":
+            if abs(total_score) > 25:
+                direction = "📈 ВВЕРХ"
+                strength = "сильный"
+                confidence = "Высокая"
+            else:
+                direction = "📈 Вероятно вверх"
+                strength = "средний"
+                confidence = "Средняя"
+        elif raw_direction == "short":
+            if abs(total_score) > 25:
+                direction = "📉 ВНИЗ"
+                strength = "сильный"
+                confidence = "Высокая"
+            else:
+                direction = "📉 Вероятно вниз"
+                strength = "средний"
+                confidence = "Средняя"
+        else:
+            direction = "➡️ Боковик"
+            strength = "слабый"
+            confidence = "Низкая"
+        
+        # Обновляем probability_data
+        probability_data["probability"] = new_probability
+        
+        # ====== СОХРАНЯЕМ СИГНАЛ ДЛЯ МЕЖМОНЕТНОЙ ПРОВЕРКИ ======
+        self.last_symbol_signals[symbol] = {
+            "direction": raw_direction,
+            "probability": new_probability,
+            "total_score": total_score,
+            "trend_score": block_trend_score,
+            "generated_at": datetime.now().timestamp(),
+        }
+        
         # Normalize strength to 0-100%
         strength_percent = min(max((total_score + 100) / 200 * 100, 0), 100)
         
@@ -3212,6 +3385,8 @@ class AISignalAnalyzer:
             "block_whales_score": round(block_whales_score, 2),
             "block_derivatives_score": round(block_derivatives_score, 2),
             "block_sentiment_score": round(block_sentiment_score, 2),
+            # Cross-asset correlation conflict flag
+            "is_cross_conflict": is_cross_conflict,
         }
     
     @staticmethod
@@ -3270,7 +3445,8 @@ class AISignalAnalyzer:
         news_sentiment: Optional[Dict] = None,
         tradingview_rating: Optional[Dict] = None,
         whale_alert: Optional[Dict] = None,
-        social_data: Optional[Dict] = None
+        social_data: Optional[Dict] = None,
+        is_cross_conflict: bool = False,  # НОВЫЙ ПАРАМЕТР
     ) -> str:
         """
         Расширенное форматирование сообщения с AI сигналом.
@@ -3360,7 +3536,14 @@ class AISignalAnalyzer:
         # ===== НАПРАВЛЕНИЕ =====
         text += "📊 *НАПРАВЛЕНИЕ*\n"
         text += f"{direction_emoji} {direction_text} ({probability}% вероятность)\n"
-        text += f"Сила сигнала: {strength_bar} {signal_strength}%\n\n"
+        text += f"Сила сигнала: {strength_bar} {signal_strength}%\n"
+        
+        # Если был конфликт с BTC, добавляем предупреждение
+        if is_cross_conflict:
+            text += "⚠️ *КОРРЕКТИРОВКА*\n"
+            text += "_Сигнал скорректирован с учётом корреляции с BTC\\._\n"
+        
+        text += "\n"
         
         # ===== РАЗБИВКА ПО БЛОКАМ =====
         block_trend = signal_data.get('block_trend_score', 0)
@@ -3887,7 +4070,8 @@ class AISignalAnalyzer:
                 news_sentiment=news_sentiment,
                 tradingview_rating=tradingview_rating,
                 whale_alert=whale_alert,
-                social_data=social_data
+                social_data=social_data,
+                is_cross_conflict=signal_data.get("is_cross_conflict", False),
             )
             
             return message
