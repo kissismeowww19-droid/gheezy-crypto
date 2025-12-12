@@ -2724,26 +2724,36 @@ class AISignalAnalyzer:
         
         # BTC рассчитывается без корректировок — он ведущий индикатор
         if symbol == "BTC":
+            logger.info(f"Cross-asset: {symbol} is leading indicator, no adjustment")
             return direction, probability, total_score, is_cross_conflict
         
         # Получаем последний сигнал BTC из хранилища корреляции
         btc_signal = self._correlation_signals.get("BTC")
+        
+        # ЛОГИРОВАНИЕ: что есть в _correlation_signals
+        logger.info(f"Cross-asset check for {symbol}: _correlation_signals keys = {list(self._correlation_signals.keys())}")
+        
         if not btc_signal:
             # Если BTC ещё не рассчитан, возвращаем без изменений
+            logger.warning(f"Cross-asset: No BTC signal found for {symbol} correlation")
             return direction, probability, total_score, is_cross_conflict
         
         # Проверяем свежесть сигнала BTC (не старше 10 минут)
         expires_at = btc_signal.get("expires_at", 0)
         current_time = time.time()
+        generated_at = btc_signal.get("generated_at", 0)
+        age_seconds = current_time - generated_at
+        logger.info(f"Cross-asset: BTC signal age = {age_seconds:.1f}s")
         
         if expires_at < current_time:
-            age_seconds = current_time - btc_signal.get("generated_at", 0)
-            logger.info(f"BTC signal expired for correlation (age: {age_seconds:.0f}s)")
+            logger.warning(f"Cross-asset: BTC signal expired ({age_seconds:.1f}s > 600s)")
             return direction, probability, total_score, is_cross_conflict
         
         btc_direction = btc_signal["direction"]
         btc_total_score = btc_signal["total_score"]
         btc_trend = btc_signal.get("trend_score", 0)
+        
+        logger.info(f"Cross-asset: BTC signal = direction={btc_direction}, total_score={btc_total_score}")
         
         # ====== ОПРЕДЕЛЯЕМ СИЛУ КОРРЕЛЯЦИИ ======
         if symbol == "ETH":
@@ -2757,6 +2767,8 @@ class AISignalAnalyzer:
         # Добавляем влияние BTC к собственному score монеты
         btc_influence = btc_total_score * correlation
         adjusted_total_score = total_score + btc_influence
+        
+        logger.info(f"Cross-asset: {symbol} score adjustment: {total_score:.2f} + ({btc_total_score:.2f} * {correlation}) = {adjusted_total_score:.2f}")
         
         # ====== ОПРЕДЕЛЯЕМ DEAD ZONE ======
         if symbol == "TON":
@@ -2811,6 +2823,9 @@ class AISignalAnalyzer:
         if new_direction != btc_direction and new_direction in ("long", "short") and btc_direction in ("long", "short"):
             new_probability = max(50, new_probability - 5)
             is_cross_conflict = True
+        
+        # ЛОГИРОВАНИЕ РЕЗУЛЬТАТА
+        logger.info(f"Cross-asset RESULT for {symbol}: direction {direction} → {new_direction}, probability {probability} → {new_probability}, score {total_score:.2f} → {adjusted_total_score:.2f}, conflict={is_cross_conflict}")
         
         return new_direction, new_probability, adjusted_total_score, is_cross_conflict
 
@@ -3326,6 +3341,8 @@ class AISignalAnalyzer:
         
         # ====== МЕЖМОНЕТНАЯ КОРРЕЛЯЦИЯ ======
         # Корректируем сигнал с учётом BTC (ведущий индикатор рынка)
+        logger.info(f"Applying cross-asset correlation for {symbol}...")
+        
         adjusted_direction, adjusted_probability, adjusted_total_score, is_cross_conflict = self._cross_asset_correlation_check(
             symbol=symbol,
             direction=raw_direction,
@@ -3341,6 +3358,9 @@ class AISignalAnalyzer:
             bearish_count=consensus_data["bearish_count"],
             data_sources_count=data_sources_available,
         )
+        
+        # ЛОГИРОВАНИЕ результата корреляции
+        logger.info(f"Cross-asset result: direction {raw_direction} → {adjusted_direction}, probability {new_probability} → {adjusted_probability}, score {total_score:.2f} → {adjusted_total_score:.2f}")
         
         # Применяем корректировки
         raw_direction = adjusted_direction
@@ -3395,7 +3415,7 @@ class AISignalAnalyzer:
             "generated_at": current_time,
             "expires_at": current_time + self.CORRELATION_SIGNAL_TTL,  # TTL 10 минут
         }
-        logger.debug(f"Correlation signal saved: {symbol} -> {raw_direction} (expires in {self.CORRELATION_SIGNAL_TTL}s)")
+        logger.info(f"Saved signal for {symbol}: direction={raw_direction}, probability={new_probability}, total_score={total_score:.2f} (expires in {self.CORRELATION_SIGNAL_TTL}s)")
         
         # Normalize strength to 0-100%
         strength_percent = min(max((total_score + 100) / 200 * 100, 0), 100)
