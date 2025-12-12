@@ -3,6 +3,7 @@ Tests for Cross-Asset Correlation feature in AI Signals.
 """
 
 import pytest
+import time
 from unittest.mock import Mock, AsyncMock
 import sys
 import os
@@ -96,7 +97,6 @@ class TestCrossAssetCorrelation:
     
     def test_eth_with_btc_short_signal(self, analyzer):
         """Test ETH adjustment when BTC is in SHORT."""
-        import time
         current_time = time.time()
         
         # Setup: BTC is in SHORT with strong negative score
@@ -144,7 +144,6 @@ class TestCrossAssetCorrelation:
     
     def test_ton_with_btc_short_signal(self, analyzer):
         """Test TON adjustment when BTC is in SHORT."""
-        import time
         current_time = time.time()
         
         # Setup: BTC is in SHORT
@@ -191,7 +190,6 @@ class TestCrossAssetCorrelation:
     
     def test_eth_long_with_btc_long_agreement(self, analyzer):
         """Test ETH LONG when BTC is also LONG (agreement bonus)."""
-        import time
         current_time = time.time()
         
         # Setup: BTC is in LONG
@@ -236,7 +234,6 @@ class TestCrossAssetCorrelation:
     
     def test_eth_short_disagrees_with_btc_long(self, analyzer):
         """Test conflict detection when ETH is SHORT but BTC is LONG."""
-        import time
         current_time = time.time()
         
         # Setup: BTC is in LONG
@@ -282,7 +279,6 @@ class TestCrossAssetCorrelation:
     
     def test_correlation_strength_differences(self, analyzer):
         """Test that ETH has stronger correlation (40%) than TON (30%)."""
-        import time
         current_time = time.time()
         
         # Setup: BTC with strong signal
@@ -342,7 +338,6 @@ class TestCrossAssetCorrelation:
     
     def test_conflict_detection_only_for_opposite_directions(self, analyzer):
         """Test that conflict is only detected for long<->short changes, not sideways."""
-        import time
         current_time = time.time()
         
         # Setup: BTC is in LONG
@@ -483,7 +478,6 @@ class TestCrossAssetCorrelation:
     
     def test_correlation_signals_preserved_on_clear_cache(self, analyzer):
         """Test that _correlation_signals are NOT cleared when cache is cleared."""
-        import time
         current_time = time.time()
         
         # Add a correlation signal
@@ -514,7 +508,6 @@ class TestCrossAssetCorrelation:
     
     def test_cleanup_expired_signals(self, analyzer):
         """Test that expired signals are removed by cleanup."""
-        import time
         current_time = time.time()
         
         # Add a fresh signal (not expired)
@@ -548,7 +541,6 @@ class TestCrossAssetCorrelation:
     
     def test_eth_with_expired_btc_signal(self, analyzer):
         """Test that expired BTC signal is not used for ETH correlation."""
-        import time
         current_time = time.time()
         
         # Add an expired BTC signal
@@ -592,7 +584,6 @@ class TestCrossAssetCorrelation:
     
     def test_eth_with_fresh_btc_signal(self, analyzer):
         """Test that fresh BTC signal IS used for ETH correlation."""
-        import time
         current_time = time.time()
         
         # Add a fresh BTC signal

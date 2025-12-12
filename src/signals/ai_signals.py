@@ -5,6 +5,7 @@ AI Signals - анализ и прогнозирование движения ц�
 """
 
 import logging
+import time
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List
 import aiohttp
@@ -217,7 +218,6 @@ class AISignalAnalyzer:
         Сигналы с истекшим TTL (expires_at < текущее время) удаляются,
         чтобы не влиять на новые расчёты устаревшими данными.
         """
-        import time
         current_time = time.time()
         expired = [
             symbol for symbol, data in self._correlation_signals.items()
@@ -2733,7 +2733,6 @@ class AISignalAnalyzer:
             return direction, probability, total_score, is_cross_conflict
         
         # Проверяем свежесть сигнала BTC (не старше 10 минут)
-        import time
         generated_at = btc_signal.get("generated_at", 0)
         age_seconds = time.time() - generated_at
         
@@ -3375,7 +3374,6 @@ class AISignalAnalyzer:
         probability_data["probability"] = new_probability
         
         # ====== СОХРАНЯЕМ СИГНАЛ ДЛЯ МЕЖМОНЕТНОЙ ПРОВЕРКИ ======
-        import time
         current_time = time.time()
         
         # Сохраняем в старое хранилище для обратной совместимости
