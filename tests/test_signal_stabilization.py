@@ -141,7 +141,7 @@ class TestDeadZone:
         # If score is between -10 and 10, should show боковик
         if abs(total_score) < 10:
             assert "Боковик" in direction
-            assert 50 <= probability <= 55  # Real probability for weak signals (not constant)
+            assert 50 <= probability <= 58  # Sideways direction capped at 58% in new system
     
     def test_ton_dead_zone_is_15(self, analyzer):
         """TON should use wider dead zone of 15."""
@@ -171,7 +171,7 @@ class TestDeadZone:
         # If score is between -15 and 15, should show боковик
         if abs(total_score) < 15:
             assert "Боковик" in direction
-            assert 50 <= probability <= 55  # Real probability for weak signals (not constant)
+            assert 50 <= probability <= 58  # Sideways direction capped at 58% in new system
 
 
 class TestHysteresis:
@@ -273,7 +273,7 @@ class TestProbabilityCapping:
         return AISignalAnalyzer(mock_whale_tracker)
     
     def test_weak_signal_probability_capped_at_52(self, analyzer):
-        """Weak signals (abs(score) < dead_zone) should have probability=52."""
+        """Weak signals (abs(score) < dead_zone) should become sideways with probability capped at 58%."""
         whale_data = {
             "transaction_count": 0,
             "total_volume_usd": 0,
@@ -294,10 +294,13 @@ class TestProbabilityCapping:
         result = analyzer.calculate_signal("BTC", whale_data, market_data)
         total_score = result.get('total_score', 0)
         probability = result.get('probability', 0)
+        direction = result.get('direction', '')
         
         # If abs(total_score) < 10 (dead zone for BTC)
         if abs(total_score) < 10:
-            assert 50 <= probability <= 55, f"Expected probability in range 50-55% for weak signal (score={total_score}), got {probability}"
+            # Weak signals become sideways with probability capped at 58%
+            assert "Боковик" in direction or "sideways" in direction.lower(), f"Expected sideways direction for weak signal"
+            assert 50 <= probability <= 58, f"Expected probability in range 50-58% for weak signal (score={total_score}), got {probability}"
     
     def test_medium_signal_probability_capped_at_58(self, analyzer):
         """Medium signals (10 <= abs(score) < 20) should have probability <= 58."""
