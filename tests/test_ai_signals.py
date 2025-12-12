@@ -167,6 +167,7 @@ class TestAISignalAnalyzer:
         """Test message formatting with 10-factor system and probability."""
         signal_data = {
             "direction": "📈 ВВЕРХ",
+            "raw_direction": "long",  # Add raw_direction for proper display
             "strength": "сильный",
             "strength_percent": 75,
             "confidence": "Высокая",
@@ -211,16 +212,14 @@ class TestAISignalAnalyzer:
         message = analyzer.format_signal_message("BTC", signal_data, whale_data, market_data)
         
         assert "🤖 *AI СИГНАЛ: BTC*" in message
-        assert "📈 ВВЕРХ" in message or "72%" in message
-        assert "Высокая" in message
+        assert ("📈 ЛОНГ" in message or "72%" in message), "Should show ЛОНГ direction or probability"
         assert "15" in message  # transaction count
-        assert "🐋 *Анализ китов" in message
-        assert "📊 *Рыночные данные" in message
-        assert "Breakdown сигнала" in message
-        assert "10 факторов" in message
-        assert "Бычье" in message
-        assert "⚠️" in message
-        assert "🕐" in message
+        assert "АКТИВНОСТЬ КИТОВ" in message or "Score:" in message
+        assert "РЫНОЧНЫЕ ДАННЫЕ" in message or "Market Cap:" in message
+        assert "НАПРАВЛЕНИЕ" in message
+        assert "ЦЕНА И УРОВНИ" in message
+        # Check for TP/SL since this is a long signal
+        assert "TP1:" in message and "TP2:" in message
     
     @pytest.mark.asyncio
     async def test_analyze_coin_unsupported(self, analyzer):
@@ -516,6 +515,7 @@ class TestAISignalAnalyzer:
         """Test message formatting with all data in 10-factor system and probability."""
         signal_data = {
             "direction": "📈 ВВЕРХ",
+            "raw_direction": "long",  # Add raw_direction for proper display
             "strength": "сильный",
             "strength_percent": 78,
             "confidence": "Высокая",

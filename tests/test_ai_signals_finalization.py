@@ -72,7 +72,8 @@ class TestAISignalsFinalization:
         """Test that consensus is НЕЙТРАЛЬНЫЙ with only 1 bullish and 0 bearish factors."""
         # Create a signal message with controlled reasons
         signal_data = {
-            'probability_direction': 'up',
+            'probability_direction': 'sideways',  # Changed to sideways for weak signal
+            'raw_direction': 'sideways',  # Add raw_direction for proper display
             'probability': 52,
             'total_score': 3,
             'factors': {
@@ -115,7 +116,8 @@ class TestAISignalsFinalization:
     def test_consensus_with_one_bearish_factor(self, analyzer):
         """Test that consensus is НЕЙТРАЛЬНЫЙ with only 1 bearish and 0 bullish factors."""
         signal_data = {
-            'probability_direction': 'down',
+            'probability_direction': 'sideways',  # Changed to sideways for weak signal
+            'raw_direction': 'sideways',  # Add raw_direction for proper display
             'probability': 48,
             'total_score': -3,
             'factors': {

@@ -3607,33 +3607,58 @@ class AISignalAnalyzer:
                 return f"${volume / 1_000:.1f}K"
             return f"${volume:.0f}"
         
-        # Определяем направление
-        direction = signal_data['probability_direction']
-        is_long = direction == "up"
+        # Определяем направление из raw_direction (учитывает sideways)
+        raw_direction = signal_data.get('raw_direction', 'sideways')
+        probability_direction = signal_data.get('probability_direction', 'up')
         probability = signal_data['probability']
         
         # Текущая цена
         current_price = market_data['price_usd']
         
+        # Направление и эмодзи
+        if raw_direction == "long":
+            direction_text = "ЛОНГ"
+            direction_emoji = "📈"
+            is_long = True
+            is_sideways = False
+        elif raw_direction == "short":
+            direction_text = "ШОРТ"
+            direction_emoji = "📉"
+            is_long = False
+            is_sideways = False
+        else:  # sideways
+            direction_text = "Боковик"
+            direction_emoji = "➡️"
+            is_long = False
+            is_sideways = True
+        
         # Рассчитываем TP (два уровня) и SL
-        if is_long:
+        if is_sideways:
+            # Для боковика показываем диапазон
+            range_percent = 1.0
+            range_high = current_price * (1 + range_percent / 100)
+            range_low = current_price * (1 - range_percent / 100)
+            tp1_price = None
+            tp2_price = None
+            sl_price = None
+        elif is_long:
             tp1_percent = 1.5
             tp2_percent = 2.0
             sl_percent = -0.6
             tp1_price = current_price * (1 + tp1_percent / 100)
             tp2_price = current_price * (1 + tp2_percent / 100)
             sl_price = current_price * (1 + sl_percent / 100)
-        else:
+            range_high = None
+            range_low = None
+        else:  # short
             tp1_percent = -1.5
             tp2_percent = -2.0
             sl_percent = 0.6
             tp1_price = current_price * (1 + tp1_percent / 100)
             tp2_price = current_price * (1 + tp2_percent / 100)
             sl_price = current_price * (1 + sl_percent / 100)
-        
-        # Направление текст и эмодзи
-        direction_text = "ЛОНГ" if is_long else "ШОРТ"
-        direction_emoji = "📈" if is_long else "📉"
+            range_high = None
+            range_low = None
         
         # Сила сигнала (рассчитывается из total_score, не probability)
         # total_score диапазон: -100 до +100
@@ -3677,9 +3702,19 @@ class AISignalAnalyzer:
         # ===== ЦЕНА И УРОВНИ =====
         text += "💰 *ЦЕНА И УРОВНИ*\n"
         text += f"Текущая: {format_price(current_price)}\n"
-        text += f"🎯 TP1: {format_price(tp1_price)} ({tp1_percent:+.1f}%)\n"
-        text += f"🎯 TP2: {format_price(tp2_price)} ({tp2_percent:+.1f}%)\n"
-        text += f"🛑 SL: {format_price(sl_price)} ({sl_percent:+.1f}%)\n\n"
+        
+        if is_sideways:
+            # Для боковика показываем ожидаемый диапазон
+            text += f"📊 Верх диапазона: {format_price(range_high)} (+1.0%)\n"
+            text += f"📊 Низ диапазона: {format_price(range_low)} (-1.0%)\n"
+            text += f"ℹ️ _Ожидается движение в диапазоне_\n"
+        else:
+            # Для ЛОНГ/ШОРТ показываем TP и SL
+            text += f"🎯 TP1: {format_price(tp1_price)} ({tp1_percent:+.1f}%)\n"
+            text += f"🎯 TP2: {format_price(tp2_price)} ({tp2_percent:+.1f}%)\n"
+            text += f"🛑 SL: {format_price(sl_price)} ({sl_percent:+.1f}%)\n"
+        
+        text += "\n"
         
         # ===== ТРЕНД ЦЕНЫ =====
         text += "📈 *ТРЕНД ЦЕНЫ*\n"

@@ -205,6 +205,7 @@ class TestAISignalMessageFormat:
             signal_data = {
                 'probability': 72,
                 'probability_direction': 'up',
+                'raw_direction': 'long',  # Add raw_direction for proper display
                 'factors': {
                     'whale': {'score': 5}
                 }
@@ -279,6 +280,7 @@ class TestAISignalMessageFormat:
             signal_data = {
                 'probability': 75,
                 'probability_direction': 'up',
+                'raw_direction': 'long',  # Add raw_direction for proper display
                 'factors': {'whale': {'score': 3}}
             }
             
