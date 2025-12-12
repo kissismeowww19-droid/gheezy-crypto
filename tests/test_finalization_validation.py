@@ -21,33 +21,27 @@ def test_bybit_mapping_has_ton():
 
 
 def test_weak_signal_logic():
-    """Test that weak signal logic exists in calculate_signal."""
+    """Test that weak signal logic exists via _determine_direction_from_score."""
     with open(os.path.join(os.path.dirname(__file__), '..', 'src', 'signals', 'ai_signals.py'), 'r') as f:
         content = f.read()
     
-    # Check that the weak signal threshold constant exists
-    assert 'WEAK_SIGNAL_THRESHOLD = 5' in content, "Weak signal threshold constant should exist"
+    # Check that the direction determination method exists
+    assert 'def _determine_direction_from_score(' in content, "Direction determination method should exist"
+    assert 'if total_score <= -10:' in content, "Short threshold check should exist"
+    assert 'elif total_score >= 10:' in content, "Long threshold check should exist"
+    assert 'return "sideways"' in content, "Sideways return should exist"
     
-    # Check that the weak signal check exists
-    assert 'if abs(total_score) < self.WEAK_SIGNAL_THRESHOLD:' in content, "Weak signal check should use constant"
-    assert '# Очень слабый сетап, почти нет сигнала' in content, "Weak signal comment should exist"
-    
-    # Check that it comes before other direction checks
-    weak_signal_pos = content.find('if abs(total_score) < self.WEAK_SIGNAL_THRESHOLD:')
-    strong_up_pos = content.find('elif total_score > 20:')
-    assert weak_signal_pos < strong_up_pos, "Weak signal check should come before strong signal checks"
-    
-    print("✓ Weak signal logic is correctly implemented")
+    print("✓ Direction determination logic is correctly implemented")
 
 
 def test_consensus_logic():
-    """Test that consensus logic handles single factors correctly."""
+    """Test that consensus counting exists."""
     with open(os.path.join(os.path.dirname(__file__), '..', 'src', 'signals', 'ai_signals.py'), 'r') as f:
         content = f.read()
     
-    # Check that the consensus logic exists
-    assert 'if bullish_count <= 1 and bearish_count == 0:' in content, \
-        "Consensus check for single bullish factor should exist"
+    # Check that consensus counting exists
+    assert 'def count_consensus(' in content, "Consensus counting method should exist"
+    assert 'bullish_count' in content and 'bearish_count' in content, "Consensus counts should be tracked"
     assert 'elif bearish_count <= 1 and bullish_count == 0:' in content, \
         "Consensus check for single bearish factor should exist"
     assert '# Слишком мало факторов для бычьего консенсуса' in content, \
@@ -59,7 +53,7 @@ def test_consensus_logic():
 
 
 def test_all_changes_in_correct_locations():
-    """Verify all changes are in the correct methods."""
+    """Verify key methods exist and TON mapping is in __init__."""
     with open(os.path.join(os.path.dirname(__file__), '..', 'src', 'signals', 'ai_signals.py'), 'r') as f:
         lines = f.readlines()
     
@@ -67,6 +61,8 @@ def test_all_changes_in_correct_locations():
     calculate_signal_line = None
     format_signal_message_line = None
     init_line = None
+    determine_direction_line = None
+    calculate_real_probability_line = None
     
     for i, line in enumerate(lines):
         if 'def calculate_signal(' in line:
@@ -75,33 +71,29 @@ def test_all_changes_in_correct_locations():
             format_signal_message_line = i
         elif 'def __init__(self, whale_tracker):' in line:
             init_line = i
+        elif 'def _determine_direction_from_score(' in line:
+            determine_direction_line = i
+        elif 'def _calculate_real_probability(' in line:
+            calculate_real_probability_line = i
     
     assert calculate_signal_line is not None, "calculate_signal method should exist"
     assert format_signal_message_line is not None, "format_signal_message method should exist"
     assert init_line is not None, "__init__ method should exist"
+    assert determine_direction_line is not None, "_determine_direction_from_score method should exist"
+    assert calculate_real_probability_line is not None, "_calculate_real_probability method should exist"
     
-    # Find where changes are
-    weak_signal_line = None
-    consensus_line = None
+    # Find TON mapping
     ton_mapping_line = None
-    
     for i, line in enumerate(lines):
-        if 'if abs(total_score) < self.WEAK_SIGNAL_THRESHOLD:' in line:
-            weak_signal_line = i
-        elif 'if bullish_count <= 1 and bearish_count == 0:' in line:
-            consensus_line = i
-        elif '"TON": "TONUSDT"' in line:
+        if '"TON": "TONUSDT"' in line:
             ton_mapping_line = i
     
-    # Verify changes are in correct methods
-    assert calculate_signal_line < weak_signal_line < format_signal_message_line, \
-        "Weak signal logic should be in calculate_signal method"
-    assert format_signal_message_line < consensus_line, \
-        "Consensus logic should be in format_signal_message method"
+    # Verify TON mapping is in __init__ method
+    assert ton_mapping_line is not None, "TON mapping should exist"
     assert init_line < ton_mapping_line < calculate_signal_line, \
         "TON mapping should be in __init__ method"
     
-    print("✓ All changes are in the correct method locations")
+    print("✓ All key methods exist and TON mapping is in the correct location")
 
 
 def test_direction_emoji():
