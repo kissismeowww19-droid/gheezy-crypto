@@ -129,13 +129,14 @@ class TestCrossAssetCorrelation:
         new_direction, new_probability, new_total_score, is_conflict = result
         
         # ETH should be adjusted based on BTC
-        # BTC influence: -13 * 0.35 = -4.55
-        # Adjusted score: 14 + (-4.55) = 9.45
-        # With abs(9.45) < 10, should become sideways
+        # BTC influence: -13 * 0.40 = -5.2
+        # Adjusted score: 14 + (-5.2) = 8.8
+        # With abs(8.8) < 10, should become sideways
         assert new_direction == "sideways", f"Expected sideways, got {new_direction}"
         assert new_total_score < total_score, "Total score should be reduced by BTC influence"
-        # Conflict should be detected (long -> sideways is not a conflict for our logic)
-        # But long -> short would be
+        # Conflict should be detected only if long -> short or short -> long
+        # long -> sideways is NOT a conflict
+        assert is_conflict is False, "long -> sideways should not be a conflict"
     
     def test_ton_with_btc_short_signal(self, analyzer):
         """Test TON adjustment when BTC is in SHORT."""
@@ -172,11 +173,13 @@ class TestCrossAssetCorrelation:
         new_direction, new_probability, new_total_score, is_conflict = result
         
         # TON should be adjusted
-        # BTC influence: -13 * 0.25 = -3.25
-        # Adjusted score: 4 + (-3.25) = 0.75
-        # With abs(0.75) < 15 (TON dead zone), should become sideways
+        # BTC influence: -13 * 0.30 = -3.9
+        # Adjusted score: 4 + (-3.9) = 0.1
+        # With abs(0.1) < 15 (TON dead zone), should become sideways
         assert new_direction == "sideways", f"Expected sideways, got {new_direction}"
         assert new_total_score < total_score, "Total score should be reduced by BTC influence"
+        # long -> sideways is NOT a conflict
+        assert is_conflict is False, "long -> sideways should not be a conflict"
     
     def test_eth_long_with_btc_long_agreement(self, analyzer):
         """Test ETH LONG when BTC is also LONG (agreement bonus)."""
@@ -213,8 +216,8 @@ class TestCrossAssetCorrelation:
         new_direction, new_probability, new_total_score, is_conflict = result
         
         # Should stay LONG with positive BTC influence
-        # BTC influence: 20 * 0.35 = 7.0
-        # Adjusted score: 18 + 7 = 25
+        # BTC influence: 20 * 0.40 = 8.0
+        # Adjusted score: 18 + 8 = 26
         assert new_direction == "long", f"Expected long, got {new_direction}"
         assert new_total_score > total_score, "Total score should increase with positive BTC"
         assert is_conflict is False, "No conflict when both in same direction"
@@ -253,12 +256,13 @@ class TestCrossAssetCorrelation:
         
         new_direction, new_probability, new_total_score, is_conflict = result
         
-        # BTC influence: 20 * 0.35 = 7.0
-        # Adjusted score: -11 + 7 = -4
-        # With abs(-4) < 10, should become sideways
+        # BTC influence: 20 * 0.40 = 8.0
+        # Adjusted score: -11 + 8 = -3
+        # With abs(-3) < 10, should become sideways
         assert new_direction == "sideways", f"Expected sideways after BTC correction, got {new_direction}"
-        # Conflict detected since original was short
-        assert is_conflict is True, "Conflict should be detected when changing from short to sideways"
+        # Conflict should NOT be detected when changing from short to sideways
+        # Only long -> short or short -> long triggers conflict
+        assert is_conflict is False, "short -> sideways should NOT be a conflict"
     
     def test_correlation_strength_differences(self, analyzer):
         """Test that ETH has stronger correlation (35%) than TON (25%)."""
@@ -308,13 +312,141 @@ class TestCrossAssetCorrelation:
         eth_adjusted_score = eth_result[2]
         ton_adjusted_score = ton_result[2]
         
-        # ETH should get more influence (30 * 0.35 = 10.5)
-        # TON should get less influence (30 * 0.25 = 7.5)
+        # ETH should get more influence (30 * 0.40 = 12.0)
+        # TON should get less influence (30 * 0.30 = 9.0)
         assert eth_adjusted_score > ton_adjusted_score, "ETH should have stronger BTC correlation than TON"
         
-        # ETH: 5 + 10.5 = 15.5 -> should be LONG
-        # TON: 5 + 7.5 = 12.5 -> could be sideways or LONG depending on dead zone
+        # ETH: 5 + 12.0 = 17.0 -> should be LONG (> 10)
+        # TON: 5 + 9.0 = 14.0 -> should be sideways (< 15 TON dead zone)
         assert eth_result[0] == "long", "ETH should be LONG with strong BTC influence"
+    
+    def test_conflict_detection_only_for_opposite_directions(self, analyzer):
+        """Test that conflict is only detected for long<->short changes, not sideways."""
+        # Setup: BTC is in LONG
+        analyzer.last_symbol_signals["BTC"] = {
+            "direction": "long",
+            "probability": 75,
+            "total_score": 30.0,
+            "trend_score": 8.0,
+            "generated_at": 1234567890
+        }
+        
+        # Test 1: long -> sideways (NO conflict)
+        result1 = analyzer._cross_asset_correlation_check(
+            symbol="ETH",
+            direction="long",
+            probability=60,
+            total_score=5.0,  # weak long
+            trend_score=1.0,
+            block_trend_score=1.0,
+            block_momentum_score=1.0,
+            block_whales_score=1.0,
+            block_derivatives_score=1.0,
+            block_sentiment_score=1.0,
+            bullish_count=11,
+            bearish_count=9,
+            data_sources_count=20,
+        )
+        # 5 + (30 * 0.40) = 5 + 12 = 17 -> long
+        # No direction change, no conflict
+        assert result1[3] is False, "long -> long should not be a conflict"
+        
+        # Test 2: sideways -> long (NO conflict)
+        result2 = analyzer._cross_asset_correlation_check(
+            symbol="ETH",
+            direction="sideways",
+            probability=52,
+            total_score=3.0,
+            trend_score=0.5,
+            block_trend_score=0.5,
+            block_momentum_score=0.5,
+            block_whales_score=0.5,
+            block_derivatives_score=0.5,
+            block_sentiment_score=0.5,
+            bullish_count=10,
+            bearish_count=10,
+            data_sources_count=20,
+        )
+        # 3 + (30 * 0.40) = 3 + 12 = 15 -> long
+        # sideways -> long is NOT a conflict
+        assert result2[3] is False, "sideways -> long should not be a conflict"
+        
+        # Test 3: Setup BTC as SHORT, then ETH long -> should become sideways/short
+        analyzer.last_symbol_signals["BTC"] = {
+            "direction": "short",
+            "probability": 70,
+            "total_score": -30.0,
+            "trend_score": -8.0,
+            "generated_at": 1234567891
+        }
+        
+        result3 = analyzer._cross_asset_correlation_check(
+            symbol="ETH",
+            direction="long",
+            probability=65,
+            total_score=15.0,  # originally long
+            trend_score=3.0,
+            block_trend_score=3.0,
+            block_momentum_score=2.0,
+            block_whales_score=2.0,
+            block_derivatives_score=2.0,
+            block_sentiment_score=2.0,
+            bullish_count=14,
+            bearish_count=6,
+            data_sources_count=20,
+        )
+        # 15 + (-30 * 0.40) = 15 - 12 = 3 -> sideways (< 10)
+        # long -> sideways is NOT a conflict
+        assert result3[3] is False, "long -> sideways should not be a conflict"
+        
+        # Test 4: Strong opposite signal (long -> short) SHOULD be conflict
+        result4 = analyzer._cross_asset_correlation_check(
+            symbol="ETH",
+            direction="long",
+            probability=62,
+            total_score=5.0,  # weak long
+            trend_score=1.0,
+            block_trend_score=1.0,
+            block_momentum_score=1.0,
+            block_whales_score=0.5,
+            block_derivatives_score=1.0,
+            block_sentiment_score=0.5,
+            bullish_count=11,
+            bearish_count=9,
+            data_sources_count=20,
+        )
+        # 5 + (-30 * 0.40) = 5 - 12 = -7 -> sideways (abs(-7) < 10)
+        # long -> sideways is NOT a conflict
+        assert result4[3] is False, "long -> sideways should not be a conflict"
+        
+        # Test 5: Very strong BTC SHORT forcing ETH from long to short
+        analyzer.last_symbol_signals["BTC"] = {
+            "direction": "short",
+            "probability": 80,
+            "total_score": -50.0,
+            "trend_score": -10.0,
+            "generated_at": 1234567892
+        }
+        
+        result5 = analyzer._cross_asset_correlation_check(
+            symbol="ETH",
+            direction="long",
+            probability=62,
+            total_score=8.0,  # weak long
+            trend_score=1.5,
+            block_trend_score=1.5,
+            block_momentum_score=1.0,
+            block_whales_score=1.0,
+            block_derivatives_score=1.0,
+            block_sentiment_score=1.0,
+            bullish_count=12,
+            bearish_count=8,
+            data_sources_count=20,
+        )
+        # 8 + (-50 * 0.40) = 8 - 20 = -12 -> short (< -10)
+        # long -> short IS a conflict
+        assert result5[0] == "short", f"Expected short, got {result5[0]}"
+        assert result5[3] is True, "long -> short SHOULD be a conflict"
 
 
 if __name__ == "__main__":
