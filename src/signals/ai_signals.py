@@ -2675,72 +2675,77 @@ class AISignalAnalyzer:
         data_sources_count: int,
     ) -> tuple[str, int, float, bool]:
         """
-        Проверка согласованности сигналов между BTC/ETH/TON с учётом корреляции рынка.
+        Реальный расчёт сигнала с учётом корреляции BTC/ETH/TON.
         
-        BTC — ведущий индикатор рынка. Его тренд влияет на ETH и TON.
+        BTC — ведущий индикатор рынка. Его данные влияют на ETH и TON.
         
-        Корреляции:
-        - BTC/ETH: ~90%
-        - BTC/TON: ~70%
+        Корреляции (реальные рыночные):
+        - BTC/ETH: ~90% → 40% влияние BTC score на ETH
+        - BTC/TON: ~70% → 30% влияние BTC score на TON
         
         Возвращает:
-        - скорректированное direction
-        - скорректированную probability  
+        - скорректированное direction (на основе adjusted_total_score)
+        - скорректированную probability (пересчитанную по ВСЕМ факторам)
         - скорректированный total_score
         - флаг is_cross_conflict
         """
         is_cross_conflict = False
         
-        # BTC рассчитывается без корректировок — он ведущий
+        # BTC рассчитывается без корректировок — он ведущий индикатор
         if symbol == "BTC":
             return direction, probability, total_score, is_cross_conflict
         
-        # Получаем сигнал BTC
+        # Получаем последний сигнал BTC
         btc_signal = self.last_symbol_signals.get("BTC")
         if not btc_signal:
+            # Если BTC ещё не рассчитан, возвращаем без изменений
             return direction, probability, total_score, is_cross_conflict
         
         btc_direction = btc_signal["direction"]
         btc_total_score = btc_signal["total_score"]
+        btc_trend = btc_signal.get("trend_score", 0)
         
-        # Определяем силу корреляции
+        # ====== ОПРЕДЕЛЯЕМ СИЛУ КОРРЕЛЯЦИИ ======
         if symbol == "ETH":
-            correlation = 0.35  # 35% влияние BTC на ETH
+            correlation = 0.40  # 40% влияние BTC на ETH (высокая корреляция)
         elif symbol == "TON":
-            correlation = 0.25  # 25% влияние BTC на TON
+            correlation = 0.30  # 30% влияние BTC на TON (средняя корреляция)
         else:
-            correlation = 0.2
+            correlation = 0.20  # Для других монет
         
-        # ====== КОРРЕКТИРОВКА TOTAL_SCORE С УЧЁТОМ BTC ======
-        # BTC тренд влияет на общий score монеты
+        # ====== КОРРЕКТИРОВКА TOTAL_SCORE ======
+        # Добавляем влияние BTC к собственному score монеты
         btc_influence = btc_total_score * correlation
         adjusted_total_score = total_score + btc_influence
         
-        # ====== ПЕРЕСЧЁТ НАПРАВЛЕНИЯ ======
-        # Используем скорректированный score для определения направления
+        # ====== ОПРЕДЕЛЯЕМ DEAD ZONE ======
         if symbol == "TON":
             dead_zone = 15  # TON более волатильный
         else:
-            dead_zone = 10
+            dead_zone = 10  # ETH
         
+        # ====== ПЕРЕСЧЁТ НАПРАВЛЕНИЯ по adjusted_total_score ======
         if abs(adjusted_total_score) < dead_zone:
             new_direction = "sideways"
-        elif adjusted_total_score >= 25:
+        elif adjusted_total_score > 25:
             new_direction = "long"
-        elif adjusted_total_score >= dead_zone:
-            new_direction = "long"  
-        elif adjusted_total_score <= -25:
+        elif adjusted_total_score > dead_zone:
+            new_direction = "long"
+        elif adjusted_total_score < -25:
             new_direction = "short"
-        elif adjusted_total_score <= -dead_zone:
+        elif adjusted_total_score < -dead_zone:
             new_direction = "short"
         else:
             new_direction = "sideways"
         
-        # Проверяем был ли конфликт (изменение направления с long/short на другое)
-        if direction in ("long", "short") and direction != new_direction:
-            is_cross_conflict = True
+        # ====== ОПРЕДЕЛЯЕМ КОНФЛИКТ ======
+        # Конфликт если направление изменилось с long на short или наоборот
+        if direction in ("long", "short") and new_direction in ("long", "short"):
+            if direction != new_direction:
+                is_cross_conflict = True
         
-        # ====== ПЕРЕСЧЁТ ВЕРОЯТНОСТИ С УЧЁТОМ BTC ======
+        # ====== ПЕРЕСЧЁТ ВЕРОЯТНОСТИ ПО ВСЕМ ФАКТОРАМ ======
+        # Используем adjusted_total_score и все блоки для реального расчёта
         new_probability = self._calculate_probability(
             total_score=adjusted_total_score,
             direction=new_direction,
@@ -2756,16 +2761,16 @@ class AISignalAnalyzer:
             block_sentiment_score=block_sentiment_score,
         )
         
-        # ====== ДОПОЛНИТЕЛЬНЫЕ КОРРЕКТИРОВКИ ======
+        # ====== БОНУСЫ И ШТРАФЫ ЗА СОГЛАСОВАННОСТЬ ======
         
-        # Бонус за согласованность с BTC
+        # Бонус за согласованность с BTC (+3%)
         if new_direction == btc_direction and new_direction in ("long", "short"):
             new_probability = min(85, new_probability + 3)
         
-        # Штраф за конфликт с BTC (если всё ещё разные направления)
+        # Штраф за конфликт с BTC (-5%)
         if new_direction != btc_direction and new_direction in ("long", "short") and btc_direction in ("long", "short"):
             new_probability = max(50, new_probability - 5)
-            is_cross_conflict = True  # Also mark as conflict if final directions differ
+            is_cross_conflict = True
         
         return new_direction, new_probability, adjusted_total_score, is_cross_conflict
 
@@ -3539,9 +3544,8 @@ class AISignalAnalyzer:
         text += f"Сила сигнала: {strength_bar} {signal_strength}%\n"
         
         # Если был конфликт с BTC, добавляем предупреждение
-        if is_cross_conflict:
-            text += "⚠️ *КОРРЕКТИРОВКА*\n"
-            text += "_Сигнал скорректирован с учётом корреляции с BTC\\._\n"
+        if is_cross_conflict or signal_data.get("is_cross_conflict", False):
+            text += "\n⚠️ _Сигнал скорректирован с учётом корреляции BTC_\n"
         
         text += "\n"
         
