@@ -2733,11 +2733,12 @@ class AISignalAnalyzer:
             return direction, probability, total_score, is_cross_conflict
         
         # Проверяем свежесть сигнала BTC (не старше 10 минут)
-        generated_at = btc_signal.get("generated_at", 0)
-        age_seconds = time.time() - generated_at
+        expires_at = btc_signal.get("expires_at", 0)
+        current_time = time.time()
         
-        if age_seconds > self.CORRELATION_SIGNAL_TTL:
-            logger.info(f"BTC signal expired for correlation (age: {age_seconds:.0f}s > {self.CORRELATION_SIGNAL_TTL}s)")
+        if expires_at < current_time:
+            age_seconds = current_time - btc_signal.get("generated_at", 0)
+            logger.info(f"BTC signal expired for correlation (age: {age_seconds:.0f}s)")
             return direction, probability, total_score, is_cross_conflict
         
         btc_direction = btc_signal["direction"]
