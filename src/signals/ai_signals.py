@@ -2560,6 +2560,37 @@ class AISignalAnalyzer:
             "consensus": consensus
         }
     
+    def _calculate_probability_for_sideways(self, total_score: float) -> int:
+        """
+        Рассчитать вероятность для боковика на основе score.
+        
+        Чем ближе score к 0, тем выше уверенность в боковике.
+        Чем ближе score к границе dead zone (~10), тем ниже уверенность.
+        
+        Args:
+            total_score: Итоговый score (-100..+100)
+            
+        Returns:
+            Вероятность 50-62%
+        """
+        abs_score = abs(total_score)
+        
+        if abs_score < 2:
+            # Очень близко к нулю — высокая уверенность в боковике
+            return 62
+        elif abs_score < 4:
+            # Слабый сигнал — средняя уверенность
+            return 58
+        elif abs_score < 6:
+            # Средний сигнал
+            return 55
+        elif abs_score < 8:
+            # Ближе к границе
+            return 53
+        else:
+            # На грани направления — низкая уверенность в боковике
+            return 51
+    
     def _calculate_probability(
         self,
         total_score: float,      # -100..+100
@@ -2679,10 +2710,23 @@ class AISignalAnalyzer:
             elif trend_score < -3:
                 prob += 3  # Шорт по сильному медвежьему тренду
         
-        # 5. Боковик — ограничиваем вероятность
+        # 5. Боковик — используем специальный расчёт на основе score
         if direction == "sideways":
-            prob = min(prob, 58)  # Боковик не может быть > 58%
-            prob = max(prob, 50)  # И не < 50%
+            # Используем новый метод для расчёта вероятности боковика
+            base_sideways_prob = self._calculate_probability_for_sideways(total_score)
+            
+            # Применяем дополнительные корректировки на основе других факторов
+            # (небольшие бонусы/штрафы, но не выходим за пределы 50-62%)
+            
+            # Бонус за хороший охват данных (до +2%)
+            if coverage > 0.8:
+                base_sideways_prob = min(62, base_sideways_prob + 2)
+            
+            # Штраф за конфликт факторов (-2%)
+            if bullish_count > 0 and bearish_count > 0:
+                base_sideways_prob = max(50, base_sideways_prob - 2)
+            
+            prob = base_sideways_prob
         
         # ====== ФИНАЛЬНЫЕ ГРАНИЦЫ ======
         prob = int(round(max(50, min(85, prob))))
@@ -3393,6 +3437,15 @@ class AISignalAnalyzer:
         
         # Обновляем probability_data
         probability_data["probability"] = new_probability
+        # ВАЖНО: обновляем direction в probability_data после корреляции
+        if raw_direction == "long":
+            probability_data["direction"] = "up"
+        elif raw_direction == "short":
+            probability_data["direction"] = "down"
+        else:  # sideways
+            probability_data["direction"] = "sideways"
+        
+        logger.info(f"Final signal for {symbol}: direction={direction}, raw_direction={raw_direction}, probability={new_probability}, probability_direction={probability_data['direction']}")
         
         # ====== СОХРАНЯЕМ СИГНАЛ ДЛЯ МЕЖМОНЕТНОЙ ПРОВЕРКИ ======
         current_time = time.time()
