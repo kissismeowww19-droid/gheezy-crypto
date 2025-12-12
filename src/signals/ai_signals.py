@@ -109,6 +109,9 @@ class AISignalAnalyzer:
     # Supported coins for AI signals
     SUPPORTED_SIGNAL_COINS = {"BTC", "ETH", "TON"}
     
+    # Correlation signals TTL (10 minutes)
+    CORRELATION_SIGNAL_TTL = 600  # 10 минут - время жизни сигналов для корреляции
+    
     def __init__(self, whale_tracker):
         """
         Инициализация анализатора.
@@ -157,8 +160,11 @@ class AISignalAnalyzer:
         self.previous_scores: dict[str, float] = {}      # предыдущий score по монете
         self.previous_direction: dict[str, str] = {}     # предыдущее направление по монете
         
-        # Хранение последних сигналов для межмонетной проверки
+        # Хранение последних сигналов для межмонетной проверки (УСТАРЕВШЕЕ, для обратной совместимости)
         self.last_symbol_signals: dict[str, dict] = {}
+        
+        # Отдельное хранилище для сигналов корреляции (НЕ очищается при clear_cache, имеет TTL)
+        self._correlation_signals: dict[str, dict] = {}
         
         logger.info("AISignalAnalyzer initialized with 22-factor system")
     
@@ -194,10 +200,35 @@ class AISignalAnalyzer:
         self._cache_timestamps[key] = datetime.now()
     
     def clear_cache(self):
-        """Очистить весь кэш для получения свежих данных."""
+        """
+        Очистить кэш внешних API данных для получения свежих данных.
+        
+        ВАЖНО: _correlation_signals НЕ очищаются - они имеют собственный TTL
+        и используются для межмонетной корреляции (BTC → ETH/TON).
+        """
         self._cache = {}
         self._cache_timestamps = {}
-        logger.info("AISignalAnalyzer cache cleared")
+        logger.info("AISignalAnalyzer cache cleared (correlation signals preserved)")
+    
+    def _cleanup_expired_signals(self):
+        """
+        Удалить устаревшие сигналы для корреляции.
+        
+        Сигналы с истекшим TTL (expires_at < текущее время) удаляются,
+        чтобы не влиять на новые расчёты устаревшими данными.
+        """
+        import time
+        current_time = time.time()
+        expired = [
+            symbol for symbol, data in self._correlation_signals.items()
+            if data.get("expires_at", 0) < current_time
+        ]
+        for symbol in expired:
+            del self._correlation_signals[symbol]
+            logger.debug(f"Expired correlation signal removed: {symbol}")
+        
+        if expired:
+            logger.info(f"Cleaned up {len(expired)} expired correlation signals: {expired}")
     
     async def get_whale_data(self, symbol: str) -> Optional[Dict]:
         """
@@ -2695,10 +2726,19 @@ class AISignalAnalyzer:
         if symbol == "BTC":
             return direction, probability, total_score, is_cross_conflict
         
-        # Получаем последний сигнал BTC
-        btc_signal = self.last_symbol_signals.get("BTC")
+        # Получаем последний сигнал BTC из хранилища корреляции
+        btc_signal = self._correlation_signals.get("BTC")
         if not btc_signal:
             # Если BTC ещё не рассчитан, возвращаем без изменений
+            return direction, probability, total_score, is_cross_conflict
+        
+        # Проверяем свежесть сигнала BTC (не старше 10 минут)
+        import time
+        generated_at = btc_signal.get("generated_at", 0)
+        age_seconds = time.time() - generated_at
+        
+        if age_seconds > self.CORRELATION_SIGNAL_TTL:
+            logger.info(f"BTC signal expired for correlation (age: {age_seconds:.0f}s > {self.CORRELATION_SIGNAL_TTL}s)")
             return direction, probability, total_score, is_cross_conflict
         
         btc_direction = btc_signal["direction"]
@@ -2920,6 +2960,9 @@ class AISignalAnalyzer:
         Returns:
             Dict with analysis results
         """
+        # Очистка устаревших сигналов корреляции
+        self._cleanup_expired_signals()
+        
         # Calculate 10 long-term factor scores
         whale_score = self._calculate_whale_score(whale_data, exchange_flows)
         
@@ -3332,13 +3375,28 @@ class AISignalAnalyzer:
         probability_data["probability"] = new_probability
         
         # ====== СОХРАНЯЕМ СИГНАЛ ДЛЯ МЕЖМОНЕТНОЙ ПРОВЕРКИ ======
+        import time
+        current_time = time.time()
+        
+        # Сохраняем в старое хранилище для обратной совместимости
         self.last_symbol_signals[symbol] = {
             "direction": raw_direction,
             "probability": new_probability,
             "total_score": total_score,
             "trend_score": block_trend_score,
-            "generated_at": datetime.now().timestamp(),
+            "generated_at": current_time,
         }
+        
+        # Сохраняем в отдельное хранилище корреляции с TTL
+        self._correlation_signals[symbol] = {
+            "direction": raw_direction,
+            "probability": new_probability,
+            "total_score": total_score,
+            "trend_score": block_trend_score,
+            "generated_at": current_time,
+            "expires_at": current_time + self.CORRELATION_SIGNAL_TTL,  # TTL 10 минут
+        }
+        logger.debug(f"Correlation signal saved: {symbol} -> {raw_direction} (expires in {self.CORRELATION_SIGNAL_TTL}s)")
         
         # Normalize strength to 0-100%
         strength_percent = min(max((total_score + 100) / 200 * 100, 0), 100)

@@ -96,13 +96,17 @@ class TestCrossAssetCorrelation:
     
     def test_eth_with_btc_short_signal(self, analyzer):
         """Test ETH adjustment when BTC is in SHORT."""
+        import time
+        current_time = time.time()
+        
         # Setup: BTC is in SHORT with strong negative score
-        analyzer.last_symbol_signals["BTC"] = {
+        analyzer._correlation_signals["BTC"] = {
             "direction": "short",
             "probability": 67,
             "total_score": -13.0,
             "trend_score": -7.0,
-            "generated_at": 1234567890
+            "generated_at": current_time,
+            "expires_at": current_time + 600,
         }
         
         # ETH originally LONG
@@ -140,13 +144,17 @@ class TestCrossAssetCorrelation:
     
     def test_ton_with_btc_short_signal(self, analyzer):
         """Test TON adjustment when BTC is in SHORT."""
+        import time
+        current_time = time.time()
+        
         # Setup: BTC is in SHORT
-        analyzer.last_symbol_signals["BTC"] = {
+        analyzer._correlation_signals["BTC"] = {
             "direction": "short",
             "probability": 67,
             "total_score": -13.0,
             "trend_score": -7.0,
-            "generated_at": 1234567890
+            "generated_at": current_time,
+            "expires_at": current_time + 600,
         }
         
         # TON originally LONG (weak)
@@ -183,13 +191,17 @@ class TestCrossAssetCorrelation:
     
     def test_eth_long_with_btc_long_agreement(self, analyzer):
         """Test ETH LONG when BTC is also LONG (agreement bonus)."""
+        import time
+        current_time = time.time()
+        
         # Setup: BTC is in LONG
-        analyzer.last_symbol_signals["BTC"] = {
+        analyzer._correlation_signals["BTC"] = {
             "direction": "long",
             "probability": 70,
             "total_score": 20.0,
             "trend_score": 5.0,
-            "generated_at": 1234567890
+            "generated_at": current_time,
+            "expires_at": current_time + 600,
         }
         
         # ETH also LONG
@@ -224,13 +236,17 @@ class TestCrossAssetCorrelation:
     
     def test_eth_short_disagrees_with_btc_long(self, analyzer):
         """Test conflict detection when ETH is SHORT but BTC is LONG."""
+        import time
+        current_time = time.time()
+        
         # Setup: BTC is in LONG
-        analyzer.last_symbol_signals["BTC"] = {
+        analyzer._correlation_signals["BTC"] = {
             "direction": "long",
             "probability": 70,
             "total_score": 20.0,
             "trend_score": 5.0,
-            "generated_at": 1234567890
+            "generated_at": current_time,
+            "expires_at": current_time + 600,
         }
         
         # ETH SHORT (weak)
@@ -265,14 +281,18 @@ class TestCrossAssetCorrelation:
         assert is_conflict is False, "short -> sideways should NOT be a conflict"
     
     def test_correlation_strength_differences(self, analyzer):
-        """Test that ETH has stronger correlation (35%) than TON (25%)."""
+        """Test that ETH has stronger correlation (40%) than TON (30%)."""
+        import time
+        current_time = time.time()
+        
         # Setup: BTC with strong signal
-        analyzer.last_symbol_signals["BTC"] = {
+        analyzer._correlation_signals["BTC"] = {
             "direction": "long",
             "probability": 75,
             "total_score": 30.0,
             "trend_score": 8.0,
-            "generated_at": 1234567890
+            "generated_at": current_time,
+            "expires_at": current_time + 600,
         }
         
         # Test ETH
@@ -322,13 +342,17 @@ class TestCrossAssetCorrelation:
     
     def test_conflict_detection_only_for_opposite_directions(self, analyzer):
         """Test that conflict is only detected for long<->short changes, not sideways."""
+        import time
+        current_time = time.time()
+        
         # Setup: BTC is in LONG
-        analyzer.last_symbol_signals["BTC"] = {
+        analyzer._correlation_signals["BTC"] = {
             "direction": "long",
             "probability": 75,
             "total_score": 30.0,
             "trend_score": 8.0,
-            "generated_at": 1234567890
+            "generated_at": current_time,
+            "expires_at": current_time + 600,
         }
         
         # Test 1: long -> sideways (NO conflict)
@@ -372,12 +396,13 @@ class TestCrossAssetCorrelation:
         assert result2[3] is False, "sideways -> long should not be a conflict"
         
         # Test 3: Setup BTC as SHORT, then ETH long -> should become sideways/short
-        analyzer.last_symbol_signals["BTC"] = {
+        analyzer._correlation_signals["BTC"] = {
             "direction": "short",
             "probability": 70,
             "total_score": -30.0,
             "trend_score": -8.0,
-            "generated_at": 1234567891
+            "generated_at": current_time,
+            "expires_at": current_time + 600,
         }
         
         result3 = analyzer._cross_asset_correlation_check(
@@ -420,12 +445,13 @@ class TestCrossAssetCorrelation:
         assert result4[3] is False, "long -> sideways should not be a conflict"
         
         # Test 5: Very strong BTC SHORT forcing ETH from long to short
-        analyzer.last_symbol_signals["BTC"] = {
+        analyzer._correlation_signals["BTC"] = {
             "direction": "short",
             "probability": 80,
             "total_score": -50.0,
             "trend_score": -10.0,
-            "generated_at": 1234567892
+            "generated_at": current_time,
+            "expires_at": current_time + 600,
         }
         
         result5 = analyzer._cross_asset_correlation_check(
@@ -447,6 +473,171 @@ class TestCrossAssetCorrelation:
         # long -> short IS a conflict
         assert result5[0] == "short", f"Expected short, got {result5[0]}"
         assert result5[3] is True, "long -> short SHOULD be a conflict"
+
+
+    def test_correlation_signals_storage_initialization(self, analyzer):
+        """Test that _correlation_signals storage is initialized."""
+        assert hasattr(analyzer, '_correlation_signals')
+        assert isinstance(analyzer._correlation_signals, dict)
+        assert len(analyzer._correlation_signals) == 0
+    
+    def test_correlation_signals_preserved_on_clear_cache(self, analyzer):
+        """Test that _correlation_signals are NOT cleared when cache is cleared."""
+        import time
+        current_time = time.time()
+        
+        # Add a correlation signal
+        analyzer._correlation_signals["BTC"] = {
+            "direction": "long",
+            "probability": 70,
+            "total_score": 20.0,
+            "trend_score": 5.0,
+            "generated_at": current_time,
+            "expires_at": current_time + 600,
+        }
+        
+        # Add some cache data
+        analyzer._cache["test_key"] = {"data": "test"}
+        analyzer._cache_timestamps["test_key"] = time.time()
+        
+        # Clear cache
+        analyzer.clear_cache()
+        
+        # Cache should be cleared
+        assert len(analyzer._cache) == 0
+        assert len(analyzer._cache_timestamps) == 0
+        
+        # But correlation signals should be preserved
+        assert len(analyzer._correlation_signals) == 1
+        assert "BTC" in analyzer._correlation_signals
+        assert analyzer._correlation_signals["BTC"]["direction"] == "long"
+    
+    def test_cleanup_expired_signals(self, analyzer):
+        """Test that expired signals are removed by cleanup."""
+        import time
+        current_time = time.time()
+        
+        # Add a fresh signal (not expired)
+        analyzer._correlation_signals["BTC"] = {
+            "direction": "long",
+            "probability": 70,
+            "total_score": 20.0,
+            "trend_score": 5.0,
+            "generated_at": current_time,
+            "expires_at": current_time + 600,  # expires in 10 minutes
+        }
+        
+        # Add an expired signal
+        analyzer._correlation_signals["ETH"] = {
+            "direction": "short",
+            "probability": 65,
+            "total_score": -15.0,
+            "trend_score": -4.0,
+            "generated_at": current_time - 700,  # 11.67 minutes ago
+            "expires_at": current_time - 100,  # expired 100 seconds ago
+        }
+        
+        # Run cleanup
+        analyzer._cleanup_expired_signals()
+        
+        # Fresh signal should remain
+        assert "BTC" in analyzer._correlation_signals
+        
+        # Expired signal should be removed
+        assert "ETH" not in analyzer._correlation_signals
+    
+    def test_eth_with_expired_btc_signal(self, analyzer):
+        """Test that expired BTC signal is not used for ETH correlation."""
+        import time
+        current_time = time.time()
+        
+        # Add an expired BTC signal
+        analyzer._correlation_signals["BTC"] = {
+            "direction": "short",
+            "probability": 67,
+            "total_score": -13.0,
+            "trend_score": -7.0,
+            "generated_at": current_time - 700,  # 11.67 minutes ago
+            "expires_at": current_time - 100,  # expired
+        }
+        
+        # ETH originally LONG
+        direction = "long"
+        probability = 78
+        total_score = 14.0
+        
+        result = analyzer._cross_asset_correlation_check(
+            symbol="ETH",
+            direction=direction,
+            probability=probability,
+            total_score=total_score,
+            trend_score=3.0,
+            block_trend_score=3.0,
+            block_momentum_score=2.0,
+            block_whales_score=1.0,
+            block_derivatives_score=3.0,
+            block_sentiment_score=2.0,
+            bullish_count=12,
+            bearish_count=8,
+            data_sources_count=20,
+        )
+        
+        new_direction, new_probability, new_total_score, is_conflict = result
+        
+        # ETH should NOT be adjusted because BTC signal is expired
+        assert new_direction == direction
+        assert new_probability == probability
+        assert new_total_score == total_score
+        assert is_conflict is False
+    
+    def test_eth_with_fresh_btc_signal(self, analyzer):
+        """Test that fresh BTC signal IS used for ETH correlation."""
+        import time
+        current_time = time.time()
+        
+        # Add a fresh BTC signal
+        analyzer._correlation_signals["BTC"] = {
+            "direction": "short",
+            "probability": 67,
+            "total_score": -13.0,
+            "trend_score": -7.0,
+            "generated_at": current_time,  # just now
+            "expires_at": current_time + 600,  # expires in 10 minutes
+        }
+        
+        # ETH originally LONG
+        direction = "long"
+        probability = 78
+        total_score = 14.0
+        
+        result = analyzer._cross_asset_correlation_check(
+            symbol="ETH",
+            direction=direction,
+            probability=probability,
+            total_score=total_score,
+            trend_score=3.0,
+            block_trend_score=3.0,
+            block_momentum_score=2.0,
+            block_whales_score=1.0,
+            block_derivatives_score=3.0,
+            block_sentiment_score=2.0,
+            bullish_count=12,
+            bearish_count=8,
+            data_sources_count=20,
+        )
+        
+        new_direction, new_probability, new_total_score, is_conflict = result
+        
+        # ETH SHOULD be adjusted
+        # BTC influence: -13 * 0.40 = -5.2
+        # Adjusted score: 14 + (-5.2) = 8.8
+        assert new_total_score < total_score, "Total score should be reduced by BTC influence"
+        assert new_direction == "sideways", f"Expected sideways after BTC correlation, got {new_direction}"
+    
+    def test_correlation_signal_ttl_constant(self, analyzer):
+        """Test that CORRELATION_SIGNAL_TTL constant exists and is 600 seconds (10 minutes)."""
+        assert hasattr(analyzer, 'CORRELATION_SIGNAL_TTL')
+        assert analyzer.CORRELATION_SIGNAL_TTL == 600
 
 
 if __name__ == "__main__":
