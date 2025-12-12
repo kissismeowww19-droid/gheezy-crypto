@@ -2560,6 +2560,101 @@ class AISignalAnalyzer:
             "consensus": consensus
         }
     
+    def _determine_direction_from_score(self, total_score: float) -> str:
+        """
+        Определить направление строго по score.
+        Никаких исключений — данные решают.
+        
+        Args:
+            total_score: Итоговый score (-100..+100)
+            
+        Returns:
+            "short" если score <= -10
+            "long" если score >= 10
+            "sideways" если -10 < score < 10
+        """
+        if total_score <= -10:
+            return "short"      # Чёткий медвежий сигнал
+        elif total_score >= 10:
+            return "long"       # Чёткий бычий сигнал
+        else:
+            return "sideways"   # Нет чёткого направления = боковик
+    
+    def _calculate_real_probability(
+        self,
+        total_score: float,
+        direction: str,
+        bullish_count: int,
+        bearish_count: int,
+        neutral_count: int
+    ) -> int:
+        """
+        Рассчитать реальную вероятность на основе:
+        1. Силы score (чем дальше от 0, тем увереннее)
+        2. Консенсуса факторов (bullish vs bearish)
+        3. Количества нейтральных (много нейтральных = неопределённость)
+        
+        Args:
+            total_score: Итоговый score (-100..+100)
+            direction: Направление ("long"/"short"/"sideways")
+            bullish_count: Количество бычьих факторов
+            bearish_count: Количество медвежьих факторов
+            neutral_count: Количество нейтральных факторов
+            
+        Returns:
+            Вероятность 50-85%
+        """
+        abs_score = abs(total_score)
+        
+        if direction == "sideways":
+            # Боковик: чем ближе к 0, тем увереннее
+            if abs_score < 2:
+                base = 68  # Очень уверенный боковик
+            elif abs_score < 4:
+                base = 63
+            elif abs_score < 6:
+                base = 58
+            elif abs_score < 8:
+                base = 54
+            else:
+                base = 51  # На грани направления
+        else:
+            # Long/Short: чем дальше от 10, тем увереннее
+            if abs_score < 12:
+                base = 52  # Слабый сигнал (только перешёл границу)
+            elif abs_score < 15:
+                base = 56
+            elif abs_score < 18:
+                base = 60
+            elif abs_score < 22:
+                base = 65
+            elif abs_score < 28:
+                base = 70
+            elif abs_score < 35:
+                base = 75
+            else:
+                base = 80  # Экстремально сильный сигнал
+        
+        # Бонус за консенсус факторов
+        if direction == "long" and bullish_count > bearish_count:
+            consensus_bonus = min(5, bullish_count - bearish_count)
+            base += consensus_bonus
+        elif direction == "short" and bearish_count > bullish_count:
+            consensus_bonus = min(5, bearish_count - bullish_count)
+            base += consensus_bonus
+        elif direction == "sideways":
+            # Для боковика: много нейтральных = хорошо
+            if neutral_count > (bullish_count + bearish_count):
+                base += 3
+        
+        # Штраф за противоречивые данные
+        if direction == "long" and bearish_count > bullish_count:
+            base -= 5  # Данные противоречат направлению
+        elif direction == "short" and bullish_count > bearish_count:
+            base -= 5
+        
+        return max(50, min(85, base))
+    
     def _calculate_probability_for_sideways(self, total_score: float) -> int:
         """
         Рассчитать вероятность для боковика на основе score.
@@ -2747,6 +2842,7 @@ class AISignalAnalyzer:
         block_sentiment_score: float,
         bullish_count: int,
         bearish_count: int,
+        neutral_count: int,
         data_sources_count: int,
     ) -> tuple[str, int, float, bool]:
         """
@@ -2799,6 +2895,11 @@ class AISignalAnalyzer:
         
         logger.info(f"Cross-asset: BTC signal = direction={btc_direction}, total_score={btc_total_score}")
         
+        # Корреляция только при сильном BTC сигнале
+        if abs(btc_total_score) < 10:
+            logger.info(f"BTC in sideways (score={btc_total_score:.2f}), no correlation applied to {symbol}")
+            return direction, probability, total_score, False
+        
         # ====== ОПРЕДЕЛЯЕМ СИЛУ КОРРЕЛЯЦИИ ======
         if symbol == "ETH":
             correlation = 0.40  # 40% влияние BTC на ETH (высокая корреляция)
@@ -2814,25 +2915,9 @@ class AISignalAnalyzer:
         
         logger.info(f"Cross-asset: {symbol} score adjustment: {total_score:.2f} + ({btc_total_score:.2f} * {correlation}) = {adjusted_total_score:.2f}")
         
-        # ====== ОПРЕДЕЛЯЕМ DEAD ZONE ======
-        if symbol == "TON":
-            dead_zone = 15  # TON более волатильный
-        else:
-            dead_zone = 10  # ETH
-        
         # ====== ПЕРЕСЧЁТ НАПРАВЛЕНИЯ по adjusted_total_score ======
-        if abs(adjusted_total_score) < dead_zone:
-            new_direction = "sideways"
-        elif adjusted_total_score > 25:
-            new_direction = "long"
-        elif adjusted_total_score > dead_zone:
-            new_direction = "long"
-        elif adjusted_total_score < -25:
-            new_direction = "short"
-        elif adjusted_total_score < -dead_zone:
-            new_direction = "short"
-        else:
-            new_direction = "sideways"
+        # Используем единственный источник правды для определения направления
+        new_direction = self._determine_direction_from_score(adjusted_total_score)
         
         # ====== ОПРЕДЕЛЯЕМ КОНФЛИКТ ======
         # Конфликт если направление изменилось с long на short или наоборот
@@ -2840,33 +2925,15 @@ class AISignalAnalyzer:
             if direction != new_direction:
                 is_cross_conflict = True
         
-        # ====== ПЕРЕСЧЁТ ВЕРОЯТНОСТИ ПО ВСЕМ ФАКТОРАМ ======
-        # Используем adjusted_total_score и все блоки для реального расчёта
-        new_probability = self._calculate_probability(
+        # ====== ПЕРЕСЧЁТ ВЕРОЯТНОСТИ ======
+        # Используем новый метод для реальной вероятности
+        new_probability = self._calculate_real_probability(
             total_score=adjusted_total_score,
             direction=new_direction,
             bullish_count=bullish_count,
             bearish_count=bearish_count,
-            data_sources_count=data_sources_count,
-            total_sources=self.TOTAL_DATA_SOURCES,
-            trend_score=trend_score,
-            block_trend_score=block_trend_score,
-            block_momentum_score=block_momentum_score,
-            block_whales_score=block_whales_score,
-            block_derivatives_score=block_derivatives_score,
-            block_sentiment_score=block_sentiment_score,
+            neutral_count=neutral_count
         )
-        
-        # ====== БОНУСЫ И ШТРАФЫ ЗА СОГЛАСОВАННОСТЬ ======
-        
-        # Бонус за согласованность с BTC (+3%)
-        if new_direction == btc_direction and new_direction in ("long", "short"):
-            new_probability = min(85, new_probability + 3)
-        
-        # Штраф за конфликт с BTC (-5%)
-        if new_direction != btc_direction and new_direction in ("long", "short") and btc_direction in ("long", "short"):
-            new_probability = max(50, new_probability - 5)
-            is_cross_conflict = True
         
         # ЛОГИРОВАНИЕ РЕЗУЛЬТАТА
         logger.info(f"Cross-asset RESULT for {symbol}: direction {direction} → {new_direction}, probability {probability} → {new_probability}, score {total_score:.2f} → {adjusted_total_score:.2f}, conflict={is_cross_conflict}")
@@ -3269,128 +3336,20 @@ class AISignalAnalyzer:
             social_data is not None,
         ])
         
-        # Calculate probability (22 factors)
-        probability_data = self.calculate_probability(
-            total_score=total_score,
-            data_sources_count=data_sources_available,
-            consensus_count=consensus_data["bullish_count"] if total_score > 0 else consensus_data["bearish_count"],
-            total_factors=22
-        )
-        
-        # Слабый сигнал (сила < 10%) → ВСЕГДА боковик
-        if abs(total_score) < 10:
-            direction = "➡️ Боковик"
-            raw_direction = "sideways"
-            strength = "слабый"
-            confidence = "Низкая"
-        else:
-            # Определяем размер мёртвой зоны (для TON шире)
-            if symbol == "TON":
-                dead_zone = self.DEAD_ZONE_TON  # TON более шумный, нужна широкая зона
-            else:
-                dead_zone = self.DEAD_ZONE_DEFAULT  # BTC/ETH
-            
-            # Мёртвая зона — показываем боковик
-            if abs(total_score) < dead_zone:
-                direction = "➡️ Боковик"
-                strength = "слабый"
-                confidence = "Низкая"
-            elif total_score > 25:
-                direction = "📈 ВВЕРХ"
-                strength = "сильный"
-                confidence = "Высокая"
-            elif total_score > 10:
-                direction = "📈 Вероятно вверх"
-                strength = "средний"
-                confidence = "Средняя"
-            elif total_score < -25:
-                direction = "📉 ВНИЗ"
-                strength = "сильный"
-                confidence = "Высокая"
-            elif total_score < -10:
-                direction = "📉 Вероятно вниз"
-                strength = "средний"
-                confidence = "Средняя"
-            else:
-                direction = "➡️ Боковик"
-                strength = "слабый"
-                confidence = "Низкая"
-            
-            # Преобразуем direction в простой формат для сравнения
-            if "ВВЕРХ" in direction or "вверх" in direction:
-                raw_direction = "long"
-            elif "ВНИЗ" in direction or "вниз" in direction:
-                raw_direction = "short"
-            else:
-                raw_direction = "sideways"
-        
-        # Проверка направления против явного консенсуса факторов
-        # Не давать направление против консенсуса (если разница >= 2)
-        if consensus_data["bullish_count"] >= consensus_data["bearish_count"] + 2 and raw_direction == "short":
-            # Бычий консенсус, но сигнал шорт → боковик
-            raw_direction = "sideways"
-            direction = "➡️ Боковик"
-            strength = "слабый"
-            confidence = "Низкая"
-        elif consensus_data["bearish_count"] >= consensus_data["bullish_count"] + 2 and raw_direction == "long":
-            # Медвежий консенсус, но сигнал лонг → боковик
-            raw_direction = "sideways"
-            direction = "➡️ Боковик"
-            strength = "слабый"
-            confidence = "Низкая"
-        
-        # Гистерезис — не разворачиваем сразу
-        prev_dir = self.previous_direction.get(symbol)
-        
-        if prev_dir == "long" and raw_direction == "short":
-            # Был ЛОНГ, хотим ШОРТ — нужен сильный сигнал
-            if abs(total_score) < self.HYSTERESIS_THRESHOLD:
-                direction = "➡️ Боковик"
-                strength = "слабый"
-                confidence = "Низкая"
-                raw_direction = "sideways"
-        elif prev_dir == "short" and raw_direction == "long":
-            # Был ШОРТ, хотим ЛОНГ — нужен сильный сигнал
-            if abs(total_score) < self.HYSTERESIS_THRESHOLD:
-                direction = "➡️ Боковик"
-                strength = "слабый"
-                confidence = "Низкая"
-                raw_direction = "sideways"
-        
-        # Сохраняем текущее направление
-        self.previous_direction[symbol] = raw_direction
-        
-        # РЕАЛЬНАЯ ВЕРОЯТНОСТЬ на основе ВСЕХ факторов
-        # Note: trend_score используется для расчёта штрафа "против тренда"
-        # block_trend_score используется для расчёта бонуса от блока тренда
-        # Оба используют одно значение block_trend_score, но для разных целей
-        new_probability = self._calculate_probability(
-            total_score=total_score,
-            direction=raw_direction,
-            bullish_count=consensus_data["bullish_count"],
-            bearish_count=consensus_data["bearish_count"],
-            data_sources_count=data_sources_available,
-            total_sources=self.TOTAL_DATA_SOURCES,
-            trend_score=block_trend_score,  # Для штрафа "против тренда"
-            # Новые параметры — все 5 блоков (для бонусов)
-            block_trend_score=block_trend_score,
-            block_momentum_score=block_momentum_score,
-            block_whales_score=block_whales_score,
-            block_derivatives_score=block_derivatives_score,
-            block_sentiment_score=block_sentiment_score,
-        )
-        
-        # Обновляем probability_data с новой вероятностью
-        probability_data["probability"] = new_probability
-        
         # ====== МЕЖМОНЕТНАЯ КОРРЕЛЯЦИЯ ======
         # Корректируем сигнал с учётом BTC (ведущий индикатор рынка)
         logger.info(f"Applying cross-asset correlation for {symbol}...")
         
+        # Определяем начальное направление по score (до корреляции)
+        initial_direction = self._determine_direction_from_score(total_score)
+        
+        # Initial probability for correlation check (not used, will be recalculated)
+        INITIAL_PROBABILITY = 50  # Neutral baseline before honest probability calculation
+        
         adjusted_direction, adjusted_probability, adjusted_total_score, is_cross_conflict = self._cross_asset_correlation_check(
             symbol=symbol,
-            direction=raw_direction,
-            probability=new_probability,
+            direction=initial_direction,
+            probability=INITIAL_PROBABILITY,
             total_score=total_score,
             trend_score=block_trend_score,
             block_trend_score=block_trend_score,
@@ -3400,60 +3359,80 @@ class AISignalAnalyzer:
             block_sentiment_score=block_sentiment_score,
             bullish_count=consensus_data["bullish_count"],
             bearish_count=consensus_data["bearish_count"],
+            neutral_count=consensus_data["neutral_count"],
             data_sources_count=data_sources_available,
         )
         
         # ЛОГИРОВАНИЕ результата корреляции
-        logger.info(f"Cross-asset result: direction {raw_direction} → {adjusted_direction}, probability {new_probability} → {adjusted_probability}, score {total_score:.2f} → {adjusted_total_score:.2f}")
+        logger.info(f"Cross-asset result: direction {initial_direction} → {adjusted_direction}, score {total_score:.2f} → {adjusted_total_score:.2f}")
         
         # Применяем корректировки
         raw_direction = adjusted_direction
-        new_probability = adjusted_probability
         total_score = adjusted_total_score
         
-        # Обновляем текстовое направление
-        if raw_direction == "long":
-            if abs(total_score) > 25:
-                direction = "📈 ВВЕРХ"
+        # ====== ФИНАЛЬНОЕ НАПРАВЛЕНИЕ И ТЕКСТ ======
+        # Направление определяется ТОЛЬКО по score (уже учтена корреляция)
+        final_direction = raw_direction  # Уже определено через _determine_direction_from_score
+        
+        # Текст соответствует направлению
+        if final_direction == "long":
+            if abs(total_score) >= 25:
+                direction = "📈 ЛОНГ"
                 strength = "сильный"
-                confidence = "Высокая"
             else:
                 direction = "📈 Вероятно вверх"
                 strength = "средний"
-                confidence = "Средняя"
-        elif raw_direction == "short":
-            if abs(total_score) > 25:
-                direction = "📉 ВНИЗ"
+        elif final_direction == "short":
+            if abs(total_score) >= 25:
+                direction = "📉 ШОРТ"
                 strength = "сильный"
-                confidence = "Высокая"
             else:
                 direction = "📉 Вероятно вниз"
                 strength = "средний"
-                confidence = "Средняя"
-        else:
+        else:  # sideways
             direction = "➡️ Боковик"
             strength = "слабый"
+        
+        # Вероятность рассчитывается по реальным данным
+        final_probability = self._calculate_real_probability(
+            total_score=total_score,
+            direction=final_direction,
+            bullish_count=consensus_data["bullish_count"],
+            bearish_count=consensus_data["bearish_count"],
+            neutral_count=consensus_data["neutral_count"]
+        )
+        
+        logger.info(f"FINAL signal for {symbol}: direction={direction}, raw={final_direction}, score={total_score:.2f}, probability={final_probability}%")
+        
+        # Determine confidence based on probability
+        if final_probability >= 70:
+            confidence = "Высокая"
+            confidence_en = "high"
+        elif final_probability >= 60:
+            confidence = "Средняя"
+            confidence_en = "medium"
+        else:
             confidence = "Низкая"
+            confidence_en = "low"
         
-        # Обновляем probability_data
-        probability_data["probability"] = new_probability
-        # ВАЖНО: обновляем direction в probability_data после корреляции
-        if raw_direction == "long":
-            probability_data["direction"] = "up"
-        elif raw_direction == "short":
-            probability_data["direction"] = "down"
-        else:  # sideways
-            probability_data["direction"] = "sideways"
+        # Create probability_data with final values
+        probability_data = {
+            "probability": final_probability,
+            "direction": "up" if final_direction == "long" else ("down" if final_direction == "short" else "sideways"),
+            "confidence": confidence_en,
+            "data_quality": round(data_sources_available / self.TOTAL_DATA_SOURCES, 2)
+        }
         
-        logger.info(f"Final signal for {symbol}: direction={direction}, raw_direction={raw_direction}, probability={new_probability}, probability_direction={probability_data['direction']}")
+        # Save direction for next time (for hysteresis tracking, though not actively used in honest signals)
+        self.previous_direction[symbol] = final_direction
         
         # ====== СОХРАНЯЕМ СИГНАЛ ДЛЯ МЕЖМОНЕТНОЙ ПРОВЕРКИ ======
         current_time = time.time()
         
         # Сохраняем в старое хранилище для обратной совместимости
         self.last_symbol_signals[symbol] = {
-            "direction": raw_direction,
-            "probability": new_probability,
+            "direction": final_direction,
+            "probability": final_probability,
             "total_score": total_score,
             "trend_score": block_trend_score,
             "generated_at": current_time,
@@ -3461,20 +3440,22 @@ class AISignalAnalyzer:
         
         # Сохраняем в отдельное хранилище корреляции с TTL
         self._correlation_signals[symbol] = {
-            "direction": raw_direction,
-            "probability": new_probability,
+            "direction": final_direction,
+            "probability": final_probability,
             "total_score": total_score,
             "trend_score": block_trend_score,
             "generated_at": current_time,
             "expires_at": current_time + self.CORRELATION_SIGNAL_TTL,  # TTL 10 минут
         }
-        logger.info(f"Saved signal for {symbol}: direction={raw_direction}, probability={new_probability}, total_score={total_score:.2f} (expires in {self.CORRELATION_SIGNAL_TTL}s)")
+        logger.info(f"Saved signal for {symbol}: direction={final_direction}, probability={final_probability}, total_score={total_score:.2f} (expires in {self.CORRELATION_SIGNAL_TTL}s)")
         
         # Normalize strength to 0-100%
         strength_percent = min(max((total_score + 100) / 200 * 100, 0), 100)
         
         return {
+            "symbol": symbol,
             "direction": direction,
+            "raw_direction": final_direction,  # "long" или "short" или "sideways"
             "strength": strength,
             "strength_percent": round(strength_percent),
             "confidence": confidence,

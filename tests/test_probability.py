@@ -223,7 +223,7 @@ class TestIntegration:
         
         # Validate probability values
         assert 20 <= result["probability"] <= 95
-        assert result["probability_direction"] in ["up", "down"]
+        assert result["probability_direction"] in ["up", "down", "sideways"]
         assert result["probability_confidence"] in ["high", "medium", "low"]
         assert 0 <= result["data_quality"] <= 1
 
