@@ -107,6 +107,9 @@ class AISignalAnalyzer:
     WEAK_SIGNAL_PROBABILITY = 52  # Фиксированная вероятность для слабых сигналов
     MEDIUM_SIGNAL_MAX_PROBABILITY = 58  # Максимальная вероятность для средних сигналов
     
+    # Sideways display constants
+    SIDEWAYS_RANGE_PERCENT = 1.0  # Диапазон для боковика (+/-1.0%)
+    
     # Supported coins for AI signals
     SUPPORTED_SIGNAL_COINS = {"BTC", "ETH", "TON"}
     
@@ -3635,9 +3638,8 @@ class AISignalAnalyzer:
         # Рассчитываем TP (два уровня) и SL
         if is_sideways:
             # Для боковика показываем диапазон
-            range_percent = 1.0
-            range_high = current_price * (1 + range_percent / 100)
-            range_low = current_price * (1 - range_percent / 100)
+            range_high = current_price * (1 + self.SIDEWAYS_RANGE_PERCENT / 100)
+            range_low = current_price * (1 - self.SIDEWAYS_RANGE_PERCENT / 100)
             tp1_price = None
             tp2_price = None
             sl_price = None
