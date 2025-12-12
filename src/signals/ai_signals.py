@@ -2605,7 +2605,6 @@ class AISignalAnalyzer:
             Вероятность 50-85%
         """
         abs_score = abs(total_score)
-        total_factors = bullish_count + bearish_count + neutral_count
         
         if direction == "sideways":
             # Боковик: чем ближе к 0, тем увереннее
@@ -3337,14 +3336,6 @@ class AISignalAnalyzer:
             social_data is not None,
         ])
         
-        # Calculate probability (22 factors) - OLD method, will be replaced
-        probability_data = self.calculate_probability(
-            total_score=total_score,
-            data_sources_count=data_sources_available,
-            consensus_count=consensus_data["bullish_count"] if total_score > 0 else consensus_data["bearish_count"],
-            total_factors=22
-        )
-        
         # ====== МЕЖМОНЕТНАЯ КОРРЕЛЯЦИЯ ======
         # Корректируем сигнал с учётом BTC (ведущий индикатор рынка)
         logger.info(f"Applying cross-asset correlation for {symbol}...")
@@ -3352,10 +3343,13 @@ class AISignalAnalyzer:
         # Определяем начальное направление по score (до корреляции)
         initial_direction = self._determine_direction_from_score(total_score)
         
+        # Initial probability for correlation check (not used, will be recalculated)
+        INITIAL_PROBABILITY = 50  # Neutral baseline before honest probability calculation
+        
         adjusted_direction, adjusted_probability, adjusted_total_score, is_cross_conflict = self._cross_asset_correlation_check(
             symbol=symbol,
             direction=initial_direction,
-            probability=50,  # Placeholder, will be recalculated
+            probability=INITIAL_PROBABILITY,
             total_score=total_score,
             trend_score=block_trend_score,
             block_trend_score=block_trend_score,
@@ -3410,22 +3404,24 @@ class AISignalAnalyzer:
         
         logger.info(f"FINAL signal for {symbol}: direction={direction}, raw={final_direction}, score={total_score:.2f}, probability={final_probability}%")
         
-        # Update probability_data with final values
-        probability_data["probability"] = final_probability
-        if final_direction == "long":
-            probability_data["direction"] = "up"
-        elif final_direction == "short":
-            probability_data["direction"] = "down"
-        else:  # sideways
-            probability_data["direction"] = "sideways"
-        
         # Determine confidence based on probability
         if final_probability >= 70:
             confidence = "Высокая"
+            confidence_en = "high"
         elif final_probability >= 60:
             confidence = "Средняя"
+            confidence_en = "medium"
         else:
             confidence = "Низкая"
+            confidence_en = "low"
+        
+        # Create probability_data with final values
+        probability_data = {
+            "probability": final_probability,
+            "direction": "up" if final_direction == "long" else ("down" if final_direction == "short" else "sideways"),
+            "confidence": confidence_en,
+            "data_quality": round(data_sources_available / self.TOTAL_DATA_SOURCES, 2)
+        }
         
         # Save direction for next time (for hysteresis tracking, though not actively used in honest signals)
         self.previous_direction[symbol] = final_direction
