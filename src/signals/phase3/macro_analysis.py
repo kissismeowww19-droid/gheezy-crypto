@@ -94,6 +94,7 @@ class MacroAnalyzer:
                                 prev = closes[-24] if len(closes) >= 24 else closes[0]
                                 change = ((current - prev) / prev) * 100
                                 
+                                logger.info(f"Gold: ${current:.2f}, change: {change:+.2f}%")
                                 return {
                                     'value': round(current, 2),
                                     'change_24h': round(change, 2),
@@ -134,8 +135,10 @@ class MacroAnalyzer:
         if gold:
             if gold['trend'] == 'bullish':
                 score += 3
+                factors.append(f"Gold ↑{gold['change_24h']:+.2f}% (бычье)")
             elif gold['trend'] == 'bearish':
                 score -= 3
+                factors.append(f"Gold ↓{gold['change_24h']:+.2f}% (медвежье)")
         
         score = max(min(score, 15), -15)
         verdict = 'bullish' if score > 4 else 'bearish' if score < -4 else 'neutral'
