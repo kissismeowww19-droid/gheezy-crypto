@@ -2680,7 +2680,7 @@ class AISignalAnalyzer:
         """
         return max(-self.MAX_TOTAL_SCORE, min(self.MAX_TOTAL_SCORE, score))
 
-    def calculate_realistic_probability(self, score: float, factors_count: int, max_factors: int = 22) -> int:
+    def calculate_realistic_probability(self, score: float, factors_count: int, max_factors: int = 30) -> int:
         """
         Рассчитать реалистичную вероятность с консервативной шкалой.
         
@@ -2692,7 +2692,7 @@ class AISignalAnalyzer:
         Args:
             score: Итоговый score (-100..+100)
             factors_count: Количество доступных факторов
-            max_factors: Максимальное количество факторов (по умолчанию 22)
+            max_factors: Максимальное количество факторов (по умолчанию 30)
             
         Returns:
             Вероятность 50-78%
