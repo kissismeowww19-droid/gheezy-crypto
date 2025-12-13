@@ -138,6 +138,8 @@ class AISignalAnalyzer:
     
     # Maximum contribution from any single factor (prevents over-dominance)
     MAX_SINGLE_FACTOR_SCORE = 15  # ±15 - максимальный вклад одного фактора в итоговый score
+    MAX_TOTAL_SCORE = 100  # ±100 - максимальный общий score
+    MAX_PROBABILITY = 78  # Максимальная вероятность (реалистичная)
     
     def __init__(self, whale_tracker):
         """
@@ -1654,24 +1656,33 @@ class AISignalAnalyzer:
         
         score = 0.0
         
-        # RSI 5m score (max ±3)
+        # RSI 5m score with enhanced extreme levels
+        # RSI < 30 = перепродан = ЛОНГ, RSI > 70 = перекуплен = ШОРТ
         rsi_5m = short_term_data.get("rsi_5m")
         if rsi_5m:
-            if rsi_5m < 30:
-                score += 3  # Oversold = bullish
+            if rsi_5m < 20:
+                score += 5  # Сильно перепродан = сильный ЛОНГ
+            elif rsi_5m < 30:
+                score += 3  # Перепродан = ЛОНГ
+            elif rsi_5m > 80:
+                score -= 5  # Сильно перекуплен = сильный ШОРТ
             elif rsi_5m > 70:
-                score -= 3  # Overbought = bearish
+                score -= 3  # Перекуплен = ШОРТ
             else:
                 # Gradient
                 score += (50 - rsi_5m) / 20
         
-        # RSI 15m score (max ±2)
+        # RSI 15m score with enhanced extreme levels
         rsi_15m = short_term_data.get("rsi_15m")
         if rsi_15m:
-            if rsi_15m < 30:
-                score += 2
+            if rsi_15m < 20:
+                score += 4  # Сильно перепродан = сильный ЛОНГ
+            elif rsi_15m < 30:
+                score += 2  # Перепродан = ЛОНГ
+            elif rsi_15m > 80:
+                score -= 4  # Сильно перекуплен = сильный ШОРТ
             elif rsi_15m > 70:
-                score -= 2
+                score -= 2  # Перекуплен = ШОРТ
             else:
                 score += (50 - rsi_15m) / 30
         
@@ -2657,6 +2668,59 @@ class AISignalAnalyzer:
         weighted_score = raw_score * weight
         return max(-self.MAX_SINGLE_FACTOR_SCORE, min(self.MAX_SINGLE_FACTOR_SCORE, weighted_score))
 
+    def apply_total_score_limit(self, score: float) -> float:
+        """
+        Применить ограничение на итоговый score.
+        
+        Args:
+            score: Итоговый score (любой диапазон)
+            
+        Returns:
+            Ограниченный score (±MAX_TOTAL_SCORE)
+        """
+        return max(-self.MAX_TOTAL_SCORE, min(self.MAX_TOTAL_SCORE, score))
+
+    def calculate_realistic_probability(self, score: float, factors_count: int, max_factors: int = 30) -> int:
+        """
+        Рассчитать реалистичную вероятность с консервативной шкалой.
+        
+        Реалистичная формула вероятности:
+        - Учитывает полноту данных (коэффициент 0.5-1.0)
+        - Консервативная шкала: максимум 78%
+        - Прогрессивное уменьшение роста вероятности с ростом score
+        
+        Args:
+            score: Итоговый score (-100..+100)
+            factors_count: Количество доступных факторов
+            max_factors: Максимальное количество факторов (по умолчанию 30)
+            
+        Returns:
+            Вероятность 50-78%
+        """
+        abs_score = abs(score)
+        
+        # Коэффициент полноты данных (0.5 - 1.0)
+        data_completeness = max(0.5, min(1.0, factors_count / max_factors))
+        
+        # Консервативная шкала вероятности
+        if abs_score < 20:
+            base_prob = 50 + (abs_score * 0.25)  # 50-55%
+        elif abs_score < 40:
+            base_prob = 55 + ((abs_score - 20) * 0.3)  # 55-61%
+        elif abs_score < 60:
+            base_prob = 61 + ((abs_score - 40) * 0.25)  # 61-66%
+        elif abs_score < 80:
+            base_prob = 66 + ((abs_score - 60) * 0.2)  # 66-70%
+        elif abs_score < 100:
+            base_prob = 70 + ((abs_score - 80) * 0.15)  # 70-73%
+        else:
+            base_prob = min(73 + ((abs_score - 100) * 0.05), self.MAX_PROBABILITY)  # max 78%
+        
+        # Применяем коэффициент полноты данных
+        adjusted_prob = 50 + (base_prob - 50) * data_completeness
+        
+        return int(min(max(adjusted_prob, 50), self.MAX_PROBABILITY))
+
     def _calc_trend_score(
         self,
         ema_data: Optional[Dict],
@@ -2727,30 +2791,46 @@ class AISignalAnalyzer:
         score = 0.0
         factors = 0
         
+        # RSI main timeframe with enhanced extreme levels
+        # RSI < 30 = перепродан = ЛОНГ, RSI > 70 = перекуплен = ШОРТ
         if rsi is not None:
             factors += 1
-            if rsi < 30:
-                score += 8
+            if rsi < 20:
+                score += 12  # Сильно перепродан = сильный ЛОНГ сигнал
+            elif rsi < 30:
+                score += 8   # Перепродан = ЛОНГ
             elif rsi < 40:
                 score += 4
+            elif rsi > 80:
+                score -= 12  # Сильно перекуплен = сильный ШОРТ сигнал
             elif rsi > 70:
-                score -= 8
+                score -= 8   # Перекуплен = ШОРТ
             elif rsi > 60:
                 score -= 4
         
+        # RSI 5m with enhanced extreme levels
         if rsi_5m is not None:
             factors += 1
-            if rsi_5m < 30:
-                score += 5
+            if rsi_5m < 20:
+                score += 8   # Сильно перепродан = ЛОНГ
+            elif rsi_5m < 30:
+                score += 5   # Перепродан = ЛОНГ
+            elif rsi_5m > 80:
+                score -= 8   # Сильно перекуплен = ШОРТ
             elif rsi_5m > 70:
-                score -= 5
+                score -= 5   # Перекуплен = ШОРТ
         
+        # RSI 15m with enhanced extreme levels
         if rsi_15m is not None:
             factors += 1
-            if rsi_15m < 30:
-                score += 5
+            if rsi_15m < 20:
+                score += 8   # Сильно перепродан = ЛОНГ
+            elif rsi_15m < 30:
+                score += 5   # Перепродан = ЛОНГ
+            elif rsi_15m > 80:
+                score -= 8   # Сильно перекуплен = ШОРТ
             elif rsi_15m > 70:
-                score -= 5
+                score -= 5   # Перекуплен = ШОРТ
         
         if price_momentum_10min is not None:
             factors += 1
@@ -2975,10 +3055,12 @@ class AISignalAnalyzer:
         neutral_count: int
     ) -> int:
         """
-        Рассчитать реальную вероятность на основе:
-        1. Силы score (чем дальше от 0, тем увереннее)
-        2. Консенсуса факторов (bullish vs bearish)
-        3. Количества нейтральных (много нейтральных = неопределённость)
+        Рассчитать реалистичную вероятность на основе консервативной шкалы.
+        
+        НОВАЯ РЕАЛИСТИЧНАЯ ФОРМУЛА:
+        - Учитывает силу score и консенсус факторов
+        - Консервативная шкала: 50-78% (не более!)
+        - Учитывает полноту данных через количество факторов
         
         Args:
             total_score: Итоговый score (-100..+100)
@@ -2988,58 +3070,38 @@ class AISignalAnalyzer:
             neutral_count: Количество нейтральных факторов
             
         Returns:
-            Вероятность 50-85%
+            Вероятность 50-78%
         """
-        abs_score = abs(total_score)
+        # Используем новую реалистичную формулу
+        total_factors = bullish_count + bearish_count + neutral_count
+        base_prob = self.calculate_realistic_probability(
+            score=total_score,
+            factors_count=total_factors,
+            max_factors=self.TOTAL_FACTORS  # 30 факторов
+        )
         
-        if direction == "sideways":
-            # Боковик: чем ближе к 0, тем увереннее
-            if abs_score < 2:
-                base = 68  # Очень уверенный боковик
-            elif abs_score < 4:
-                base = 63
-            elif abs_score < 6:
-                base = 58
-            elif abs_score < 8:
-                base = 54
-            else:
-                base = 51  # На грани направления
-        else:
-            # Long/Short: чем дальше от 10, тем увереннее
-            if abs_score < 12:
-                base = 52  # Слабый сигнал (только перешёл границу)
-            elif abs_score < 15:
-                base = 56
-            elif abs_score < 18:
-                base = 60
-            elif abs_score < 22:
-                base = 65
-            elif abs_score < 28:
-                base = 70
-            elif abs_score < 35:
-                base = 75
-            else:
-                base = 80  # Экстремально сильный сигнал
+        # Дополнительные корректировки на основе консенсуса факторов
+        prob = base_prob
         
-        # Бонус за консенсус факторов
+        # Бонус за консенсус факторов (до +3%)
         if direction == "long" and bullish_count > bearish_count:
-            consensus_bonus = min(5, bullish_count - bearish_count)
-            base += consensus_bonus
+            consensus_bonus = min(3, bullish_count - bearish_count)
+            prob = min(self.MAX_PROBABILITY, prob + consensus_bonus)
         elif direction == "short" and bearish_count > bullish_count:
-            consensus_bonus = min(5, bearish_count - bullish_count)
-            base += consensus_bonus
+            consensus_bonus = min(3, bearish_count - bullish_count)
+            prob = min(self.MAX_PROBABILITY, prob + consensus_bonus)
         elif direction == "sideways":
             # Для боковика: много нейтральных = хорошо
             if neutral_count > (bullish_count + bearish_count):
-                base += 3
+                prob = min(self.MAX_PROBABILITY, prob + 2)
         
-        # Штраф за противоречивые данные
+        # Штраф за противоречивые данные (до -3%)
         if direction == "long" and bearish_count > bullish_count:
-            base -= 5  # Данные противоречат направлению
+            prob = max(50, prob - 3)  # Данные противоречат направлению
         elif direction == "short" and bullish_count > bearish_count:
-            base -= 5
+            prob = max(50, prob - 3)
         
-        return max(50, min(85, base))
+        return int(max(50, min(self.MAX_PROBABILITY, prob)))
     
     def calculate_signal_strength(self, score: float) -> int:
         """
@@ -3665,6 +3727,9 @@ class AISignalAnalyzer:
         
         if prev_score is not None:
             total_score = self.SMOOTHING_ALPHA * new_score + (1 - self.SMOOTHING_ALPHA) * prev_score
+        
+        # Применяем ограничение на общий score (±MAX_TOTAL_SCORE)
+        total_score = self.apply_total_score_limit(total_score)
         
         # Сохраняем для следующего раза
         self.previous_scores[symbol] = total_score
