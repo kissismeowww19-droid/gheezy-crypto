@@ -31,10 +31,12 @@ from signals.whale_analysis import DeepWhaleAnalyzer
 from signals.derivatives_analysis import DeepDerivativesAnalyzer
 
 try:
-    from signals.phase3 import MacroAnalyzer
+    from signals.phase3 import MacroAnalyzer, OptionsAnalyzer
     PHASE3_MACRO = True
+    PHASE3_OPTIONS = True
 except ImportError:
     PHASE3_MACRO = False
+    PHASE3_OPTIONS = False
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +163,7 @@ class AISignalAnalyzer:
         self.deep_whale_analyzer = DeepWhaleAnalyzer()
         self.deep_derivatives_analyzer = DeepDerivativesAnalyzer()
         self.macro_analyzer = MacroAnalyzer() if PHASE3_MACRO else None
+        self.options_analyzer = OptionsAnalyzer() if PHASE3_OPTIONS else None
         
         # Маппинг символов для whale tracker
         self.blockchain_mapping = {
@@ -1135,6 +1138,16 @@ class AISignalAnalyzer:
             return await self.macro_analyzer.analyze()
         except Exception as e:
             logger.warning(f"Macro analysis failed: {e}")
+            return {'score': 0, 'verdict': 'neutral'}
+    
+    async def get_options_data(self, symbol: str) -> Dict:
+        """Получить опционные данные (только BTC/ETH)"""
+        if not self.options_analyzer or symbol.upper() not in ['BTC', 'ETH']:
+            return {'score': 0, 'verdict': 'neutral'}
+        try:
+            return await self.options_analyzer.analyze(symbol)
+        except Exception as e:
+            logger.warning(f"Options analysis failed: {e}")
             return {'score': 0, 'verdict': 'neutral'}
     
     async def get_coinglass_data(self, symbol: str) -> Optional[Dict]:
@@ -3546,8 +3559,10 @@ class AISignalAnalyzer:
                         deep_whale_data: Optional[Dict] = None,
                         # Deep derivatives analysis (Phase 2)
                         deep_derivatives_data: Optional[Dict] = None,
-                        # Macro analysis (Phase 3)
-                        macro_data: Optional[Dict] = None) -> Dict:
+                        # Macro analysis (Phase 3.1)
+                        macro_data: Optional[Dict] = None,
+                        # Options analysis (Phase 3.2)
+                        options_data: Optional[Dict] = None) -> Dict:
         """
         22-факторная система расчёта сигнала.
         
@@ -3755,6 +3770,12 @@ class AISignalAnalyzer:
             macro_score = macro_data['score']
             total_score += macro_score
             logger.info(f"Added macro score: {macro_score}")
+        
+        # Options analysis (Phase 3.2, BTC/ETH only)
+        if options_data and options_data.get('score', 0) != 0:
+            options_score = options_data['score']
+            total_score += options_score
+            logger.info(f"Added options score: {options_score}")
         
         # Сохраняем для следующего раза
         self.previous_scores[symbol] = total_score
@@ -4084,6 +4105,8 @@ class AISignalAnalyzer:
             "is_cross_conflict": is_cross_conflict,
             # Macro analysis (Phase 3.1)
             "macro": macro_data if macro_data else {'score': 0, 'verdict': 'neutral'},
+            # Options analysis (Phase 3.2)
+            "options": options_data if options_data else {'score': 0, 'verdict': 'neutral'},
         }
     
     @staticmethod
@@ -4525,6 +4548,16 @@ class AISignalAnalyzer:
                 text += f"• Gold: ${g['value']:,.0f} ({g['change_24h']:+.2f}%)\n"
             v = "🟢" if macro['verdict'] == 'bullish' else "🔴" if macro['verdict'] == 'bearish' else "🟡"
             text += f"• Вердикт: {v} {macro['verdict']}\n"
+            text += "\n"
+        
+        # ===== OPTIONS ANALYSIS (Phase 3.2) =====
+        options = signal_data.get('options', {})
+        if options and options.get('put_call_ratio'):
+            text += "📈 *ОПЦИОНЫ (Deribit)*\n"
+            text += f"• Put/Call Ratio: {options['put_call_ratio']:.2f}\n"
+            text += f"• {options.get('interpretation', '')}\n"
+            v = "🟢" if 'bullish' in options.get('verdict', '') else "🔴" if 'bearish' in options.get('verdict', '') else "🟡"
+            text += f"• Вердикт: {v} {options['verdict']}\n"
             text += "\n"
         
         # ===== SCENARIOS (NEW) =====
@@ -5034,6 +5067,10 @@ class AISignalAnalyzer:
             logger.info(f"Collecting macro analysis...")
             macro_data = await self.get_macro_data()
             
+            # ===== OPTIONS ANALYSIS (Phase 3.2) =====
+            logger.info(f"Collecting options analysis for {symbol}...")
+            options_data = await self.get_options_data(symbol)
+            
             # Log data availability (22 sources now)
             data_sources_available = {
                 "whale_data": whale_data is not None and whale_data.get("transaction_count", 0) > 0,
@@ -5089,8 +5126,10 @@ class AISignalAnalyzer:
                 # Deep analysis (Phase 2)
                 deep_whale_data=deep_whale_data,
                 deep_derivatives_data=deep_derivatives_data,
-                # Macro analysis (Phase 3)
-                macro_data=macro_data
+                # Macro analysis (Phase 3.1)
+                macro_data=macro_data,
+                # Options analysis (Phase 3.2)
+                options_data=options_data
             )
             
             # Format message with all data (including short-term)
