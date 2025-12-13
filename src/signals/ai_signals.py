@@ -3303,13 +3303,13 @@ class AISignalAnalyzer:
         # ====== ПРАВИЛО: ЗАПРЕТ ПРОТИВОПОЛОЖНЫХ СИГНАЛОВ ======
         # Если BTC сильный ШОРТ (score < -30), а ETH получается ЛОНГ → делаем НЕЙТРАЛЬНЫЙ
         # Если BTC сильный ЛОНГ (score > 30), а ETH получается ШОРТ → делаем НЕЙТРАЛЬНЫЙ
-        if btc_total_score < -30 and adjusted_total_score > 15:
+        if btc_total_score < -30 and adjusted_total_score >= 10:
             # BTC сильный шорт, но ETH хочет быть лонгом
             # Переводим в нейтральный/слабый шорт
             adjusted_total_score = min(adjusted_total_score, 0)
             logger.info(f"Cross-asset OVERRIDE: BTC strong SHORT, forcing {symbol} to neutral/short (score: {adjusted_total_score:.2f})")
         
-        elif btc_total_score > 30 and adjusted_total_score < -15:
+        elif btc_total_score > 30 and adjusted_total_score <= -10:
             # BTC сильный лонг, но ETH хочет быть шортом
             # Переводим в нейтральный/слабый лонг
             adjusted_total_score = max(adjusted_total_score, 0)
