@@ -31,12 +31,14 @@ from signals.whale_analysis import DeepWhaleAnalyzer
 from signals.derivatives_analysis import DeepDerivativesAnalyzer
 
 try:
-    from signals.phase3 import MacroAnalyzer, OptionsAnalyzer
+    from signals.phase3 import MacroAnalyzer, OptionsAnalyzer, SocialSentimentAnalyzer
     PHASE3_MACRO = True
     PHASE3_OPTIONS = True
+    PHASE3_AVAILABLE = True
 except ImportError:
     PHASE3_MACRO = False
     PHASE3_OPTIONS = False
+    PHASE3_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +166,7 @@ class AISignalAnalyzer:
         self.deep_derivatives_analyzer = DeepDerivativesAnalyzer()
         self.macro_analyzer = MacroAnalyzer() if PHASE3_MACRO else None
         self.options_analyzer = OptionsAnalyzer() if PHASE3_OPTIONS else None
+        self.sentiment_analyzer = SocialSentimentAnalyzer() if PHASE3_AVAILABLE else None
         
         # Маппинг символов для whale tracker
         self.blockchain_mapping = {
@@ -1148,6 +1151,16 @@ class AISignalAnalyzer:
             return await self.options_analyzer.analyze(symbol)
         except Exception as e:
             logger.warning(f"Options analysis failed: {e}")
+            return {'score': 0, 'verdict': 'neutral'}
+    
+    async def get_sentiment_data(self, symbol: str) -> Dict:
+        """Получить social sentiment"""
+        if not self.sentiment_analyzer:
+            return {'score': 0, 'verdict': 'neutral'}
+        try:
+            return await self.sentiment_analyzer.analyze(symbol)
+        except Exception as e:
+            logger.warning(f"Sentiment analysis failed: {e}")
             return {'score': 0, 'verdict': 'neutral'}
     
     async def get_coinglass_data(self, symbol: str) -> Optional[Dict]:
@@ -3562,7 +3575,9 @@ class AISignalAnalyzer:
                         # Macro analysis (Phase 3.1)
                         macro_data: Optional[Dict] = None,
                         # Options analysis (Phase 3.2)
-                        options_data: Optional[Dict] = None) -> Dict:
+                        options_data: Optional[Dict] = None,
+                        # Social sentiment (Phase 3.3)
+                        sentiment_data: Optional[Dict] = None) -> Dict:
         """
         22-факторная система расчёта сигнала.
         
@@ -3776,6 +3791,12 @@ class AISignalAnalyzer:
             options_score = options_data['score']
             total_score += options_score
             logger.info(f"Added options score: {options_score}")
+        
+        # Social sentiment (Phase 3.3)
+        if sentiment_data and sentiment_data.get('score', 0) != 0:
+            sentiment_score = sentiment_data['score']
+            total_score += sentiment_score
+            logger.info(f"Added sentiment score: {sentiment_score}")
         
         # Сохраняем для следующего раза
         self.previous_scores[symbol] = total_score
@@ -4107,6 +4128,8 @@ class AISignalAnalyzer:
             "macro": macro_data if macro_data else {'score': 0, 'verdict': 'neutral'},
             # Options analysis (Phase 3.2)
             "options": options_data if options_data else {'score': 0, 'verdict': 'neutral'},
+            # Social sentiment (Phase 3.3)
+            "sentiment": sentiment_data if sentiment_data else {'score': 0, 'verdict': 'neutral'},
         }
     
     @staticmethod
@@ -4558,6 +4581,16 @@ class AISignalAnalyzer:
             text += f"• {options.get('interpretation', '')}\n"
             v = "🟢" if 'bullish' in options.get('verdict', '') else "🔴" if 'bearish' in options.get('verdict', '') else "🟡"
             text += f"• Вердикт: {v} {options['verdict']}\n"
+            text += "\n"
+        
+        # ===== SOCIAL SENTIMENT (Phase 3.3) =====
+        sentiment = signal_data.get('sentiment', {})
+        if sentiment and sentiment.get('bullish_ratio') is not None:
+            text += "💬 *СОЦИАЛЬНОЕ НАСТРОЕНИЕ*\n"
+            text += f"• Reddit: {sentiment['bullish_ratio']*100:.0f}% бычье / {sentiment['bearish_ratio']*100:.0f}% медвежье\n"
+            text += f"• Постов: {sentiment.get('posts_analyzed', 0)}\n"
+            v = "🟢" if 'bullish' in sentiment.get('verdict', '') else "🔴" if 'bearish' in sentiment.get('verdict', '') else "🟡"
+            text += f"• Вердикт: {v} {sentiment['verdict']}\n"
             text += "\n"
         
         # ===== SCENARIOS (NEW) =====
@@ -5071,7 +5104,11 @@ class AISignalAnalyzer:
             logger.info(f"Collecting options analysis for {symbol}...")
             options_data = await self.get_options_data(symbol)
             
-            # Log data availability (22 sources now)
+            # ===== SOCIAL SENTIMENT (Phase 3.3) =====
+            logger.info(f"Collecting social sentiment for {symbol}...")
+            sentiment_data = await self.get_sentiment_data(symbol)
+            
+            # Log data availability
             data_sources_available = {
                 "whale_data": whale_data is not None and whale_data.get("transaction_count", 0) > 0,
                 "market_data": market_data is not None,
@@ -5096,7 +5133,8 @@ class AISignalAnalyzer:
                 "social_data": social_data is not None,
             }
             available_count = sum(1 for v in data_sources_available.values() if v)
-            logger.info(f"Data sources available: {available_count}/22 for {symbol}")
+            total_sources = len(data_sources_available)
+            logger.info(f"Data sources available: {available_count}/{total_sources} for {symbol}")
             
             # Calculate signal with all available data (30-factor system)
             signal_data = self.calculate_signal(
@@ -5129,7 +5167,9 @@ class AISignalAnalyzer:
                 # Macro analysis (Phase 3.1)
                 macro_data=macro_data,
                 # Options analysis (Phase 3.2)
-                options_data=options_data
+                options_data=options_data,
+                # Social sentiment (Phase 3.3)
+                sentiment_data=sentiment_data
             )
             
             # Format message with all data (including short-term)
