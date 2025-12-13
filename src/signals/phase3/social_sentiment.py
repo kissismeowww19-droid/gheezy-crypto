@@ -10,6 +10,9 @@ class SocialSentimentAnalyzer:
     Без API ключа — парсим публичный JSON
     """
     
+    MAX_SUBREDDITS = 2  # Максимальное количество subreddit'ов для анализа
+    MAX_POSTS_PER_SUBREDDIT = 25  # Максимальное количество постов для анализа
+    
     SUBREDDITS = {
         'BTC': ['bitcoin', 'cryptocurrency'],
         'ETH': ['ethereum', 'cryptocurrency'],
@@ -39,9 +42,9 @@ class SocialSentimentAnalyzer:
         total_engagement = 0
         posts_analyzed = 0
         
-        for subreddit in subreddits[:2]:
-            try:
-                async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession() as session:
+            for subreddit in subreddits[:self.MAX_SUBREDDITS]:
+                try:
                     url = f"https://www.reddit.com/r/{subreddit}/hot.json"
                     headers = {'User-Agent': 'CryptoSignalBot/1.0 (Educational)'}
                     
@@ -59,8 +62,8 @@ class SocialSentimentAnalyzer:
                             logger.warning(f"Reddit rate limited for r/{subreddit}")
                         else:
                             logger.warning(f"Reddit returned {resp.status}")
-            except Exception as e:
-                logger.warning(f"Reddit r/{subreddit} failed: {e}")
+                except Exception as e:
+                    logger.warning(f"Reddit r/{subreddit} failed: {e}")
         
         if posts_analyzed == 0:
             return None
@@ -104,7 +107,7 @@ class SocialSentimentAnalyzer:
         engagement = 0
         count = 0
         
-        for post in posts[:25]:
+        for post in posts[:self.MAX_POSTS_PER_SUBREDDIT]:
             post_data = post.get('data', {})
             title = post_data.get('title', '').lower()
             selftext = post_data.get('selftext', '').lower()
@@ -116,17 +119,24 @@ class SocialSentimentAnalyzer:
             engagement += post_engagement
             count += 1
             
+            # Check for keywords (mutual exclusivity: first match wins)
+            is_bullish = False
+            is_bearish = False
+            
             # Bullish
             for keyword in self.BULLISH_KEYWORDS:
                 if keyword in full_text:
                     bullish_score += post_engagement
+                    is_bullish = True
                     break
             
-            # Bearish
-            for keyword in self.BEARISH_KEYWORDS:
-                if keyword in full_text:
-                    bearish_score += post_engagement
-                    break
+            # Bearish (only if not already bullish)
+            if not is_bullish:
+                for keyword in self.BEARISH_KEYWORDS:
+                    if keyword in full_text:
+                        bearish_score += post_engagement
+                        is_bearish = True
+                        break
         
         return {
             'bullish_score': bullish_score,
