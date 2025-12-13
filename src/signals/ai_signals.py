@@ -3166,7 +3166,7 @@ class AISignalAnalyzer:
         
         # Реалистичная сила: рассчитываем как если бы максимум был 130,
         # чтобы 100% был редким достижением
-        strength = min(int(abs_score / 130 * 100), 100)
+        strength = min(int(abs_score / self.MAX_TOTAL_SCORE * 100), 100)
         
         return strength
     
