@@ -3575,7 +3575,9 @@ class AISignalAnalyzer:
                         # Macro analysis (Phase 3.1)
                         macro_data: Optional[Dict] = None,
                         # Options analysis (Phase 3.2)
-                        options_data: Optional[Dict] = None) -> Dict:
+                        options_data: Optional[Dict] = None,
+                        # Social sentiment (Phase 3.3)
+                        sentiment_data: Optional[Dict] = None) -> Dict:
         """
         22-факторная система расчёта сигнала.
         
@@ -5106,7 +5108,7 @@ class AISignalAnalyzer:
             logger.info(f"Collecting social sentiment for {symbol}...")
             sentiment_data = await self.get_sentiment_data(symbol)
             
-            # Log data availability (22 sources now)
+            # Log data availability
             data_sources_available = {
                 "whale_data": whale_data is not None and whale_data.get("transaction_count", 0) > 0,
                 "market_data": market_data is not None,
@@ -5131,7 +5133,8 @@ class AISignalAnalyzer:
                 "social_data": social_data is not None,
             }
             available_count = sum(1 for v in data_sources_available.values() if v)
-            logger.info(f"Data sources available: {available_count}/22 for {symbol}")
+            total_sources = len(data_sources_available)
+            logger.info(f"Data sources available: {available_count}/{total_sources} for {symbol}")
             
             # Calculate signal with all available data (30-factor system)
             signal_data = self.calculate_signal(
@@ -5164,7 +5167,9 @@ class AISignalAnalyzer:
                 # Macro analysis (Phase 3.1)
                 macro_data=macro_data,
                 # Options analysis (Phase 3.2)
-                options_data=options_data
+                options_data=options_data,
+                # Social sentiment (Phase 3.3)
+                sentiment_data=sentiment_data
             )
             
             # Format message with all data (including short-term)
