@@ -27,6 +27,8 @@ from signals.technical_analysis import (
     calculate_ichimoku, calculate_volume_profile, calculate_cvd,
     calculate_market_structure, find_order_blocks, find_fvg
 )
+from signals.whale_analysis import DeepWhaleAnalyzer
+from signals.derivatives_analysis import DeepDerivativesAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -83,9 +85,21 @@ class AISignalAnalyzer:
     WHALE_ALERT_WEIGHT = 0.05     # 5% - Whale Alert
     SOCIAL_WEIGHT = 0.04          # 4% - LunarCrush
     
-    # Total factors in the analysis system
-    TOTAL_FACTORS = 22  # 10 long-term + 5 short-term + 6 new sources + sentiment
-    TOTAL_DATA_SOURCES = 22  # Total number of data sources for probability calculation
+    # Deep Whale Analysis Weights (Phase 2)
+    WHALE_ACCUMULATION_WEIGHT = 3.0      # Accumulation/Distribution phase
+    EXCHANGE_FLOW_DETAILED_WEIGHT = 2.5  # Per-exchange flow analysis
+    STABLECOIN_FLOW_WEIGHT = 2.0         # USDT/USDC flows
+    
+    # Deep Derivatives Analysis Weights (Phase 2)
+    OI_PRICE_CORRELATION_WEIGHT = 2.5    # OI/Price correlation
+    LIQUIDATION_LEVELS_WEIGHT = 2.0      # Liquidation clustering
+    LS_RATIO_DETAILED_WEIGHT = 1.5       # Multi-exchange L/S ratio
+    FUNDING_TREND_WEIGHT = 1.5           # Funding rate trend
+    BASIS_WEIGHT = 1.0                   # Futures/Spot spread
+    
+    # Total factors in the analysis system (includes Phase 2 deep analysis)
+    TOTAL_FACTORS = 30  # 10 long-term + 5 short-term + 6 new sources + sentiment + 8 deep analysis
+    TOTAL_DATA_SOURCES = 30  # Total number of data sources for probability calculation
     
     # Scaling factor for final score calculation
     SCORE_SCALE_FACTOR = 10  # Scale weighted sum from -10/+10 to -100/+100
@@ -133,6 +147,8 @@ class AISignalAnalyzer:
         self.data_source_manager = DataSourceManager()
         self.multi_timeframe_analyzer = MultiTimeframeAnalyzer()
         self.price_forecast_analyzer = PriceForecastAnalyzer()
+        self.deep_whale_analyzer = DeepWhaleAnalyzer()
+        self.deep_derivatives_analyzer = DeepDerivativesAnalyzer()
         
         # Маппинг символов для whale tracker
         self.blockchain_mapping = {
@@ -2363,6 +2379,241 @@ class AISignalAnalyzer:
             # Gradient
             return (50 - fg_value) / 5
     
+    def _calculate_whale_accumulation_score(self, accumulation_data: Optional[Dict]) -> float:
+        """
+        Calculate score based on accumulation/distribution phase.
+        
+        Args:
+            accumulation_data: Accumulation/distribution analysis data
+            
+        Returns:
+            Score from -10 to +10
+        """
+        if not accumulation_data:
+            return 0.0
+        
+        phase = accumulation_data.get("phase", "neutral")
+        confidence = accumulation_data.get("confidence", 0) / 100  # 0-1 range
+        
+        if phase == "accumulation":
+            # Accumulation is bullish
+            return 10 * confidence
+        elif phase == "distribution":
+            # Distribution is bearish
+            return -10 * confidence
+        else:
+            return 0.0
+    
+    def _calculate_exchange_flow_detailed_score(self, exchange_flows_detailed: Optional[Dict]) -> float:
+        """
+        Calculate score based on detailed per-exchange flows.
+        
+        Args:
+            exchange_flows_detailed: Detailed exchange flow data
+            
+        Returns:
+            Score from -10 to +10
+        """
+        if not exchange_flows_detailed:
+            return 0.0
+        
+        total_net = exchange_flows_detailed.get("total_net", 0)
+        
+        # Negative net (outflows > inflows) = bullish (hodling)
+        # Positive net (inflows > outflows) = bearish (selling)
+        
+        # Normalize based on $50M threshold
+        if total_net < -50_000_000:
+            return 10  # Strong outflow = very bullish
+        elif total_net < -10_000_000:
+            return 5  # Moderate outflow = bullish
+        elif total_net > 50_000_000:
+            return -10  # Strong inflow = very bearish
+        elif total_net > 10_000_000:
+            return -5  # Moderate inflow = bearish
+        else:
+            # Linear interpolation for intermediate values
+            return -(total_net / 10_000_000)
+    
+    def _calculate_stablecoin_flow_score(self, stablecoin_flows: Optional[Dict]) -> float:
+        """
+        Calculate score based on stablecoin flows to exchanges.
+        
+        Args:
+            stablecoin_flows: Stablecoin flow data
+            
+        Returns:
+            Score from -10 to +10
+        """
+        if not stablecoin_flows:
+            return 0.0
+        
+        total_inflow = stablecoin_flows.get("total_inflow", 0)
+        
+        # Positive inflow = stablecoins to exchanges = buying power = bullish
+        # Negative inflow = stablecoins leaving = no buying power = bearish
+        
+        # Normalize based on $100M threshold
+        if total_inflow > 100_000_000:
+            return 10  # Strong inflow = very bullish
+        elif total_inflow > 50_000_000:
+            return 5  # Moderate inflow = bullish
+        elif total_inflow < -100_000_000:
+            return -10  # Strong outflow = very bearish
+        elif total_inflow < -50_000_000:
+            return -5  # Moderate outflow = bearish
+        else:
+            # Linear interpolation
+            return total_inflow / 20_000_000
+    
+    def _calculate_oi_price_correlation_score(self, oi_correlation: Optional[Dict]) -> float:
+        """
+        Calculate score based on OI/Price correlation analysis.
+        
+        Args:
+            oi_correlation: OI/Price correlation data
+            
+        Returns:
+            Score from -10 to +10
+        """
+        if not oi_correlation:
+            return 0.0
+        
+        signal = oi_correlation.get("signal", "neutral")
+        correlation = oi_correlation.get("correlation", "neutral")
+        
+        # Strong signals
+        if signal == "bullish" and correlation == "bullish":
+            return 10
+        elif signal == "bearish" and correlation == "bearish":
+            return -10
+        # Moderate signals
+        elif signal == "bullish":
+            return 5
+        elif signal == "bearish":
+            return -5
+        else:
+            return 0.0
+    
+    def _calculate_liquidation_levels_score(self, liquidation_levels: Optional[Dict]) -> float:
+        """
+        Calculate score based on liquidation level clustering.
+        
+        Args:
+            liquidation_levels: Liquidation levels data
+            
+        Returns:
+            Score from -10 to +10
+        """
+        if not liquidation_levels:
+            return 0.0
+        
+        signal = liquidation_levels.get("signal", "neutral")
+        
+        if signal == "bullish":
+            return 7  # Price close to hunting shorts
+        elif signal == "bearish":
+            return -7  # Price close to hunting longs
+        else:
+            return 0.0
+    
+    def _calculate_ls_ratio_detailed_score(self, ls_ratio_data: Optional[Dict]) -> float:
+        """
+        Calculate score based on multi-exchange L/S ratios.
+        
+        Args:
+            ls_ratio_data: Long/Short ratio data
+            
+        Returns:
+            Score from -10 to +10
+        """
+        if not ls_ratio_data:
+            return 0.0
+        
+        avg_ratio = ls_ratio_data.get("average_ratio", 1.0)
+        
+        # High ratio (>1.5) = too many longs = bearish (reversal risk)
+        # Low ratio (<0.7) = too many shorts = bullish (reversal risk)
+        # Moderate high (>1.1) = bullish sentiment
+        # Moderate low (<0.9) = bearish sentiment
+        
+        if avg_ratio > 1.5:
+            return -8  # Too bullish = reversal down
+        elif avg_ratio > 1.2:
+            return 5  # Moderately bullish
+        elif avg_ratio < 0.7:
+            return 8  # Too bearish = reversal up
+        elif avg_ratio < 0.9:
+            return -5  # Moderately bearish
+        else:
+            return 0.0
+    
+    def _calculate_funding_trend_score(self, funding_history: Optional[Dict]) -> float:
+        """
+        Calculate score based on funding rate trend.
+        
+        Args:
+            funding_history: Funding rate history data
+            
+        Returns:
+            Score from -10 to +10
+        """
+        if not funding_history:
+            return 0.0
+        
+        extreme = funding_history.get("extreme", False)
+        trend = funding_history.get("trend", "stable")
+        current = funding_history.get("current", 0)
+        
+        # Extreme rates indicate reversal risk
+        if extreme:
+            if current > 0.1:
+                return -10  # Extreme positive = too bullish = bearish signal
+            elif current < -0.1:
+                return 10  # Extreme negative = too bearish = bullish signal
+        
+        # Trend analysis
+        if trend == "rising" and current > 0.03:
+            return -5  # Rising bullish sentiment = reversal risk
+        elif trend == "falling" and current < -0.03:
+            return 5  # Rising bearish sentiment = reversal risk
+        else:
+            return 0.0
+    
+    def _calculate_basis_score(self, basis_data: Optional[Dict]) -> float:
+        """
+        Calculate score based on futures/spot basis.
+        
+        Args:
+            basis_data: Basis (futures-spot spread) data
+            
+        Returns:
+            Score from -10 to +10
+        """
+        if not basis_data:
+            return 0.0
+        
+        basis_type = basis_data.get("basis_type", "neutral")
+        basis_value = basis_data.get("basis", 0)
+        
+        # Contango (futures > spot) = bullish sentiment
+        # Backwardation (futures < spot) = bearish sentiment
+        
+        if basis_type == "contango":
+            # Positive basis indicates bullish sentiment
+            if basis_value > 0.5:
+                return 8  # Strong contango
+            else:
+                return 4  # Moderate contango
+        elif basis_type == "backwardation":
+            # Negative basis indicates bearish sentiment
+            if basis_value < -0.5:
+                return -8  # Strong backwardation
+            else:
+                return -4  # Moderate backwardation
+        else:
+            return 0.0
+    
     def _clamp_block_score(self, score: float, factors: int, multiplier: float = None) -> float:
         """
         Helper method to normalize and clamp block scores to [-10, +10] range.
@@ -3139,7 +3390,11 @@ class AISignalAnalyzer:
                         news_sentiment: Optional[Dict] = None,
                         tradingview_rating: Optional[Dict] = None,
                         whale_alert: Optional[Dict] = None,
-                        social_data: Optional[Dict] = None) -> Dict:
+                        social_data: Optional[Dict] = None,
+                        # Deep whale analysis (Phase 2)
+                        deep_whale_data: Optional[Dict] = None,
+                        # Deep derivatives analysis (Phase 2)
+                        deep_derivatives_data: Optional[Dict] = None) -> Dict:
         """
         22-факторная система расчёта сигнала.
         
@@ -3255,7 +3510,45 @@ class AISignalAnalyzer:
         whale_alert_score = self._calculate_whale_alert_score(whale_alert)
         social_score = self._calculate_social_score(social_data)
         
-        # Calculate weighted total score (22 factors)
+        # Calculate deep whale analysis scores (Phase 2)
+        whale_accumulation_score = 0.0
+        exchange_flow_detailed_score = 0.0
+        stablecoin_flow_score = 0.0
+        if deep_whale_data:
+            whale_accumulation_score = self._calculate_whale_accumulation_score(
+                deep_whale_data.get("accumulation_distribution")
+            )
+            exchange_flow_detailed_score = self._calculate_exchange_flow_detailed_score(
+                deep_whale_data.get("exchange_flows_detailed")
+            )
+            stablecoin_flow_score = self._calculate_stablecoin_flow_score(
+                deep_whale_data.get("stablecoin_flows")
+            )
+        
+        # Calculate deep derivatives analysis scores (Phase 2)
+        oi_price_correlation_score = 0.0
+        liquidation_levels_score = 0.0
+        ls_ratio_detailed_score = 0.0
+        funding_trend_score = 0.0
+        basis_score = 0.0
+        if deep_derivatives_data:
+            oi_price_correlation_score = self._calculate_oi_price_correlation_score(
+                deep_derivatives_data.get("oi_price_correlation")
+            )
+            liquidation_levels_score = self._calculate_liquidation_levels_score(
+                deep_derivatives_data.get("liquidation_levels")
+            )
+            ls_ratio_detailed_score = self._calculate_ls_ratio_detailed_score(
+                deep_derivatives_data.get("ls_ratio_by_exchange")
+            )
+            funding_trend_score = self._calculate_funding_trend_score(
+                deep_derivatives_data.get("funding_rate_history")
+            )
+            basis_score = self._calculate_basis_score(
+                deep_derivatives_data.get("basis")
+            )
+        
+        # Calculate weighted total score (30 factors total)
         total_score = (
             # Long-term (35%)
             whale_score * self.WHALE_WEIGHT +
@@ -3280,7 +3573,17 @@ class AISignalAnalyzer:
             news_sentiment_score * self.NEWS_SENTIMENT_WEIGHT +
             tradingview_score * self.TRADINGVIEW_WEIGHT +
             whale_alert_score * self.WHALE_ALERT_WEIGHT +
-            social_score * self.SOCIAL_WEIGHT
+            social_score * self.SOCIAL_WEIGHT +
+            # Deep whale analysis (Phase 2)
+            whale_accumulation_score * self.WHALE_ACCUMULATION_WEIGHT +
+            exchange_flow_detailed_score * self.EXCHANGE_FLOW_DETAILED_WEIGHT +
+            stablecoin_flow_score * self.STABLECOIN_FLOW_WEIGHT +
+            # Deep derivatives analysis (Phase 2)
+            oi_price_correlation_score * self.OI_PRICE_CORRELATION_WEIGHT +
+            liquidation_levels_score * self.LIQUIDATION_LEVELS_WEIGHT +
+            ls_ratio_detailed_score * self.LS_RATIO_DETAILED_WEIGHT +
+            funding_trend_score * self.FUNDING_TREND_WEIGHT +
+            basis_score * self.BASIS_WEIGHT
         ) * self.SCORE_SCALE_FACTOR  # Scale to -100 to +100
         
         # Сглаживание score для стабильности
@@ -3678,6 +3981,8 @@ class AISignalAnalyzer:
         is_cross_conflict: bool = False,  # НОВЫЙ ПАРАМЕТР
         multi_timeframe_data: Optional[Dict] = None,  # НОВЫЙ ПАРАМЕТР
         advanced_indicators: Optional[Dict] = None,  # НОВЫЙ ПАРАМЕТР
+        deep_whale_data: Optional[Dict] = None,  # НОВЫЙ ПАРАМЕТР - Phase 2
+        deep_derivatives_data: Optional[Dict] = None,  # НОВЫЙ ПАРАМЕТР - Phase 2
     ) -> str:
         """
         Расширенное форматирование сообщения с AI сигналом.
@@ -3934,6 +4239,109 @@ class AISignalAnalyzer:
             text += f"📉 S1: {format_price(s1)} | S2: {format_price(s2)}\n"
         
         text += "\n"
+        
+        # ===== DEEP WHALE ANALYSIS (Phase 2) =====
+        if deep_whale_data:
+            text += "🐋 *ГЛУБОКИЙ WHALE АНАЛИЗ*\n"
+            
+            # Accumulation/Distribution
+            accumulation = deep_whale_data.get("accumulation_distribution", {})
+            if accumulation:
+                phase = accumulation.get("phase", "neutral")
+                confidence = accumulation.get("confidence", 0)
+                phase_emoji = "🟢" if phase == "accumulation" else "🔴" if phase == "distribution" else "🟡"
+                phase_text = "Накопление" if phase == "accumulation" else "Раздача" if phase == "distribution" else "Нейтрально"
+                text += f"• Фаза: {phase_emoji} {phase_text} ({confidence}%)\n"
+            
+            # Exchange flows detailed
+            exchange_flows_detailed = deep_whale_data.get("exchange_flows_detailed", {})
+            if exchange_flows_detailed:
+                binance = exchange_flows_detailed.get("binance", {})
+                coinbase = exchange_flows_detailed.get("coinbase", {})
+                total_net = exchange_flows_detailed.get("total_net", 0)
+                signal = exchange_flows_detailed.get("signal", "neutral")
+                
+                if binance.get("net") != 0:
+                    direction = "↓ отток" if binance["net"] < 0 else "↑ приток"
+                    text += f"• Binance: {format_volume(abs(binance['net']))} {direction}\n"
+                
+                if coinbase.get("net") != 0:
+                    direction = "↓ отток" if coinbase["net"] < 0 else "↑ приток"
+                    text += f"• Coinbase: {format_volume(abs(coinbase['net']))} {direction}\n"
+            
+            # Stablecoin flows
+            stablecoin = deep_whale_data.get("stablecoin_flows", {})
+            if stablecoin and stablecoin.get("total_inflow", 0) != 0:
+                total_inflow = stablecoin.get("total_inflow", 0)
+                direction_text = "на биржи" if total_inflow > 0 else "с бирж"
+                text += f"• Stablecoin: {format_volume(abs(total_inflow))} {direction_text}\n"
+            
+            # Verdict
+            if exchange_flows_detailed:
+                signal = exchange_flows_detailed.get("signal", "neutral")
+                signal_emoji = "🟢" if signal == "bullish" else "🔴" if signal == "bearish" else "🟡"
+                signal_text = "бычий" if signal == "bullish" else "медвежий" if signal == "bearish" else "нейтральный"
+                text += f"• Вердикт: {signal_emoji} {signal_text}\n"
+            
+            text += "\n"
+        
+        # ===== DEEP DERIVATIVES ANALYSIS (Phase 2) =====
+        if deep_derivatives_data:
+            text += "📊 *ДЕРИВАТИВЫ (ГЛУБОКО)*\n"
+            
+            # OI/Price correlation
+            oi_corr = deep_derivatives_data.get("oi_price_correlation", {})
+            if oi_corr:
+                oi_change = oi_corr.get("oi_change_24h", 0)
+                interpretation = oi_corr.get("interpretation", "")
+                text += f"• OI 24ч: {oi_change:+.1f}% ({interpretation})\n"
+            
+            # Liquidation levels
+            liq_levels = deep_derivatives_data.get("liquidation_levels", {})
+            if liq_levels:
+                long_liq = liq_levels.get("long_liquidations", [])
+                short_liq = liq_levels.get("short_liquidations", [])
+                
+                if short_liq:
+                    nearest_short = liq_levels.get("nearest_short_liq", 0)
+                    text += f"• Ликв. шортов: ${nearest_short:,.0f}\n"
+                
+                if long_liq:
+                    nearest_long = liq_levels.get("nearest_long_liq", 0)
+                    text += f"• Ликв. лонгов: ${nearest_long:,.0f}\n"
+            
+            # L/S Ratio
+            ls_ratio = deep_derivatives_data.get("ls_ratio_by_exchange", {})
+            if ls_ratio:
+                avg_ratio = ls_ratio.get("average_ratio", 1.0)
+                signal = ls_ratio.get("signal", "neutral")
+                signal_emoji = "🟢" if signal == "bullish" else "🔴" if signal == "bearish" else "🟡"
+                text += f"• L/S Ratio: {avg_ratio:.2f} {signal_emoji}\n"
+            
+            # Funding trend
+            funding = deep_derivatives_data.get("funding_rate_history", {})
+            if funding:
+                trend = funding.get("trend", "stable")
+                current_rate = funding.get("current", 0)
+                trend_text = "растёт" if trend == "rising" else "падает" if trend == "falling" else "стабильно"
+                text += f"• Funding: {current_rate:.4f}% ({trend_text})\n"
+            
+            # Basis
+            basis = deep_derivatives_data.get("basis", {})
+            if basis:
+                basis_value = basis.get("basis", 0)
+                basis_type = basis.get("basis_type", "neutral")
+                type_text = "контанго" if basis_type == "contango" else "бэквордация" if basis_type == "backwardation" else "нейтрально"
+                text += f"• Basis: {basis_value:+.2f}% ({type_text})\n"
+            
+            # Verdict from OI correlation
+            if oi_corr:
+                signal = oi_corr.get("signal", "neutral")
+                signal_emoji = "🟢" if signal == "bullish" else "🔴" if signal == "bearish" else "🟡"
+                signal_text = "бычий" if signal == "bullish" else "медвежий" if signal == "bearish" else "нейтральный"
+                text += f"• Вердикт: {signal_emoji} {signal_text}\n"
+            
+            text += "\n"
         
         # ===== SCENARIOS (NEW) =====
         # Generate scenarios based on signal data
@@ -4382,6 +4790,62 @@ class AISignalAnalyzer:
                 logger.error(f"Error fetching social data: {social_data}")
                 social_data = None
             
+            # ===== DEEP WHALE ANALYSIS (Phase 2) =====
+            logger.info(f"Gathering deep whale analysis for {symbol}...")
+            deep_whale_data = {}
+            try:
+                # Get detailed exchange flows
+                exchange_flows_detailed = await self.deep_whale_analyzer.get_exchange_flows_detailed(
+                    symbol, self.whale_tracker
+                )
+                deep_whale_data["exchange_flows_detailed"] = exchange_flows_detailed
+                
+                # Get accumulation/distribution phase
+                if whale_data and whale_data.get("transactions"):
+                    accumulation_distribution = self.deep_whale_analyzer.detect_accumulation_distribution(
+                        whale_data["transactions"]
+                    )
+                    deep_whale_data["accumulation_distribution"] = accumulation_distribution
+                
+                # Get stablecoin flows (ETH only for now, as it's on Ethereum)
+                if symbol == "ETH":
+                    stablecoin_flows = await self.deep_whale_analyzer.get_stablecoin_flows()
+                    deep_whale_data["stablecoin_flows"] = stablecoin_flows
+                
+                logger.info(f"Deep whale analysis collected for {symbol}")
+            except Exception as e:
+                logger.error(f"Error in deep whale analysis: {e}")
+                deep_whale_data = None
+            
+            # ===== DEEP DERIVATIVES ANALYSIS (Phase 2) =====
+            logger.info(f"Gathering deep derivatives analysis for {symbol}...")
+            deep_derivatives_data = {}
+            try:
+                # Get OI/Price correlation
+                oi_correlation = await self.deep_derivatives_analyzer.analyze_oi_price_correlation(bybit_symbol)
+                deep_derivatives_data["oi_price_correlation"] = oi_correlation
+                
+                # Get liquidation levels
+                liquidation_levels = await self.deep_derivatives_analyzer.get_liquidation_levels(bybit_symbol)
+                deep_derivatives_data["liquidation_levels"] = liquidation_levels
+                
+                # Get L/S ratio by exchange
+                ls_ratio = await self.deep_derivatives_analyzer.get_ls_ratio_by_exchange(bybit_symbol)
+                deep_derivatives_data["ls_ratio_by_exchange"] = ls_ratio
+                
+                # Get funding rate history
+                funding_history = await self.deep_derivatives_analyzer.get_funding_rate_history(bybit_symbol)
+                deep_derivatives_data["funding_rate_history"] = funding_history
+                
+                # Get basis (futures/spot spread)
+                basis = await self.deep_derivatives_analyzer.get_basis(bybit_symbol)
+                deep_derivatives_data["basis"] = basis
+                
+                logger.info(f"Deep derivatives analysis collected for {symbol}")
+            except Exception as e:
+                logger.error(f"Error in deep derivatives analysis: {e}")
+                deep_derivatives_data = None
+            
             # Log data availability (22 sources now)
             data_sources_available = {
                 "whale_data": whale_data is not None and whale_data.get("transaction_count", 0) > 0,
@@ -4409,7 +4873,7 @@ class AISignalAnalyzer:
             available_count = sum(1 for v in data_sources_available.values() if v)
             logger.info(f"Data sources available: {available_count}/22 for {symbol}")
             
-            # Calculate signal with all available data (22-factor system)
+            # Calculate signal with all available data (30-factor system)
             signal_data = self.calculate_signal(
                 symbol=symbol,
                 whale_data=whale_data,
@@ -4433,7 +4897,10 @@ class AISignalAnalyzer:
                 news_sentiment=news_sentiment,
                 tradingview_rating=tradingview_rating,
                 whale_alert=whale_alert,
-                social_data=social_data
+                social_data=social_data,
+                # Deep analysis (Phase 2)
+                deep_whale_data=deep_whale_data,
+                deep_derivatives_data=deep_derivatives_data
             )
             
             # Format message with all data (including short-term)
@@ -4464,6 +4931,9 @@ class AISignalAnalyzer:
                 # NEW: Multi-timeframe and advanced indicators
                 multi_timeframe_data=multi_timeframe_data,
                 advanced_indicators=advanced_indicators,
+                # Deep analysis (Phase 2)
+                deep_whale_data=deep_whale_data,
+                deep_derivatives_data=deep_derivatives_data
             )
             
             return message
