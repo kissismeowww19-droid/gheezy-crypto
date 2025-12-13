@@ -40,7 +40,6 @@ BTC_WHALE_ADDRESSES = [
     "34xp4vRoCGJym3xR7yCVPFHoCNxv4Twseo",  # Unknown Large Holder
     "3LCGsSmfr24demGvriN4e3ft8wEcDuHFqh",  # Unknown Large Holder
     "1LQoWist8KkaUXSPKZHNvEyfrEkPHzSsCd",  # Unknown Large Holder
-    "bc1qa5wkgaew2dkv56kfvj49j0av5nml45x9ek9hz6",  # Institutional Holder
     # More Exchange Wallets
     "3BMEXqGpG4FxBA1KWhRFufXfSTRgzfDBhJ",  # Bitstamp
     "38UmuUqPCrFmQo4khkomQwZ4VbY2nZMJ67",  # Bitstamp Cold

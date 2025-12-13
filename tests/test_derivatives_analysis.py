@@ -5,9 +5,11 @@ Tests for Deep Derivatives Analysis module.
 import pytest
 from unittest.mock import Mock, AsyncMock, patch
 import aiohttp
-
 import sys
-sys.path.insert(0, '/home/runner/work/gheezy-crypto/gheezy-crypto/src')
+from pathlib import Path
+
+# Add src directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 from signals.derivatives_analysis import DeepDerivativesAnalyzer
 

@@ -97,9 +97,9 @@ class AISignalAnalyzer:
     FUNDING_TREND_WEIGHT = 1.5           # Funding rate trend
     BASIS_WEIGHT = 1.0                   # Futures/Spot spread
     
-    # Total factors in the analysis system
-    TOTAL_FACTORS = 22  # 10 long-term + 5 short-term + 6 new sources + sentiment
-    TOTAL_DATA_SOURCES = 22  # Total number of data sources for probability calculation
+    # Total factors in the analysis system (includes Phase 2 deep analysis)
+    TOTAL_FACTORS = 30  # 10 long-term + 5 short-term + 6 new sources + sentiment + 8 deep analysis
+    TOTAL_DATA_SOURCES = 30  # Total number of data sources for probability calculation
     
     # Scaling factor for final score calculation
     SCORE_SCALE_FACTOR = 10  # Scale weighted sum from -10/+10 to -100/+100
@@ -3548,7 +3548,7 @@ class AISignalAnalyzer:
                 deep_derivatives_data.get("basis")
             )
         
-        # Calculate weighted total score (22 factors + 8 new deep analysis factors)
+        # Calculate weighted total score (30 factors total)
         total_score = (
             # Long-term (35%)
             whale_score * self.WHALE_WEIGHT +
@@ -4873,7 +4873,7 @@ class AISignalAnalyzer:
             available_count = sum(1 for v in data_sources_available.values() if v)
             logger.info(f"Data sources available: {available_count}/22 for {symbol}")
             
-            # Calculate signal with all available data (22-factor system + Phase 2 deep analysis)
+            # Calculate signal with all available data (30-factor system)
             signal_data = self.calculate_signal(
                 symbol=symbol,
                 whale_data=whale_data,
