@@ -15,6 +15,20 @@ from typing import List, Optional, Tuple, Dict
 import numpy as np
 
 
+# Constants for Ichimoku Cloud
+ICHIMOKU_TENKAN_PERIOD = 9
+ICHIMOKU_KIJUN_PERIOD = 26
+ICHIMOKU_SENKOU_PERIOD = 52
+
+# Constants for data validation
+MIN_DATA_POINTS_ICHIMOKU = 52
+MIN_DATA_POINTS_VOLUME_PROFILE = 10
+MIN_DATA_POINTS_CVD = 10
+MIN_DATA_POINTS_MARKET_STRUCTURE = 30  # lookback * 3
+MIN_DATA_POINTS_ORDER_BLOCKS = 5
+MIN_DATA_POINTS_FVG = 3
+
+
 @dataclass
 class IchimokuCloud:
     """
@@ -161,26 +175,26 @@ def calculate_ichimoku(
     Returns:
         IchimokuCloud object or None if insufficient data
     """
-    if len(high) < 52 or len(low) < 52 or len(close) < 26:
+    if len(high) < MIN_DATA_POINTS_ICHIMOKU or len(low) < MIN_DATA_POINTS_ICHIMOKU or len(close) < ICHIMOKU_KIJUN_PERIOD:
         return None
     
     try:
         # Tenkan-sen (Conversion Line): (9-period high + 9-period low) / 2
-        tenkan_high = max(high[-9:])
-        tenkan_low = min(low[-9:])
+        tenkan_high = max(high[-ICHIMOKU_TENKAN_PERIOD:])
+        tenkan_low = min(low[-ICHIMOKU_TENKAN_PERIOD:])
         tenkan_sen = (tenkan_high + tenkan_low) / 2
         
         # Kijun-sen (Base Line): (26-period high + 26-period low) / 2
-        kijun_high = max(high[-26:])
-        kijun_low = min(low[-26:])
+        kijun_high = max(high[-ICHIMOKU_KIJUN_PERIOD:])
+        kijun_low = min(low[-ICHIMOKU_KIJUN_PERIOD:])
         kijun_sen = (kijun_high + kijun_low) / 2
         
         # Senkou Span A: (Tenkan-sen + Kijun-sen) / 2
         senkou_span_a = (tenkan_sen + kijun_sen) / 2
         
         # Senkou Span B: (52-period high + 52-period low) / 2
-        senkou_high = max(high[-52:])
-        senkou_low = min(low[-52:])
+        senkou_high = max(high[-ICHIMOKU_SENKOU_PERIOD:])
+        senkou_low = min(low[-ICHIMOKU_SENKOU_PERIOD:])
         senkou_span_b = (senkou_high + senkou_low) / 2
         
         # Chikou Span: Current close (shifted back 26 periods in practice)
@@ -217,7 +231,7 @@ def calculate_volume_profile(
     Returns:
         VolumeProfile object or None if insufficient data
     """
-    if len(close) < 10 or len(volume) < 10 or len(close) != len(volume):
+    if len(close) < MIN_DATA_POINTS_VOLUME_PROFILE or len(volume) < MIN_DATA_POINTS_VOLUME_PROFILE or len(close) != len(volume):
         return None
     
     try:

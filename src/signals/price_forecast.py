@@ -17,6 +17,20 @@ class PriceForecastAnalyzer:
     # ATR multipliers for targets
     ATR_TARGET_MULTIPLIER = 1.5
     ATR_STOP_MULTIPLIER = 1.0
+    ATR_TARGET2_MULTIPLIER = 2.25  # 1.5 * 1.5
+    
+    # Range multipliers for sideways scenarios
+    SIDEWAYS_RANGE_MULTIPLIER = 0.5
+    
+    # Support/Resistance percentage levels
+    DEFAULT_R1_PERCENT = 0.015  # 1.5%
+    DEFAULT_R2_PERCENT = 0.030  # 3.0%
+    DEFAULT_S1_PERCENT = 0.015  # 1.5%
+    DEFAULT_S2_PERCENT = 0.030  # 3.0%
+    
+    # Scenario range multipliers
+    SCENARIO_RANGE_HIGH_PERCENT = 0.01  # 1%
+    SCENARIO_RANGE_LOW_PERCENT = 0.01   # 1%
     
     def __init__(self):
         """Initialize price forecast analyzer."""
@@ -60,7 +74,7 @@ class PriceForecastAnalyzer:
             # Calculate targets based on direction
             if direction == "long":
                 target1 = current_price + (atr_value * self.ATR_TARGET_MULTIPLIER)
-                target2 = current_price + (atr_value * self.ATR_TARGET_MULTIPLIER * 1.5)
+                target2 = current_price + (atr_value * self.ATR_TARGET2_MULTIPLIER)
                 stop = current_price - (atr_value * self.ATR_STOP_MULTIPLIER)
                 
                 target1_percent = ((target1 - current_price) / current_price) * 100
@@ -69,7 +83,7 @@ class PriceForecastAnalyzer:
                 
             elif direction == "short":
                 target1 = current_price - (atr_value * self.ATR_TARGET_MULTIPLIER)
-                target2 = current_price - (atr_value * self.ATR_TARGET_MULTIPLIER * 1.5)
+                target2 = current_price - (atr_value * self.ATR_TARGET2_MULTIPLIER)
                 stop = current_price + (atr_value * self.ATR_STOP_MULTIPLIER)
                 
                 target1_percent = ((target1 - current_price) / current_price) * 100
@@ -78,8 +92,8 @@ class PriceForecastAnalyzer:
                 
             else:  # sideways
                 # For sideways, use ATR for range estimation
-                target1 = current_price + (atr_value * 0.5)
-                target2 = current_price - (atr_value * 0.5)
+                target1 = current_price + (atr_value * self.SIDEWAYS_RANGE_MULTIPLIER)
+                target2 = current_price - (atr_value * self.SIDEWAYS_RANGE_MULTIPLIER)
                 stop = None
                 
                 target1_percent = ((target1 - current_price) / current_price) * 100
