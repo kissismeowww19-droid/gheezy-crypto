@@ -2528,32 +2528,33 @@ class AISignalAnalyzer:
             ls_ratio_data: Long/Short ratio data
             
         Returns:
-            Score from -10 to +10 (reduced impact for better balance)
+            Score from -10 to +10 with gradual scaling to prevent over-dominance
         """
         if not ls_ratio_data:
             return 0.0
         
         avg_ratio = ls_ratio_data.get("average_ratio", 1.0)
         
-        # Reduced L/S ratio influence to prevent over-dominance
-        # High ratio (>2.0) = too many longs = bearish (reversal risk)
-        # Low ratio (<0.5) = too many shorts = bullish (reversal risk)
+        # Gradual L/S ratio influence with maximum ±10 for extreme values
+        # After weighting (1.5x) and capping, max contribution is ±15
+        # High ratio (>2.5) = too many longs = bearish (reversal risk)
+        # Low ratio (<0.4) = too many shorts = bullish (reversal risk)
         # Moderate ranges provide smaller adjustments
         
-        if avg_ratio > 2.0:
-            return -8  # Too bullish = reversal down
+        if avg_ratio > 2.5:
+            return -10  # Extreme bullish crowd = strong reversal down
+        elif avg_ratio > 2.0:
+            return -7  # Very many longs
         elif avg_ratio > 1.5:
-            return -4  # Moderately too bullish
-        elif avg_ratio > 1.2:
-            return 3  # Slightly bullish
+            return -3  # Many longs
+        elif avg_ratio < 0.4:
+            return 10  # Extreme bearish crowd = strong reversal up
         elif avg_ratio < 0.5:
-            return 8  # Too bearish = reversal up
+            return 7  # Very many shorts
         elif avg_ratio < 0.7:
-            return 4  # Moderately too bearish
-        elif avg_ratio < 0.9:
-            return -3  # Slightly bearish
+            return 3  # Many shorts
         else:
-            return 0.0
+            return 0.0  # Neutral zone (0.7 - 1.5)
     
     def _calculate_funding_trend_score(self, funding_history: Optional[Dict]) -> float:
         """
@@ -3040,6 +3041,76 @@ class AISignalAnalyzer:
         
         return max(50, min(85, base))
     
+    def calculate_signal_strength(self, score: float) -> int:
+        """
+        Вычислить силу сигнала на основе score с плавной шкалой.
+        
+        Плавная шкала силы сигнала:
+        - 0-20 score = 0-25% (слабый сигнал)
+        - 20-40 score = 25-50% (умеренный сигнал)
+        - 40-60 score = 50-75% (сильный сигнал)
+        - 60+ score = 75-100% (очень сильный сигнал)
+        
+        Args:
+            score: Итоговый score (-100..+100)
+            
+        Returns:
+            Сила сигнала 0-100%
+        """
+        abs_score = abs(score)
+        
+        if abs_score < 20:
+            # Слабый сигнал: 0-25%
+            strength = int(abs_score * 1.25)
+        elif abs_score < 40:
+            # Умеренный сигнал: 25-50%
+            strength = 25 + int((abs_score - 20) * 1.25)
+        elif abs_score < 60:
+            # Сильный сигнал: 50-75%
+            strength = 50 + int((abs_score - 40) * 1.25)
+        else:
+            # Очень сильный сигнал: 75-100%
+            strength = min(75 + int((abs_score - 60) * 0.625), 100)
+        
+        return strength
+    
+    def _calculate_probability_from_score(self, score: float) -> int:
+        """
+        Вычислить базовую вероятность на основе score с плавной шкалой.
+        
+        Плавная шкала вероятности вместо фиксированных значений:
+        - abs_score < 15: слабый сигнал → 50-54%
+        - 15-30: умеренный сигнал → 55-64%
+        - 30-60: сильный сигнал → 65-74%
+        - 60-100: очень сильный сигнал → 75-84%
+        - 100+: экстремальный сигнал → 85-95%
+        
+        Args:
+            score: Итоговый score (-100..+100)
+            
+        Returns:
+            Вероятность 50-95%
+        """
+        abs_score = abs(score)
+        
+        if abs_score < 15:
+            # Слабый сигнал: 50-54%
+            probability = 50 + int(abs_score * 0.27)  # 0.27 ≈ 4/15
+        elif abs_score < 30:
+            # Умеренный сигнал: 55-64%
+            probability = 55 + int((abs_score - 15) * 0.6)
+        elif abs_score < 60:
+            # Сильный сигнал: 65-74%
+            probability = 65 + int((abs_score - 30) * 0.3)
+        elif abs_score < 100:
+            # Очень сильный сигнал: 75-84%
+            probability = 75 + int((abs_score - 60) * 0.225)  # 0.225 ≈ 9/40
+        else:
+            # Экстремальный сигнал: 85-95%
+            probability = min(85 + int((abs_score - 100) * 0.1), 95)
+        
+        return probability
+    
     def _calculate_probability_for_sideways(self, total_score: float) -> int:
         """
         Рассчитать вероятность для боковика на основе score.
@@ -3090,34 +3161,22 @@ class AISignalAnalyzer:
         """
         ПОЛНЫЙ расчёт вероятности на основе ВСЕХ факторов и данных.
         
-        Компоненты вероятности:
-        1. База: 50%
-        2. Сила сигнала: 0-12%
-        3. Консенсус факторов: 0-12%
-        4. Охват данных: 0-8%
-        5. Тренд (блок): 0-8%
-        6. Импульс (блок): 0-5%
-        7. Киты (блок): 0-5%
-        8. Деривативы (блок): 0-5%
-        9. Настроения (блок): 0-5%
+        Использует плавную шкалу вероятности на основе score с корректировками:
+        1. База: плавная шкала от score (50-95%)
+        2. Консенсус факторов: до ±5%
+        3. Охват данных: до +3%
+        4. Против тренда: до -8%
         
-        Штрафы:
-        - Конфликт факторов: -5%
-        - Против тренда: -8%
-        - Слабый консенсус: -3%
-        
-        Итого: 50-85%
+        Итого: 50-95%
         """
         
-        # ====== БАЗА ======
-        base_prob = 50.0
+        # ====== БАЗА: ПЛАВНАЯ ШКАЛА ОТ SCORE ======
+        # Используем новый метод для расчёта базовой вероятности
+        base_prob = self._calculate_probability_from_score(total_score)
         
-        # ====== 1. БОНУС ОТ СИЛЫ СИГНАЛА (0-12%) ======
-        # total_score: -100..+100, берём абсолютное значение
-        strength = min(100, max(0, abs(total_score)))
-        strength_bonus = (strength / 100) * 12
+        # ====== КОРРЕКТИРОВКИ ======
         
-        # ====== 2. БОНУС ОТ КОНСЕНСУСА ФАКТОРОВ (0-12%) ======
+        # 1. БОНУС ОТ КОНСЕНСУСА ФАКТОРОВ (до +5%)
         # Чем больше факторов в одном направлении, тем выше вероятность
         total_factors = bullish_count + bearish_count
         if total_factors > 0:
@@ -3125,54 +3184,31 @@ class AISignalAnalyzer:
             consensus_diff = abs(bullish_count - bearish_count)
             # Нормализуем: если все факторы в одном направлении = 100%
             consensus_ratio = consensus_diff / total_factors
-            consensus_bonus = consensus_ratio * 12
+            consensus_bonus = consensus_ratio * 5
         else:
             consensus_bonus = 0
         
-        # ====== 3. БОНУС ОТ ОХВАТА ДАННЫХ (0-8%) ======
+        # 2. БОНУС ОТ ОХВАТА ДАННЫХ (до +3%)
         # Чем больше источников данных, тем увереннее сигнал
         coverage = data_sources_count / max(1, total_sources)
-        coverage_bonus = coverage * 8
-        
-        # ====== 4. БОНУС ОТ БЛОКА ТРЕНДА (0-8%) ======
-        # block_trend_score: -10..+10
-        # Берём абсолютное значение и нормализуем
-        trend_strength = abs(block_trend_score) / 10
-        trend_bonus = trend_strength * 8
-        
-        # ====== 5. БОНУС ОТ БЛОКА ИМПУЛЬСА (0-5%) ======
-        momentum_strength = abs(block_momentum_score) / 10
-        momentum_bonus = momentum_strength * 5
-        
-        # ====== 6. БОНУС ОТ БЛОКА КИТОВ (0-5%) ======
-        whales_strength = abs(block_whales_score) / 10
-        whales_bonus = whales_strength * 5
-        
-        # ====== 7. БОНУС ОТ БЛОКА ДЕРИВАТИВОВ (0-5%) ======
-        derivatives_strength = abs(block_derivatives_score) / 10
-        derivatives_bonus = derivatives_strength * 5
-        
-        # ====== 8. БОНУС ОТ БЛОКА НАСТРОЕНИЙ (0-5%) ======
-        sentiment_strength = abs(block_sentiment_score) / 10
-        sentiment_bonus = sentiment_strength * 5
+        coverage_bonus = coverage * 3
         
         # ====== СУММИРУЕМ БОНУСЫ ======
-        prob = base_prob + strength_bonus + consensus_bonus + coverage_bonus
-        prob += trend_bonus + momentum_bonus + whales_bonus + derivatives_bonus + sentiment_bonus
+        prob = base_prob + consensus_bonus + coverage_bonus
         
         # ====== ШТРАФЫ ======
         
         # 1. Конфликт факторов (есть и бычьи и медвежьи)
         if bullish_count > 0 and bearish_count > 0:
-            prob -= 5
+            prob -= 3
         
         # 2. Равный консенсус (бычьи == медвежьи) — очень неопределённо
         if bullish_count == bearish_count and bullish_count > 0:
-            prob -= 3
+            prob -= 2
         
         # 3. Слабый консенсус (мало факторов)
         if total_factors < 3:
-            prob -= 3
+            prob -= 2
         
         # 4. Против тренда
         if direction == "long":
@@ -3181,14 +3217,14 @@ class AISignalAnalyzer:
             elif trend_score < 0:
                 prob -= 4  # Лонг против слабого медвежьего тренда
             elif trend_score > 3:
-                prob += 3  # Лонг по сильному бычьему тренду
+                prob += 2  # Лонг по сильному бычьему тренду
         elif direction == "short":
             if trend_score > 3:
                 prob -= 8  # Шорт против сильного бычьего тренда
             elif trend_score > 0:
                 prob -= 4  # Шорт против слабого бычьего тренда
             elif trend_score < -3:
-                prob += 3  # Шорт по сильному медвежьему тренду
+                prob += 2  # Шорт по сильному медвежьему тренду
         
         # 5. Боковик — используем специальный расчёт на основе score
         if direction == "sideways":
@@ -3209,7 +3245,7 @@ class AISignalAnalyzer:
             prob = base_sideways_prob
         
         # ====== ФИНАЛЬНЫЕ ГРАНИЦЫ ======
-        prob = int(round(max(50, min(85, prob))))
+        prob = int(round(max(50, min(95, prob))))
         
         return prob
     
@@ -3902,8 +3938,8 @@ class AISignalAnalyzer:
         }
         logger.info(f"Saved signal for {symbol}: direction={final_direction}, probability={final_probability}, total_score={total_score:.2f} (expires in {self.CORRELATION_SIGNAL_TTL}s)")
         
-        # Normalize strength to 0-100%
-        strength_percent = min(max((total_score + 100) / 200 * 100, 0), 100)
+        # Calculate signal strength using the new method
+        strength_percent = self.calculate_signal_strength(total_score)
         
         return {
             "symbol": symbol,
@@ -4630,7 +4666,7 @@ class AISignalAnalyzer:
         coverage = data_sources_count / self.TOTAL_DATA_SOURCES
         
         # Определение слабого сигнала
-        signal_strength = int(min(100, max(0, abs(total_score))))
+        signal_strength = self.calculate_signal_strength(total_score)
         is_weak = signal_strength < 20 or probability < 60
         
         if is_weak:
