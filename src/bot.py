@@ -1039,11 +1039,27 @@ async def callback_signal_coin(callback: CallbackQuery):
                     reply_markup=keyboard,
                     parse_mode=ParseMode.MARKDOWN
                 )
-            except Exception as send_error:
-                logger.error(f"Failed to send new message: {send_error}")
+            except TelegramBadRequest as send_error:
+                # Если markdown не работает, попробуем без него
+                logger.error(f"Failed to send message with markdown: {send_error}")
+                try:
+                    await callback.bot.send_message(
+                        chat_id=callback.message.chat.id,
+                        text=signal_text,
+                        reply_markup=keyboard
+                    )
+                except Exception as final_error:
+                    logger.error(f"Failed to send message without markdown: {final_error}")
         elif "message is not modified" in str(e):
             # Сообщение не изменилось, игнорируем
             pass
+        elif "can't parse entities" in str(e) or "entity" in str(e).lower():
+            # Ошибка парсинга markdown, попробовать без форматирования
+            logger.error(f"Markdown parsing error: {e}")
+            try:
+                await callback.message.edit_text(signal_text, reply_markup=keyboard)
+            except Exception:
+                pass
         else:
             logger.error(f"TelegramBadRequest error: {e}")
             # Fallback: попробовать без форматирования

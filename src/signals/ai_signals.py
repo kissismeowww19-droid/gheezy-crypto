@@ -148,7 +148,7 @@ class AISignalAnalyzer:
     
     # Maximum contribution from any single factor (prevents over-dominance)
     MAX_SINGLE_FACTOR_SCORE = 15  # ±15 - максимальный вклад одного фактора в итоговый score
-    MAX_TOTAL_SCORE = 100  # ±100 - максимальный общий score
+    MAX_TOTAL_SCORE = 130  # ±130 - максимальный общий score (с учётом Phase 3)
     MAX_PROBABILITY = 78  # Максимальная вероятность (реалистичная)
     
     def __init__(self, whale_tracker):
@@ -3148,34 +3148,25 @@ class AISignalAnalyzer:
     
     def calculate_signal_strength(self, score: float) -> int:
         """
-        Вычислить силу сигнала на основе score с плавной шкалой.
+        Вычислить силу сигнала на основе score с реалистичной шкалой.
         
-        Плавная шкала силы сигнала:
-        - 0-20 score = 0-25% (слабый сигнал)
-        - 20-40 score = 25-50% (умеренный сигнал)
-        - 40-60 score = 50-75% (сильный сигнал)
-        - 60+ score = 75-100% (очень сильный сигнал)
+        Реалистичная шкала силы сигнала (рассчитывается от 130 для реализма):
+        - ±100+ score = 77%+ (сильный)
+        - ±80 score = 62% (хороший)
+        - ±60 score = 46% (средний)
+        - ±40 score = 31% (слабый)
         
         Args:
-            score: Итоговый score (-100..+100)
+            score: Итоговый score (-100..+100, ограничен после всех корректировок)
             
         Returns:
             Сила сигнала 0-100%
         """
         abs_score = abs(score)
         
-        if abs_score < 20:
-            # Слабый сигнал: 0-25%
-            strength = int(abs_score * 1.25)
-        elif abs_score < 40:
-            # Умеренный сигнал: 25-50%
-            strength = 25 + int((abs_score - 20) * 1.25)
-        elif abs_score < 60:
-            # Сильный сигнал: 50-75%
-            strength = 50 + int((abs_score - 40) * 1.25)
-        else:
-            # Очень сильный сигнал: 75-100%
-            strength = min(75 + int((abs_score - 60) * 0.625), 100)
+        # Реалистичная сила: рассчитываем как если бы максимум был 130,
+        # чтобы 100% был редким достижением
+        strength = min(int(abs_score / self.MAX_TOTAL_SCORE * 100), 100)
         
         return strength
     
@@ -3991,6 +3982,9 @@ class AISignalAnalyzer:
         raw_direction = adjusted_direction
         total_score = adjusted_total_score
         
+        # Final score limit (after all adjustments including Phase 3 and correlation)
+        total_score = max(min(total_score, 100), -100)
+        
         # ====== ФИНАЛЬНОЕ НАПРАВЛЕНИЕ И ТЕКСТ ======
         # Направление определяется ТОЛЬКО по score (уже учтена корреляция)
         final_direction = raw_direction  # Уже определено через _determine_direction_from_score
@@ -4292,10 +4286,9 @@ class AISignalAnalyzer:
         
         # Сила сигнала (рассчитывается из total_score, не probability)
         # total_score диапазон: -100 до +100
-        # Преобразуем в 0-100%
+        # Используем новую реалистичную шкалу
         total_score = signal_data.get('total_score', 0)
-        strength_value = abs(total_score)
-        signal_strength = min(100, int(strength_value))
+        signal_strength = self.calculate_signal_strength(total_score)
         filled_blocks = int(signal_strength / 10)
         empty_blocks = 10 - filled_blocks
         strength_bar = "█" * filled_blocks + "░" * empty_blocks
