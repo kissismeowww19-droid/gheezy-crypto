@@ -9,8 +9,8 @@ class OptionsAnalyzer:
     Анализ опционов с Deribit (бесплатный API, работает в РФ)
     
     Put/Call Ratio интерпретация (contrarian):
-    - PCR > 1.2: много путов = толпа ждёт падения = contrarian bullish
-    - PCR < 0.8: много коллов = толпа ждёт роста = contrarian bearish
+    - PCR > 1.3: много путов = толпа ждёт падения = contrarian bullish
+    - PCR < 0.7: много коллов = толпа ждёт роста = contrarian bearish
     """
     
     BASE_URL = "https://www.deribit.com/api/v2/public"
@@ -56,7 +56,11 @@ class OptionsAnalyzer:
                 put_oi += oi
         
         # Put/Call Ratio
-        pcr = put_oi / call_oi if call_oi > 0 else 1.0
+        # If no calls, treat as max PCR (extreme bearish positioning = contrarian bullish)
+        if call_oi == 0:
+            pcr = 10.0 if put_oi > 0 else 1.0
+        else:
+            pcr = put_oi / call_oi
         
         # Contrarian интерпретация
         if pcr > 1.3:

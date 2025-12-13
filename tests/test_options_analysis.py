@@ -47,6 +47,7 @@ class TestOptionsAnalyzer:
             assert 'put_oi' in result
             assert 'verdict' in result
             assert 'score' in result
+            # call_oi = 2500 (1000+1500), put_oi = 4500 (2000+2500)
             # PCR = 4500 / 2500 = 1.8 -> bullish
             assert result['put_call_ratio'] > 1.0
     
@@ -72,6 +73,7 @@ class TestOptionsAnalyzer:
             
             assert result is not None
             assert 'put_call_ratio' in result
+            # call_oi = 5000 (3000+2000), put_oi = 1500 (1000+500)
             # PCR = 1500 / 5000 = 0.3 -> bearish (low PCR means many calls)
             assert result['put_call_ratio'] < 1.0
     
