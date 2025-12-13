@@ -136,6 +136,9 @@ class AISignalAnalyzer:
     # Correlation signals TTL (10 minutes)
     CORRELATION_SIGNAL_TTL = 600  # 10 минут - время жизни сигналов для корреляции
     
+    # Maximum contribution from any single factor (prevents over-dominance)
+    MAX_SINGLE_FACTOR_SCORE = 15  # ±15 - максимальный вклад одного фактора в итоговый score
+    
     def __init__(self, whale_tracker):
         """
         Инициализация анализатора.
@@ -2525,26 +2528,30 @@ class AISignalAnalyzer:
             ls_ratio_data: Long/Short ratio data
             
         Returns:
-            Score from -10 to +10
+            Score from -10 to +10 (reduced impact for better balance)
         """
         if not ls_ratio_data:
             return 0.0
         
         avg_ratio = ls_ratio_data.get("average_ratio", 1.0)
         
-        # High ratio (>1.5) = too many longs = bearish (reversal risk)
-        # Low ratio (<0.7) = too many shorts = bullish (reversal risk)
-        # Moderate high (>1.1) = bullish sentiment
-        # Moderate low (<0.9) = bearish sentiment
+        # Reduced L/S ratio influence to prevent over-dominance
+        # High ratio (>2.0) = too many longs = bearish (reversal risk)
+        # Low ratio (<0.5) = too many shorts = bullish (reversal risk)
+        # Moderate ranges provide smaller adjustments
         
-        if avg_ratio > 1.5:
+        if avg_ratio > 2.0:
             return -8  # Too bullish = reversal down
+        elif avg_ratio > 1.5:
+            return -4  # Moderately too bullish
         elif avg_ratio > 1.2:
-            return 5  # Moderately bullish
-        elif avg_ratio < 0.7:
+            return 3  # Slightly bullish
+        elif avg_ratio < 0.5:
             return 8  # Too bearish = reversal up
+        elif avg_ratio < 0.7:
+            return 4  # Moderately too bearish
         elif avg_ratio < 0.9:
-            return -5  # Moderately bearish
+            return -3  # Slightly bearish
         else:
             return 0.0
     
@@ -2634,6 +2641,20 @@ class AISignalAnalyzer:
         
         normalized_score = score / factors * multiplier
         return max(-10, min(10, normalized_score))
+
+    def _cap_factor_contribution(self, raw_score: float, weight: float) -> float:
+        """
+        Cap individual factor contribution to prevent any single factor from dominating.
+        
+        Args:
+            raw_score: Raw score from factor (-10 to +10)
+            weight: Weight to apply to the score
+            
+        Returns:
+            Capped weighted contribution (±MAX_SINGLE_FACTOR_SCORE)
+        """
+        weighted_score = raw_score * weight
+        return max(-self.MAX_SINGLE_FACTOR_SCORE, min(self.MAX_SINGLE_FACTOR_SCORE, weighted_score))
 
     def _calc_trend_score(
         self,
@@ -3266,7 +3287,7 @@ class AISignalAnalyzer:
         
         # ====== ОПРЕДЕЛЯЕМ СИЛУ КОРРЕЛЯЦИИ ======
         if symbol == "ETH":
-            correlation = 0.40  # 40% влияние BTC на ETH (высокая корреляция)
+            correlation = 0.70  # 70% влияние BTC на ETH (усиленная корреляция)
         elif symbol == "TON":
             correlation = 0.30  # 30% влияние BTC на TON (средняя корреляция)
         else:
@@ -3278,6 +3299,21 @@ class AISignalAnalyzer:
         adjusted_total_score = total_score + btc_influence
         
         logger.info(f"Cross-asset: {symbol} score adjustment: {total_score:.2f} + ({btc_total_score:.2f} * {correlation}) = {adjusted_total_score:.2f}")
+        
+        # ====== ПРАВИЛО: ЗАПРЕТ ПРОТИВОПОЛОЖНЫХ СИГНАЛОВ ======
+        # Если BTC сильный ШОРТ (score < -30), а ETH получается ЛОНГ → делаем НЕЙТРАЛЬНЫЙ
+        # Если BTC сильный ЛОНГ (score > 30), а ETH получается ШОРТ → делаем НЕЙТРАЛЬНЫЙ
+        if btc_total_score < -30 and adjusted_total_score >= 10:
+            # BTC сильный шорт, но ETH хочет быть лонгом
+            # Переводим в нейтральный/слабый шорт
+            adjusted_total_score = min(adjusted_total_score, 0)
+            logger.info(f"Cross-asset OVERRIDE: BTC strong SHORT, forcing {symbol} to neutral/short (score: {adjusted_total_score:.2f})")
+        
+        elif btc_total_score > 30 and adjusted_total_score <= -10:
+            # BTC сильный лонг, но ETH хочет быть шортом
+            # Переводим в нейтральный/слабый лонг
+            adjusted_total_score = max(adjusted_total_score, 0)
+            logger.info(f"Cross-asset OVERRIDE: BTC strong LONG, forcing {symbol} to neutral/long (score: {adjusted_total_score:.2f})")
         
         # ====== ПЕРЕСЧЁТ НАПРАВЛЕНИЯ по adjusted_total_score ======
         # Используем единственный источник правды для определения направления
@@ -3549,41 +3585,42 @@ class AISignalAnalyzer:
             )
         
         # Calculate weighted total score (30 factors total)
+        # Each factor contribution is capped at ±MAX_SINGLE_FACTOR_SCORE
         total_score = (
             # Long-term (35%)
-            whale_score * self.WHALE_WEIGHT +
-            trend_score * self.TREND_WEIGHT +
-            momentum_score * self.MOMENTUM_WEIGHT +
-            volatility_score * self.VOLATILITY_WEIGHT +
-            volume_score * self.VOLUME_WEIGHT +
-            market_score * self.MARKET_WEIGHT +
-            orderbook_score * self.ORDERBOOK_WEIGHT +
-            derivatives_score * self.DERIVATIVES_WEIGHT +
-            onchain_score * self.ONCHAIN_WEIGHT +
-            sentiment_score * self.SENTIMENT_WEIGHT +
+            self._cap_factor_contribution(whale_score, self.WHALE_WEIGHT) +
+            self._cap_factor_contribution(trend_score, self.TREND_WEIGHT) +
+            self._cap_factor_contribution(momentum_score, self.MOMENTUM_WEIGHT) +
+            self._cap_factor_contribution(volatility_score, self.VOLATILITY_WEIGHT) +
+            self._cap_factor_contribution(volume_score, self.VOLUME_WEIGHT) +
+            self._cap_factor_contribution(market_score, self.MARKET_WEIGHT) +
+            self._cap_factor_contribution(orderbook_score, self.ORDERBOOK_WEIGHT) +
+            self._cap_factor_contribution(derivatives_score, self.DERIVATIVES_WEIGHT) +
+            self._cap_factor_contribution(onchain_score, self.ONCHAIN_WEIGHT) +
+            self._cap_factor_contribution(sentiment_score, self.SENTIMENT_WEIGHT) +
             # Short-term (35%)
-            short_trend_score * self.SHORT_TREND_WEIGHT +
-            trades_flow_score * self.TRADES_FLOW_WEIGHT +
-            liquidations_score * self.LIQUIDATIONS_WEIGHT +
-            orderbook_delta_score * self.ORDERBOOK_DELTA_WEIGHT +
-            price_momentum_score * self.PRICE_MOMENTUM_WEIGHT +
+            self._cap_factor_contribution(short_trend_score, self.SHORT_TREND_WEIGHT) +
+            self._cap_factor_contribution(trades_flow_score, self.TRADES_FLOW_WEIGHT) +
+            self._cap_factor_contribution(liquidations_score, self.LIQUIDATIONS_WEIGHT) +
+            self._cap_factor_contribution(orderbook_delta_score, self.ORDERBOOK_DELTA_WEIGHT) +
+            self._cap_factor_contribution(price_momentum_score, self.PRICE_MOMENTUM_WEIGHT) +
             # New sources (30%)
-            coinglass_oi_score * self.COINGLASS_OI_WEIGHT +
-            coinglass_top_traders_score * self.COINGLASS_TOP_TRADERS_WEIGHT +
-            news_sentiment_score * self.NEWS_SENTIMENT_WEIGHT +
-            tradingview_score * self.TRADINGVIEW_WEIGHT +
-            whale_alert_score * self.WHALE_ALERT_WEIGHT +
-            social_score * self.SOCIAL_WEIGHT +
+            self._cap_factor_contribution(coinglass_oi_score, self.COINGLASS_OI_WEIGHT) +
+            self._cap_factor_contribution(coinglass_top_traders_score, self.COINGLASS_TOP_TRADERS_WEIGHT) +
+            self._cap_factor_contribution(news_sentiment_score, self.NEWS_SENTIMENT_WEIGHT) +
+            self._cap_factor_contribution(tradingview_score, self.TRADINGVIEW_WEIGHT) +
+            self._cap_factor_contribution(whale_alert_score, self.WHALE_ALERT_WEIGHT) +
+            self._cap_factor_contribution(social_score, self.SOCIAL_WEIGHT) +
             # Deep whale analysis (Phase 2)
-            whale_accumulation_score * self.WHALE_ACCUMULATION_WEIGHT +
-            exchange_flow_detailed_score * self.EXCHANGE_FLOW_DETAILED_WEIGHT +
-            stablecoin_flow_score * self.STABLECOIN_FLOW_WEIGHT +
+            self._cap_factor_contribution(whale_accumulation_score, self.WHALE_ACCUMULATION_WEIGHT) +
+            self._cap_factor_contribution(exchange_flow_detailed_score, self.EXCHANGE_FLOW_DETAILED_WEIGHT) +
+            self._cap_factor_contribution(stablecoin_flow_score, self.STABLECOIN_FLOW_WEIGHT) +
             # Deep derivatives analysis (Phase 2)
-            oi_price_correlation_score * self.OI_PRICE_CORRELATION_WEIGHT +
-            liquidation_levels_score * self.LIQUIDATION_LEVELS_WEIGHT +
-            ls_ratio_detailed_score * self.LS_RATIO_DETAILED_WEIGHT +
-            funding_trend_score * self.FUNDING_TREND_WEIGHT +
-            basis_score * self.BASIS_WEIGHT
+            self._cap_factor_contribution(oi_price_correlation_score, self.OI_PRICE_CORRELATION_WEIGHT) +
+            self._cap_factor_contribution(liquidation_levels_score, self.LIQUIDATION_LEVELS_WEIGHT) +
+            self._cap_factor_contribution(ls_ratio_detailed_score, self.LS_RATIO_DETAILED_WEIGHT) +
+            self._cap_factor_contribution(funding_trend_score, self.FUNDING_TREND_WEIGHT) +
+            self._cap_factor_contribution(basis_score, self.BASIS_WEIGHT)
         ) * self.SCORE_SCALE_FACTOR  # Scale to -100 to +100
         
         # Сглаживание score для стабильности
