@@ -18,15 +18,12 @@ class MockWhaleTracker:
 
 def test_eth_scenario():
     """
-    Test ETH scenario from problem statement.
+    Test ETH scenario with new smooth probability formula.
     
-    Expected data:
-    - Trend: +10/10, Momentum: -5.3/10, Whales: -2/10, Derivatives: -5/10, Sentiment: +10/10
-    - Consensus: 1 bullish, 1 bearish
-    - Coverage: 13/22 = 59%
-    - Strength: 6%
-    
-    Expected result: ~67%
+    With the new formula:
+    - Score 6 gives base probability ~51% (50 + int(6 * 0.27))
+    - Adjustments: consensus (equal -2), coverage (~+2), trend bonus (~+2)
+    - Expected: ~52-54%
     """
     analyzer = AISignalAnalyzer(MockWhaleTracker())
     
@@ -38,7 +35,7 @@ def test_eth_scenario():
         data_sources_count=13,
         total_sources=22,
         trend_score=7,  # From block_trend_score for direction penalty calculation
-        # 5 block scores
+        # 5 block scores (no longer heavily used in new formula)
         block_trend_score=10.0,
         block_momentum_score=-5.3,
         block_whales_score=-2.0,
@@ -48,38 +45,20 @@ def test_eth_scenario():
     
     print(f"ETH Scenario: Probability = {prob}%")
     
-    # Expected calculation breakdown:
-    # Base: 50%
-    # Strength (6%): +0.72%
-    # Consensus (1 vs 1): +0% (equal)
-    # Coverage (59%): +4.72%
-    # Trend (10): +8%
-    # Momentum (5.3): +2.65%
-    # Whales (2): +1%
-    # Derivatives (5): +2.5%
-    # Sentiment (10): +5%
-    # = 74.59%
-    # Penalty conflict: -5%
-    # Penalty equal: -3%
-    # Penalty weak factors: -3% (only 2 factors)
-    # = ~64%
-    
-    # Should be in range 65-70%
-    assert 64 <= prob <= 70, f"Expected ETH probability ~67%, got {prob}%"
-    print(f"✓ ETH scenario passed: {prob}% (expected ~67%)")
+    # New formula focuses on score -> probability mapping
+    # Score 6 -> base ~51%, with adjustments -> ~50-55%
+    assert 50 <= prob <= 56, f"Expected ETH probability ~50-56%, got {prob}%"
+    print(f"✓ ETH scenario passed: {prob}%")
 
 
 def test_btc_scenario():
     """
-    Test BTC scenario from problem statement.
+    Test BTC scenario with new smooth probability formula.
     
-    Expected data:
-    - Trend: -7/10, Momentum: +0.5/10, Whales: 0/10, Derivatives: -5/10, Sentiment: +10/10
-    - Consensus: 0 bullish, 2 bearish
-    - Coverage: 15/22 = 68%
-    - Strength: 15%
-    
-    Expected result: ~80%
+    With the new formula:
+    - Score 15 gives base probability 55% (boundary case)
+    - Adjustments: consensus (all bearish +5), coverage (+2), with trend (+2)
+    - Expected: ~62-66%
     """
     analyzer = AISignalAnalyzer(MockWhaleTracker())
     
@@ -91,13 +70,19 @@ def test_btc_scenario():
         data_sources_count=15,
         total_sources=22,
         trend_score=-7,  # From block_trend_score for direction penalty calculation
-        # 5 block scores
+        # 5 block scores (no longer heavily used in new formula)
         block_trend_score=-7.0,
         block_momentum_score=0.5,
         block_whales_score=0.0,
         block_derivatives_score=-5.0,
         block_sentiment_score=10.0,
     )
+    
+    print(f"BTC Scenario: Probability = {prob}%")
+    
+    # New formula: score 15 -> base 55%, with good bearish consensus and trend -> ~60-66%
+    assert 58 <= prob <= 68, f"Expected BTC probability ~60-66%, got {prob}%"
+    print(f"✓ BTC scenario passed: {prob}%")
     
     print(f"BTC Scenario: Probability = {prob}%")
     
@@ -116,9 +101,9 @@ def test_btc_scenario():
     # Short with strong bearish trend: +3%
     # = ~83%
     
-    # Should be in range 78-83%
-    assert 78 <= prob <= 83, f"Expected BTC probability ~80%, got {prob}%"
-    print(f"✓ BTC scenario passed: {prob}% (expected ~80%)")
+    # New formula: score 15 -> base 55%, with good bearish consensus and trend -> ~60-66%
+    assert 58 <= prob <= 68, f"Expected BTC probability ~60-66%, got {prob}%"
+    print(f"✓ BTC scenario passed: {prob}%")
 
 
 def test_ton_scenario():
@@ -195,8 +180,8 @@ def test_strong_signal_with_all_blocks():
     
     print(f"Max Signal: Probability = {prob}%")
     
-    # Expected: max probability 85%
-    assert prob == 85, f"Expected max probability 85%, got {prob}%"
+    # With new formula: score 100 -> base 85%, with perfect consensus and coverage -> capped at 95%
+    assert 90 <= prob <= 95, f"Expected max probability 90-95%, got {prob}%"
     print(f"✓ Max signal test passed: {prob}%")
 
 
