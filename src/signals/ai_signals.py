@@ -21,6 +21,12 @@ from signals.indicators import (
     calculate_pivot_points, calculate_fibonacci_levels
 )
 from signals.data_sources import DataSourceManager
+from signals.multi_timeframe import MultiTimeframeAnalyzer
+from signals.price_forecast import PriceForecastAnalyzer
+from signals.technical_analysis import (
+    calculate_ichimoku, calculate_volume_profile, calculate_cvd,
+    calculate_market_structure, find_order_blocks, find_fvg
+)
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +131,8 @@ class AISignalAnalyzer:
         """
         self.whale_tracker = whale_tracker
         self.data_source_manager = DataSourceManager()
+        self.multi_timeframe_analyzer = MultiTimeframeAnalyzer()
+        self.price_forecast_analyzer = PriceForecastAnalyzer()
         
         # Маппинг символов для whale tracker
         self.blockchain_mapping = {
@@ -1503,6 +1511,108 @@ class AISignalAnalyzer:
             
         except Exception as e:
             logger.error(f"Error calculating short-term indicators for {symbol}: {e}")
+            return None
+    
+    async def calculate_advanced_indicators(self, bybit_symbol: str, ohlcv_data: Optional[List]) -> Optional[Dict]:
+        """
+        Расчёт продвинутых технических индикаторов.
+        
+        Args:
+            bybit_symbol: Символ для Bybit (e.g., "BTCUSDT")
+            ohlcv_data: OHLCV данные
+            
+        Returns:
+            Dict с продвинутыми индикаторами или None
+        """
+        try:
+            # Fetch 4h candles for advanced analysis
+            candles_4h = await self.multi_timeframe_analyzer.fetch_candles(
+                bybit_symbol, "4h", limit=100
+            )
+            
+            if not candles_4h or len(candles_4h) < 52:
+                logger.warning(f"Insufficient 4h candle data for advanced indicators")
+                return None
+            
+            # Extract price arrays
+            opens = [c["open"] for c in candles_4h]
+            highs = [c["high"] for c in candles_4h]
+            lows = [c["low"] for c in candles_4h]
+            closes = [c["close"] for c in candles_4h]
+            volumes = [c["volume"] for c in candles_4h]
+            
+            result = {}
+            
+            # Calculate Ichimoku Cloud
+            ichimoku = calculate_ichimoku(highs, lows, closes, closes[-1])
+            if ichimoku:
+                result["ichimoku"] = {
+                    "tenkan_sen": ichimoku.tenkan_sen,
+                    "kijun_sen": ichimoku.kijun_sen,
+                    "senkou_span_a": ichimoku.senkou_span_a,
+                    "senkou_span_b": ichimoku.senkou_span_b,
+                    "cloud_color": ichimoku.cloud_color,
+                    "signal": ichimoku.signal
+                }
+            
+            # Calculate Volume Profile
+            volume_profile = calculate_volume_profile(closes, volumes)
+            if volume_profile:
+                result["volume_profile"] = {
+                    "poc": volume_profile.poc,
+                    "vah": volume_profile.vah,
+                    "val": volume_profile.val,
+                    "position": volume_profile.get_position(closes[-1])
+                }
+            
+            # Calculate CVD
+            cvd = calculate_cvd(opens, closes, volumes)
+            if cvd:
+                result["cvd"] = {
+                    "value": cvd.value,
+                    "trend": cvd.trend,
+                    "signal": cvd.signal
+                }
+            
+            # Calculate Market Structure
+            market_structure = calculate_market_structure(highs, lows)
+            if market_structure:
+                result["market_structure"] = {
+                    "structure": market_structure.structure,
+                    "signal": market_structure.signal
+                }
+            
+            # Find Order Blocks
+            order_blocks = find_order_blocks(opens, highs, lows, closes)
+            if order_blocks:
+                # Get most recent order block
+                latest_ob = order_blocks[-1] if order_blocks else None
+                if latest_ob:
+                    result["order_block"] = {
+                        "type": latest_ob.block_type,
+                        "price_high": latest_ob.price_high,
+                        "price_low": latest_ob.price_low,
+                        "signal": latest_ob.signal
+                    }
+            
+            # Find FVGs
+            fvgs = find_fvg(highs, lows)
+            if fvgs:
+                # Get most recent FVG
+                latest_fvg = fvgs[-1] if fvgs else None
+                if latest_fvg:
+                    result["fvg"] = {
+                        "type": latest_fvg.gap_type,
+                        "gap_high": latest_fvg.gap_high,
+                        "gap_low": latest_fvg.gap_low,
+                        "signal": latest_fvg.signal
+                    }
+            
+            logger.info(f"Calculated advanced indicators for {bybit_symbol}")
+            return result if result else None
+            
+        except Exception as e:
+            logger.error(f"Error calculating advanced indicators: {e}")
             return None
     
     def _calculate_short_term_trend_score(self, short_term_data: Dict) -> float:
@@ -3566,6 +3676,8 @@ class AISignalAnalyzer:
         whale_alert: Optional[Dict] = None,
         social_data: Optional[Dict] = None,
         is_cross_conflict: bool = False,  # НОВЫЙ ПАРАМЕТР
+        multi_timeframe_data: Optional[Dict] = None,  # НОВЫЙ ПАРАМЕТР
+        advanced_indicators: Optional[Dict] = None,  # НОВЫЙ ПАРАМЕТР
     ) -> str:
         """
         Расширенное форматирование сообщения с AI сигналом.
@@ -3673,19 +3785,122 @@ class AISignalAnalyzer:
         strength_bar = "█" * filled_blocks + "░" * empty_blocks
         
         # ===== НАЧАЛО СООБЩЕНИЯ =====
-        text = f"🤖 *AI СИГНАЛ: {symbol}*\n"
-        text += "━━━━━━━━━━━━━━━━━━━━\n\n"
+        text = f"🤖 *AI СИГНАЛ: {symbol} (4ч прогноз)*\n"
+        text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         
         # ===== НАПРАВЛЕНИЕ =====
         text += "📊 *НАПРАВЛЕНИЕ*\n"
         text += f"{direction_emoji} {direction_text} ({probability}% вероятность)\n"
-        text += f"Сила сигнала: {strength_bar} {signal_strength}%\n"
+        text += f"Сила: {strength_bar} {signal_strength}%\n"
         
         # Если был конфликт с BTC, добавляем предупреждение
         if is_cross_conflict or signal_data.get("is_cross_conflict", False):
             text += "\n⚠️ _Сигнал скорректирован с учётом корреляции BTC_\n"
         
         text += "\n"
+        
+        # ===== 4-HOUR FORECAST (NEW) =====
+        text += "🎯 *ПРОГНОЗ НА 4 ЧАСА*\n"
+        text += f"Текущая: {format_price(current_price)}\n"
+        
+        if is_sideways:
+            # Для боковика показываем ожидаемый диапазон
+            text += f"Цель 1: {format_price(range_high)} (+1.0%)\n"
+            text += f"Цель 2: {format_price(range_low)} (-1.0%)\n"
+            text += f"Стоп: — (боковик)\n"
+            text += f"R:R = —\n"
+        else:
+            # Для ЛОНГ/ШОРТ показываем TP и SL
+            tp1_percent_abs = abs(tp1_percent)
+            tp2_percent_abs = abs(tp2_percent)
+            sl_percent_abs = abs(sl_percent)
+            risk_reward = tp1_percent_abs / sl_percent_abs if sl_percent_abs > 0 else 0
+            
+            text += f"Цель 1: {format_price(tp1_price)} ({tp1_percent:+.1f}%)\n"
+            text += f"Цель 2: {format_price(tp2_price)} ({tp2_percent:+.1f}%)\n"
+            text += f"Стоп: {format_price(sl_price)} ({sl_percent:+.1f}%)\n"
+            text += f"R:R = {risk_reward:.1f}\n"
+        
+        text += "\n"
+        
+        # ===== MULTI-TIMEFRAME (NEW) =====
+        if multi_timeframe_data:
+            text += "📊 *МУЛЬТИ-ТАЙМФРЕЙМ*\n"
+            timeframes = multi_timeframe_data.get("timeframes", {})
+            consensus = multi_timeframe_data.get("consensus", {})
+            
+            # 15m timeframe
+            tf_15m = timeframes.get("15m", {})
+            if tf_15m:
+                rsi_15m = tf_15m.get("rsi", 0)
+                dir_15m = tf_15m.get("direction", "neutral")
+                emoji_15m = "🟢" if dir_15m == "bullish" else "🔴" if dir_15m == "bearish" else "🟡"
+                text += f"• 15м: {emoji_15m} {dir_15m} (RSI {rsi_15m:.0f})\n"
+            
+            # 1h timeframe
+            tf_1h = timeframes.get("1h", {})
+            if tf_1h:
+                rsi_1h = tf_1h.get("rsi", 0)
+                dir_1h = tf_1h.get("direction", "neutral")
+                emoji_1h = "🟢" if dir_1h == "bullish" else "🔴" if dir_1h == "bearish" else "🟡"
+                text += f"• 1ч: {emoji_1h} {dir_1h} (RSI {rsi_1h:.0f})\n"
+            
+            # 4h timeframe
+            tf_4h = timeframes.get("4h", {})
+            if tf_4h:
+                rsi_4h = tf_4h.get("rsi", 0)
+                dir_4h = tf_4h.get("direction", "neutral")
+                emoji_4h = "🟢" if dir_4h == "bullish" else "🔴" if dir_4h == "bearish" else "🟡"
+                text += f"• 4ч: {emoji_4h} {dir_4h} (RSI {rsi_4h:.0f})\n"
+            
+            # Consensus
+            consensus_text = consensus.get("text", "N/A")
+            text += f"Консенсус: {consensus_text}\n"
+            text += "\n"
+        
+        # ===== ADVANCED TECHNICAL ANALYSIS (NEW) =====
+        if advanced_indicators:
+            text += "📈 *ТЕХНИЧЕСКИЙ АНАЛИЗ*\n"
+            
+            # Ichimoku
+            ichimoku = advanced_indicators.get("ichimoku", {})
+            if ichimoku:
+                signal = ichimoku.get("signal", "neutral")
+                cloud_color = ichimoku.get("cloud_color", "neutral")
+                text += f"• Ichimoku: {signal} (облако {cloud_color})\n"
+            
+            # VWAP (from technical_data if available)
+            if technical_data:
+                vwap_data = technical_data.get("vwap")
+                if vwap_data and hasattr(vwap_data, 'value'):
+                    vwap_signal = "выше VWAP" if current_price > vwap_data.value else "ниже VWAP"
+                    text += f"• VWAP: {vwap_signal}\n"
+            
+            # Market Structure
+            market_structure = advanced_indicators.get("market_structure", {})
+            if market_structure:
+                structure = market_structure.get("structure", "neutral")
+                text += f"• Market Structure: {structure}\n"
+            
+            # Volume Profile
+            volume_profile = advanced_indicators.get("volume_profile", {})
+            if volume_profile:
+                poc = volume_profile.get("poc", 0)
+                text += f"• Volume Profile: POC {format_price(poc)}\n"
+            
+            # CVD
+            cvd = advanced_indicators.get("cvd", {})
+            if cvd:
+                trend = cvd.get("trend", "neutral")
+                text += f"• CVD: {trend}\n"
+            
+            # Order Blocks
+            order_block = advanced_indicators.get("order_block", {})
+            if order_block:
+                ob_type = order_block.get("type", "none")
+                text += f"• Order Blocks: {ob_type} OB\n"
+            
+            text += "\n"
         
         # ===== РАЗБИВКА ПО БЛОКАМ =====
         block_trend = signal_data.get('block_trend_score', 0)
@@ -3701,24 +3916,59 @@ class AISignalAnalyzer:
         text += f"• Деривативы: {'+' if block_derivatives > 0 else ''}{block_derivatives:.1f}/10\n"
         text += f"• Настроения: {'+' if block_sentiment > 0 else ''}{block_sentiment:.1f}/10\n\n"
         
-        # ===== ЦЕНА И УРОВНИ =====
-        text += "💰 *ЦЕНА И УРОВНИ*\n"
-        text += f"Текущая: {format_price(current_price)}\n"
-        
-        if is_sideways:
-            # Для боковика показываем ожидаемый диапазон
-            text += f"📊 Верх диапазона: {format_price(range_high)} (+1.0%)\n"
-            text += f"📊 Низ диапазона: {format_price(range_low)} (-1.0%)\n"
-            text += f"ℹ️ _Ожидается движение в диапазоне_\n"
+        # ===== KEY LEVELS (NEW - Pivot Points) =====
+        # Calculate pivot points from technical_data or market_data
+        text += "🎯 *КЛЮЧЕВЫЕ УРОВНИ*\n"
+        if technical_data and technical_data.get("pivot_points"):
+            pivot_points = technical_data["pivot_points"]
+            if hasattr(pivot_points, 'r1'):
+                text += f"📈 R1: {format_price(pivot_points.r1)} | R2: {format_price(pivot_points.r2)}\n"
+                text += f"📉 S1: {format_price(pivot_points.s1)} | S2: {format_price(pivot_points.s2)}\n"
         else:
-            # Для ЛОНГ/ШОРТ показываем TP и SL
-            text += f"🎯 TP1: {format_price(tp1_price)} ({tp1_percent:+.1f}%)\n"
-            text += f"🎯 TP2: {format_price(tp2_price)} ({tp2_percent:+.1f}%)\n"
-            text += f"🛑 SL: {format_price(sl_price)} ({sl_percent:+.1f}%)\n"
+            # Calculate simple support/resistance based on current price
+            r1 = current_price * 1.015
+            r2 = current_price * 1.030
+            s1 = current_price * 0.985
+            s2 = current_price * 0.970
+            text += f"📈 R1: {format_price(r1)} | R2: {format_price(r2)}\n"
+            text += f"📉 S1: {format_price(s1)} | S2: {format_price(s2)}\n"
         
         text += "\n"
         
+        # ===== SCENARIOS (NEW) =====
+        # Generate scenarios based on signal data
+        text += "📈 *СЦЕНАРИИ*\n"
+        
+        # Calculate scenario probabilities
+        if is_long:
+            bull_prob = min(85, probability + 10)
+            bear_prob = max(5, 100 - bull_prob - 25)
+            side_prob = 100 - bull_prob - bear_prob
+            bull_target = tp1_price
+            bear_target = sl_price
+        elif raw_direction == "short":
+            bear_prob = min(85, probability + 10)
+            bull_prob = max(5, 100 - bear_prob - 25)
+            side_prob = 100 - bull_prob - bear_prob
+            bull_target = sl_price
+            bear_target = tp1_price
+        else:  # sideways
+            side_prob = min(70, probability + 10)
+            bull_prob = (100 - side_prob) // 2
+            bear_prob = 100 - side_prob - bull_prob
+            bull_target = range_high
+            bear_target = range_low
+        
+        text += f"🟢 Бычий: {bull_prob}% → {format_price(bull_target)}\n"
+        text += f"🟡 Боковик: {side_prob}% → {format_price(current_price * 0.99)}-{format_price(current_price * 1.01)}\n"
+        text += f"🔴 Медвежий: {bear_prob}% → {format_price(bear_target)}\n"
+        
+        text += "\n"
+        text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        text += "⏱️ Прогноз действителен: 4 часа\n"
+        
         # ===== ТРЕНД ЦЕНЫ =====
+        # (Moved below but kept for compatibility)
         text += "📈 *ТРЕНД ЦЕНЫ*\n"
         # Получить реальные данные о трендах из market_data
         change_1h = market_data.get('change_1h', 0) or 0
@@ -3942,30 +4192,7 @@ class AISignalAnalyzer:
             text += "⚠️ *Сигнал слабый. Рекомендуется ПРОПУСТИТЬ этот сетап.*\n\n"
         
         # ===== FOOTER =====
-        text += "⏱️ Таймфрейм: 1ч\n"
-        
-        # Считаем доступные источники
-        available_sources = 0
-        if whale_data: available_sources += 1
-        if market_data: available_sources += 1
-        if technical_data: available_sources += 1
-        if fear_greed: available_sources += 1
-        if funding_rate: available_sources += 1
-        if order_book: available_sources += 1
-        if futures_data: available_sources += 1
-        if onchain_data: available_sources += 1
-        if exchange_flows: available_sources += 1
-        if short_term_data: available_sources += 1
-        if trades_flow: available_sources += 1
-        if liquidations: available_sources += 1
-        if orderbook_delta: available_sources += 1
-        if coinglass_data: available_sources += 1
-        if news_sentiment: available_sources += 1
-        if tradingview_rating: available_sources += 1
-        if whale_alert: available_sources += 1
-        if social_data: available_sources += 1
-        
-        text += f"📡 Источников данных: {available_sources}/{self.TOTAL_FACTORS}\n"
+        text += "📡 Факторов: {available_sources}\n"
         text += "━━━━━━━━━━━━━━━━━━━━\n"
         text += "⚠️ *DISCLAIMER*\n"
         text += "_Это НЕ финансовый совет. Сигналы основаны на техническом анализе и могут быть ошибочными. "
@@ -4110,6 +4337,16 @@ class AISignalAnalyzer:
             # Calculate short-term indicators
             short_term_data = await self.calculate_short_term_indicators(symbol, short_term_ohlcv_5m, short_term_ohlcv_15m)
             
+            # ===== MULTI-TIMEFRAME ANALYSIS (NEW) =====
+            logger.info(f"Performing multi-timeframe analysis for {symbol}...")
+            multi_timeframe_data = await self.multi_timeframe_analyzer.analyze_multi_timeframe(bybit_symbol)
+            if multi_timeframe_data:
+                logger.info(f"Multi-timeframe consensus: {multi_timeframe_data.get('consensus', {}).get('text', 'N/A')}")
+            
+            # ===== ADVANCED TECHNICAL INDICATORS (NEW) =====
+            logger.info(f"Calculating advanced technical indicators for {symbol}...")
+            advanced_indicators = await self.calculate_advanced_indicators(bybit_symbol, ohlcv_data)
+            
             # Gather NEW data sources (7 new sources)
             logger.info(f"Gathering new data sources for {symbol}...")
             coinglass_task = self.get_coinglass_data(symbol)
@@ -4224,6 +4461,9 @@ class AISignalAnalyzer:
                 whale_alert=whale_alert,
                 social_data=social_data,
                 is_cross_conflict=signal_data.get("is_cross_conflict", False),
+                # NEW: Multi-timeframe and advanced indicators
+                multi_timeframe_data=multi_timeframe_data,
+                advanced_indicators=advanced_indicators,
             )
             
             return message
