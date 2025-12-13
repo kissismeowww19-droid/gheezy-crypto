@@ -477,7 +477,7 @@ class TestCrossAssetCorrelation:
             neutral_count=10,
             data_sources_count=20,
         )
-        # 8 + (-50 * 0.40) = 8 - 20 = -12 -> short (< -10)
+        # With new 0.70 correlation: 8 + (-50 * 0.70) = 8 - 35 = -27 -> short (< -10)
         # long -> short IS a conflict
         assert result5[0] == "short", f"Expected short, got {result5[0]}"
         assert result5[3] is True, "long -> short SHOULD be a conflict"
