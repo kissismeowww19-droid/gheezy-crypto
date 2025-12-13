@@ -30,6 +30,12 @@ from signals.technical_analysis import (
 from signals.whale_analysis import DeepWhaleAnalyzer
 from signals.derivatives_analysis import DeepDerivativesAnalyzer
 
+try:
+    from signals.phase3 import MacroAnalyzer
+    PHASE3_MACRO = True
+except ImportError:
+    PHASE3_MACRO = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -154,6 +160,7 @@ class AISignalAnalyzer:
         self.price_forecast_analyzer = PriceForecastAnalyzer()
         self.deep_whale_analyzer = DeepWhaleAnalyzer()
         self.deep_derivatives_analyzer = DeepDerivativesAnalyzer()
+        self.macro_analyzer = MacroAnalyzer() if PHASE3_MACRO else None
         
         # Маппинг символов для whale tracker
         self.blockchain_mapping = {
@@ -1119,6 +1126,16 @@ class AISignalAnalyzer:
         except Exception as e:
             logger.error(f"Error getting orderbook delta for {symbol}: {e}")
             return None
+    
+    async def get_macro_data(self) -> Dict:
+        """Получить макро данные (безопасно)"""
+        if not self.macro_analyzer:
+            return {'score': 0, 'verdict': 'neutral'}
+        try:
+            return await self.macro_analyzer.analyze()
+        except Exception as e:
+            logger.warning(f"Macro analysis failed: {e}")
+            return {'score': 0, 'verdict': 'neutral'}
     
     async def get_coinglass_data(self, symbol: str) -> Optional[Dict]:
         """
@@ -3528,7 +3545,9 @@ class AISignalAnalyzer:
                         # Deep whale analysis (Phase 2)
                         deep_whale_data: Optional[Dict] = None,
                         # Deep derivatives analysis (Phase 2)
-                        deep_derivatives_data: Optional[Dict] = None) -> Dict:
+                        deep_derivatives_data: Optional[Dict] = None,
+                        # Macro analysis (Phase 3)
+                        macro_data: Optional[Dict] = None) -> Dict:
         """
         22-факторная система расчёта сигнала.
         
@@ -3730,6 +3749,12 @@ class AISignalAnalyzer:
         
         # Применяем ограничение на общий score (±MAX_TOTAL_SCORE)
         total_score = self.apply_total_score_limit(total_score)
+        
+        # Macro analysis (Phase 3.1)
+        if macro_data and macro_data.get('score', 0) != 0:
+            macro_score = macro_data['score']
+            total_score += macro_score
+            logger.info(f"Added macro score: {macro_score}")
         
         # Сохраняем для следующего раза
         self.previous_scores[symbol] = total_score
@@ -4057,6 +4082,8 @@ class AISignalAnalyzer:
             "block_sentiment_score": round(block_sentiment_score, 2),
             # Cross-asset correlation conflict flag
             "is_cross_conflict": is_cross_conflict,
+            # Macro analysis (Phase 3.1)
+            "macro": macro_data if macro_data else {'score': 0, 'verdict': 'neutral'},
         }
     
     @staticmethod
@@ -4479,6 +4506,25 @@ class AISignalAnalyzer:
                 signal_text = "бычий" if signal == "bullish" else "медвежий" if signal == "bearish" else "нейтральный"
                 text += f"• Вердикт: {signal_emoji} {signal_text}\n"
             
+            text += "\n"
+        
+        # ===== MACRO ANALYSIS (Phase 3.1) =====
+        macro = signal_data.get('macro', {})
+        if macro and (macro.get('dxy') or macro.get('sp500')):
+            text += "📊 *МАКРО АНАЛИЗ*\n"
+            if macro.get('dxy'):
+                d = macro['dxy']
+                e = "🟢" if d['trend'] == 'bearish' else "🔴" if d['trend'] == 'bullish' else "🟡"
+                text += f"• DXY: {d['value']:.1f} ({d['change_24h']:+.2f}%) {e}\n"
+            if macro.get('sp500'):
+                s = macro['sp500']
+                e = "🟢" if s['trend'] == 'bullish' else "🔴" if s['trend'] == 'bearish' else "🟡"
+                text += f"• S&P500: {s['value']:,.0f} ({s['change_24h']:+.2f}%) {e}\n"
+            if macro.get('gold'):
+                g = macro['gold']
+                text += f"• Gold: ${g['value']:,.0f} ({g['change_24h']:+.2f}%)\n"
+            v = "🟢" if macro['verdict'] == 'bullish' else "🔴" if macro['verdict'] == 'bearish' else "🟡"
+            text += f"• Вердикт: {v} {macro['verdict']}\n"
             text += "\n"
         
         # ===== SCENARIOS (NEW) =====
@@ -4984,6 +5030,10 @@ class AISignalAnalyzer:
                 logger.error(f"Error in deep derivatives analysis: {e}")
                 deep_derivatives_data = None
             
+            # ===== MACRO ANALYSIS (Phase 3.1) =====
+            logger.info(f"Collecting macro analysis...")
+            macro_data = await self.get_macro_data()
+            
             # Log data availability (22 sources now)
             data_sources_available = {
                 "whale_data": whale_data is not None and whale_data.get("transaction_count", 0) > 0,
@@ -5038,7 +5088,9 @@ class AISignalAnalyzer:
                 social_data=social_data,
                 # Deep analysis (Phase 2)
                 deep_whale_data=deep_whale_data,
-                deep_derivatives_data=deep_derivatives_data
+                deep_derivatives_data=deep_derivatives_data,
+                # Macro analysis (Phase 3)
+                macro_data=macro_data
             )
             
             # Format message with all data (including short-term)
