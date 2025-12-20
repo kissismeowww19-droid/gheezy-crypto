@@ -112,15 +112,15 @@ async def clean_send(message: Message, text: str, keyboard: InlineKeyboardMarkup
 
 async def safe_send_message(message_method, text: str, **kwargs):
     """
-    Safely send/edit a message with MarkdownV2, falling back to no parse_mode on error.
+    Safely send/edit a message with Markdown, falling back to no parse_mode on error.
     
     This implements a "fail-soft" approach for Markdown parsing:
-    1. First tries to send with parse_mode="MarkdownV2" (or "Markdown")
+    1. First tries to send with parse_mode="Markdown"
     2. If Telegram returns "can't parse entities" error, retries without parse_mode
     3. Ensures messages are always delivered even if formatting fails
     
     Args:
-        message_method: The async method to call (e.g., message.answer, message.edit_text)
+        message_method: The async method to call (e.g., message.answer)
         text: The message text
         **kwargs: Additional arguments (reply_markup, parse_mode, etc.)
     
@@ -140,7 +140,9 @@ async def safe_send_message(message_method, text: str, **kwargs):
             try:
                 return await message_method(text, **kwargs_no_parse)
             except Exception as retry_error:
-                logger.error(f"Failed to send message even without parse_mode: {retry_error}")
+                logger.error(
+                    f"Failed to send message even without parse_mode: {retry_error}"
+                )
                 raise
         else:
             # Different error - re-raise
