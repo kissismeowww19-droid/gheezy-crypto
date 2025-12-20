@@ -1,8 +1,8 @@
 """
 Test for safe_send_message function.
 
-Tests the fail-soft Markdown parsing approach where messages are sent with
-MarkdownV2 first, and if that fails due to parsing errors, retries without parse_mode.
+Tests the fail-soft approach where messages are sent with parse_mode first,
+and if that fails due to parsing errors, retries without parse_mode.
 
 Note: The safe_send_message function is duplicated in each test rather than imported
 from src.bot to keep tests standalone and independent of implementation changes.
@@ -20,7 +20,7 @@ async def test_safe_send_message_success():
     # Mock message method
     mock_method = AsyncMock(return_value="success")
     
-    # Import the function (we'll need to mock it or test the logic)
+    # Define the function locally for testing
     async def safe_send_message(message_method, text: str, **kwargs):
         """Copy of the function for testing."""
         try:
