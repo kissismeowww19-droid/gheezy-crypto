@@ -112,10 +112,10 @@ async def clean_send(message: Message, text: str, keyboard: InlineKeyboardMarkup
 
 async def safe_send_message(message_method, text: str, **kwargs):
     """
-    Safely send/edit a message with Markdown, falling back to no parse_mode on error.
+    Safely send/edit a message with fallback to no parse_mode on parsing error.
     
     This implements a "fail-soft" approach for Markdown parsing:
-    1. First tries to send with parse_mode="Markdown"
+    1. First tries to send with the specified parse_mode (if provided)
     2. If Telegram returns "can't parse entities" error, retries without parse_mode
     3. Ensures messages are always delivered even if formatting fails
     
@@ -128,7 +128,7 @@ async def safe_send_message(message_method, text: str, **kwargs):
         The message object returned by Telegram
     """
     try:
-        # Try with the original parse_mode (usually ParseMode.MARKDOWN)
+        # Try with the original parse_mode (if specified)
         return await message_method(text, **kwargs)
     except TelegramBadRequest as e:
         error_str = str(e).lower()

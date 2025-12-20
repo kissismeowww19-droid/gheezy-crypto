@@ -3,6 +3,10 @@ Test for safe_send_message function.
 
 Tests the fail-soft Markdown parsing approach where messages are sent with
 MarkdownV2 first, and if that fails due to parsing errors, retries without parse_mode.
+
+Note: The safe_send_message function is duplicated in each test rather than imported
+from src.bot to keep tests standalone and independent of implementation changes.
+This allows tests to verify the contract/behavior without coupling to internal details.
 """
 
 import pytest
