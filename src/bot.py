@@ -110,6 +110,43 @@ async def clean_send(message: Message, text: str, keyboard: InlineKeyboardMarkup
     user_messages[chat_id] = new_msg.message_id
 
 
+async def safe_send_message(message_method, text: str, **kwargs):
+    """
+    Safely send/edit a message with MarkdownV2, falling back to no parse_mode on error.
+    
+    This implements a "fail-soft" approach for Markdown parsing:
+    1. First tries to send with parse_mode="MarkdownV2" (or "Markdown")
+    2. If Telegram returns "can't parse entities" error, retries without parse_mode
+    3. Ensures messages are always delivered even if formatting fails
+    
+    Args:
+        message_method: The async method to call (e.g., message.answer, message.edit_text)
+        text: The message text
+        **kwargs: Additional arguments (reply_markup, parse_mode, etc.)
+    
+    Returns:
+        The message object returned by Telegram
+    """
+    try:
+        # Try with the original parse_mode (usually ParseMode.MARKDOWN)
+        return await message_method(text, **kwargs)
+    except TelegramBadRequest as e:
+        error_str = str(e).lower()
+        if "can't parse entities" in error_str or "can't find end of" in error_str:
+            # Markdown parsing failed - retry without parse_mode
+            logger.error(f"Markdown parsing error: {e}")
+            # Remove parse_mode from kwargs
+            kwargs_no_parse = {k: v for k, v in kwargs.items() if k != 'parse_mode'}
+            try:
+                return await message_method(text, **kwargs_no_parse)
+            except Exception as retry_error:
+                logger.error(f"Failed to send message even without parse_mode: {retry_error}")
+                raise
+        else:
+            # Different error - re-raise
+            raise
+
+
 async def get_coin_price(symbol: str) -> dict:
     """Получить цену через Multi-API Manager (CoinGecko + CoinPaprika + MEXC + Kraken)"""
     try:
@@ -989,10 +1026,15 @@ async def callback_signals(callback: CallbackQuery):
     text = text + "🔮 _Прогноз на ближайший час_\n\n"
     text = text + "👇 Выбери монету:"
     try:
-        await callback.message.edit_text(text, reply_markup=get_signals_keyboard(), parse_mode=ParseMode.MARKDOWN)
+        await safe_send_message(
+            callback.message.edit_text,
+            text,
+            reply_markup=get_signals_keyboard(),
+            parse_mode=ParseMode.MARKDOWN
+        )
     except TelegramBadRequest as e:
-        logger.error(f"Markdown parsing error: {e}")
-        await callback.message.edit_text(text, reply_markup=get_signals_keyboard())
+        if "message is not modified" not in str(e):
+            logger.error(f"Error editing message: {e}")
     await callback. answer()
 
 
@@ -1027,46 +1069,32 @@ async def callback_signal_coin(callback: CallbackQuery):
         ],
     ])
     
+    # Use safe_send_message for fail-soft Markdown handling
     try:
-        await callback.message.edit_text(signal_text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+        await safe_send_message(
+            callback.message.edit_text,
+            signal_text,
+            reply_markup=keyboard,
+            parse_mode=ParseMode.MARKDOWN
+        )
     except TelegramBadRequest as e:
         if "message to edit not found" in str(e):
-            # Сообщение было удалено, отправляем новое используя bot напрямую
+            # Message was deleted, send a new one
             try:
-                await callback.bot.send_message(
+                await safe_send_message(
+                    callback.bot.send_message,
+                    signal_text,
                     chat_id=callback.message.chat.id,
-                    text=signal_text,
                     reply_markup=keyboard,
                     parse_mode=ParseMode.MARKDOWN
                 )
-            except TelegramBadRequest as send_error:
-                # Если markdown не работает, попробуем без него
-                logger.error(f"Failed to send message with markdown: {send_error}")
-                try:
-                    await callback.bot.send_message(
-                        chat_id=callback.message.chat.id,
-                        text=signal_text,
-                        reply_markup=keyboard
-                    )
-                except Exception as final_error:
-                    logger.error(f"Failed to send message without markdown: {final_error}")
+            except Exception as send_error:
+                logger.error(f"Failed to send new message: {send_error}")
         elif "message is not modified" in str(e):
-            # Сообщение не изменилось, игнорируем
+            # Message content unchanged, ignore
             pass
-        elif "can't parse entities" in str(e) or "entity" in str(e).lower():
-            # Ошибка парсинга markdown, попробовать без форматирования
-            logger.error(f"Markdown parsing error: {e}")
-            try:
-                await callback.message.edit_text(signal_text, reply_markup=keyboard)
-            except Exception:
-                pass
         else:
             logger.error(f"TelegramBadRequest error: {e}")
-            # Fallback: попробовать без форматирования
-            try:
-                await callback.message.edit_text(signal_text, reply_markup=keyboard)
-            except Exception:
-                pass
     except Exception as e:
         logger.error(f"Error in signal callback: {e}")
         await callback.answer("❌ Ошибка при формировании сигнала", show_alert=True)
