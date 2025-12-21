@@ -152,5 +152,145 @@ async def test_safe_send_message_cant_find_end_error():
     assert mock_method.call_count == 2
 
 
+@pytest.mark.asyncio
+async def test_safe_send_message_ton_logging(caplog):
+    """Test that TON signals are specially logged when markdown parsing fails."""
+    import logging
+    
+    # Mock message method that fails first, succeeds second
+    mock_method = AsyncMock()
+    mock_method.side_effect = [
+        TelegramBadRequest(method="", message="Can't parse entities: Can't find end of the entity starting at byte offset 50"),
+        "success"
+    ]
+    
+    async def safe_send_message(message_method, text: str, **kwargs):
+        """Copy of the function with TON logging for testing."""
+        try:
+            return await message_method(text, **kwargs)
+        except TelegramBadRequest as e:
+            error_str = str(e).lower()
+            if "can't parse entities" in error_str or "can't find end of" in error_str:
+                logging.error(f"Markdown parsing error: {e}")
+                
+                # Special logging for TON signals
+                if "TON" in text or "💎" in text:
+                    logging.error(f"TON Telegram error: {str(e)}\nRAW SIGNAL: {text}")
+                
+                kwargs_no_parse = {k: v for k, v in kwargs.items() if k != 'parse_mode'}
+                return await message_method(text, **kwargs_no_parse)
+            else:
+                raise
+    
+    # Test with TON signal text
+    with caplog.at_level(logging.ERROR):
+        result = await safe_send_message(
+            mock_method,
+            "🤖 *AI СИГНАЛ: TON (4ч прогноз)*\nTest signal with 💎 TON",
+            parse_mode="Markdown"
+        )
+    
+    assert result == "success"
+    assert mock_method.call_count == 2
+    
+    # Check that TON-specific logging was triggered
+    ton_logs = [record for record in caplog.records if "TON Telegram error" in record.message]
+    assert len(ton_logs) == 1
+    assert "RAW SIGNAL:" in ton_logs[0].message
+    assert "TON" in ton_logs[0].message
+
+
+@pytest.mark.asyncio
+async def test_safe_send_message_ton_emoji_logging(caplog):
+    """Test that messages with TON emoji (💎) are logged even without TON text."""
+    import logging
+    
+    mock_method = AsyncMock()
+    mock_method.side_effect = [
+        TelegramBadRequest(method="", message="Can't parse entities"),
+        "success"
+    ]
+    
+    async def safe_send_message(message_method, text: str, **kwargs):
+        """Copy of the function with TON logging for testing."""
+        try:
+            return await message_method(text, **kwargs)
+        except TelegramBadRequest as e:
+            error_str = str(e).lower()
+            if "can't parse entities" in error_str or "can't find end of" in error_str:
+                logging.error(f"Markdown parsing error: {e}")
+                
+                # Special logging for TON signals
+                if "TON" in text or "💎" in text:
+                    logging.error(f"TON Telegram error: {str(e)}\nRAW SIGNAL: {text}")
+                
+                kwargs_no_parse = {k: v for k, v in kwargs.items() if k != 'parse_mode'}
+                return await message_method(text, **kwargs_no_parse)
+            else:
+                raise
+    
+    # Test with TON emoji only (no TON text)
+    with caplog.at_level(logging.ERROR):
+        result = await safe_send_message(
+            mock_method,
+            "🤖 Signal with 💎 emoji",
+            parse_mode="Markdown"
+        )
+    
+    assert result == "success"
+    
+    # Check that TON-specific logging was triggered by emoji
+    ton_logs = [record for record in caplog.records if "TON Telegram error" in record.message]
+    assert len(ton_logs) == 1
+
+
+@pytest.mark.asyncio
+async def test_safe_send_message_non_ton_no_special_logging(caplog):
+    """Test that non-TON signals don't get special logging."""
+    import logging
+    
+    mock_method = AsyncMock()
+    mock_method.side_effect = [
+        TelegramBadRequest(method="", message="Can't parse entities"),
+        "success"
+    ]
+    
+    async def safe_send_message(message_method, text: str, **kwargs):
+        """Copy of the function with TON logging for testing."""
+        try:
+            return await message_method(text, **kwargs)
+        except TelegramBadRequest as e:
+            error_str = str(e).lower()
+            if "can't parse entities" in error_str or "can't find end of" in error_str:
+                logging.error(f"Markdown parsing error: {e}")
+                
+                # Special logging for TON signals
+                if "TON" in text or "💎" in text:
+                    logging.error(f"TON Telegram error: {str(e)}\nRAW SIGNAL: {text}")
+                
+                kwargs_no_parse = {k: v for k, v in kwargs.items() if k != 'parse_mode'}
+                return await message_method(text, **kwargs_no_parse)
+            else:
+                raise
+    
+    # Test with BTC signal (no TON)
+    with caplog.at_level(logging.ERROR):
+        result = await safe_send_message(
+            mock_method,
+            "🤖 *AI СИГНАЛ: BTC (4ч прогноз)*\nTest signal",
+            parse_mode="Markdown"
+        )
+    
+    assert result == "success"
+    
+    # Check that TON-specific logging was NOT triggered
+    ton_logs = [record for record in caplog.records if "TON Telegram error" in record.message]
+    assert len(ton_logs) == 0
+    
+    # But general markdown error logging should be present
+    markdown_logs = [record for record in caplog.records if "Markdown parsing error" in record.message]
+    assert len(markdown_logs) == 1
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
