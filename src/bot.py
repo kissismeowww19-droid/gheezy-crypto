@@ -118,6 +118,7 @@ async def safe_send_message(message_method, text: str, **kwargs):
     1. First tries to send with the specified parse_mode (if provided)
     2. If Telegram returns "can't parse entities" error, retries without parse_mode
     3. Ensures messages are always delivered even if formatting fails
+    4. For TON signals, logs raw text when Telegram markdown errors occur
     
     Args:
         message_method: The async method to call (e.g., message.answer)
@@ -135,6 +136,11 @@ async def safe_send_message(message_method, text: str, **kwargs):
         if "can't parse entities" in error_str or "can't find end of" in error_str:
             # Markdown parsing failed - retry without parse_mode
             logger.error(f"Markdown parsing error: {e}")
+            
+            # Special logging for TON signals to help debug markdown issues
+            if "TON" in text or "💎" in text:
+                logger.error(f"TON Telegram error: {str(e)}\nRAW SIGNAL: {text}")
+            
             # Remove parse_mode from kwargs
             kwargs_no_parse = {k: v for k, v in kwargs.items() if k != 'parse_mode'}
             try:
