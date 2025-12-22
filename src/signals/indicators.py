@@ -1500,7 +1500,11 @@ def count_touches(ohlcv_data: List[dict], level: float, tolerance_pct: float = 0
         tolerance_pct: Tolerance as percentage (default 0.5%)
         
     Returns:
-        Number of touches
+        Number of touches (0 if no data or invalid level)
+        
+    Note:
+        Returns 0 for invalid inputs (empty data or level <= 0) rather than
+        raising an exception to allow graceful handling in higher-level functions.
     """
     if not ohlcv_data or level <= 0:
         return 0

@@ -174,6 +174,10 @@ class AISignalAnalyzer:
         'options': 0.01,       # 1%  - Put/Call ratio
     }
     
+    # Price prediction constants
+    MAX_PREDICTED_MOVEMENT_PCT = 3.0  # Maximum predicted price change percentage
+    MACRO_SCORE_NORMALIZER = 1.5  # Normalize macro score from wider range to -10/+10
+    
     def __init__(self, whale_tracker):
         """
         Инициализация анализатора.
@@ -310,11 +314,16 @@ class AISignalAnalyzer:
             
         Returns:
             Weighted score (-10 to +10)
+            
+        Note:
+            Factors outside the -10/+10 range are clamped to avoid outliers.
         """
         total = 0.0
         for factor, score in factors.items():
             weight = self.FACTOR_WEIGHTS.get(factor, 0)
-            total += score * weight
+            # Clamp score to -10/+10 range for safety
+            clamped_score = max(-10, min(10, score))
+            total += clamped_score * weight
         
         return total
     
@@ -492,8 +501,8 @@ class AISignalAnalyzer:
         atr_pct = (atr / current_price) * 100 if current_price > 0 else 1.5
         adjusted_move = base_move_pct * (atr_pct / 1.5)  # Normalize to typical ATR
         
-        # Cap movement
-        adjusted_move = max(-3.0, min(3.0, adjusted_move))
+        # Cap movement to prevent unrealistic predictions
+        adjusted_move = max(-self.MAX_PREDICTED_MOVEMENT_PCT, min(self.MAX_PREDICTED_MOVEMENT_PCT, adjusted_move))
         
         predicted_price = current_price * (1 + adjusted_move / 100)
         
@@ -4700,7 +4709,8 @@ class AISignalAnalyzer:
         # 9. Macro (3%) - from macro_data (Phase 3)
         macro_factor_score = 0.0
         if macro_data and macro_data.get('score', 0) != 0:
-            macro_factor_score = max(-10, min(10, macro_data['score'] / 1.5))  # Normalize to -10/+10
+            # Normalize macro score from wider range to -10/+10 using MACRO_SCORE_NORMALIZER
+            macro_factor_score = max(-10, min(10, macro_data['score'] / self.MACRO_SCORE_NORMALIZER))
         factor_scores['macro'] = macro_factor_score
         
         # 10. Options (1%) - from options_data (Phase 3)
