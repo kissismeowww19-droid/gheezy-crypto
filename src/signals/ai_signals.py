@@ -131,6 +131,8 @@ class AISignalAnalyzer:
     CONFLICT_SCORE_BOOST = 15  # Score boost when strong signals override weak ones
     CONFLICT_HIGH_NEUTRAL_THRESHOLD = 0.6  # Threshold for high neutral factor ratio
     CONFLICT_MIN_FACTORS_FOR_BALANCE = 15  # Minimum factors needed to check balance
+    RSI_EXTREME_OVERRIDE_FACTOR = 0.3  # Factor for RSI extreme override (more aggressive than normal conflicts)
+    RSI_EXTREME_OVERRIDE_BOOST = 20  # Score boost for RSI extreme override
     
     # Signal direction thresholds
     WEAK_SIGNAL_THRESHOLD = 5  # Порог слабого сигнала (боковик)
@@ -3134,6 +3136,10 @@ class AISignalAnalyzer:
         """
         Обнаружение и разрешение противоречий между сигналами.
         
+        ПРАВИЛО 0: RSI EXTREME OVERRIDE (НОВОЕ!)
+        - RSI < 20 → АВТОМАТИЧЕСКИЙ ЛОНГ (переопределяет всё)
+        - RSI > 80 → АВТОМАТИЧЕСКИЙ ШОРТ (переопределяет всё)
+        
         ПРАВИЛО 1: Сильные сигналы переопределяют слабые
         - Если RSI < 25 И Fear & Greed < 25 И trades_flow_ratio > 10 И total_score < 0
           → override to LONG (score adjustment)
@@ -3156,6 +3162,27 @@ class AISignalAnalyzer:
         Returns:
             Tuple[adjusted_score, conflict_note]
         """
+        # Логирование входных данных для отладки
+        logger.info(f"Conflict detection inputs: rsi={rsi}, fear_greed={fear_greed}, trades_flow_ratio={trades_flow_ratio}, macd={macd_signal}, score={total_score:.2f}")
+        
+        # ПРАВИЛО 0: RSI EXTREME OVERRIDE (ПРИОРИТЕТ!)
+        # RSI < 20 или RSI > 80 — это ЭКСТРЕМАЛЬНЫЕ значения, которые должны переопределять ВСЁ
+        if rsi is not None:
+            if rsi < 20:  # Экстремальная перепроданность
+                if total_score < 0:
+                    # Переопределяем на ЛОНГ
+                    adjusted_score = abs(total_score) * self.RSI_EXTREME_OVERRIDE_FACTOR + self.RSI_EXTREME_OVERRIDE_BOOST
+                    conflict_note = f"⚠️ RSI Override: RSI={rsi:.1f} экстремально перепродан, переопределяем на ЛОНГ"
+                    logger.warning(f"RSI extreme override: RSI={rsi:.1f} < 20, score {total_score:.2f} → {adjusted_score:.2f}")
+                    return adjusted_score, conflict_note
+            
+            elif rsi > 80:  # Экстремальная перекупленность
+                if total_score > 0:
+                    adjusted_score = -abs(total_score) * self.RSI_EXTREME_OVERRIDE_FACTOR - self.RSI_EXTREME_OVERRIDE_BOOST
+                    conflict_note = f"⚠️ RSI Override: RSI={rsi:.1f} экстремально перекуплен, переопределяем на ШОРТ"
+                    logger.warning(f"RSI extreme override: RSI={rsi:.1f} > 80, score {total_score:.2f} → {adjusted_score:.2f}")
+                    return adjusted_score, conflict_note
+        
         # Подсчет сильных бычьих сигналов
         strong_bullish_signals = 0
         if rsi is not None and rsi < 25:
@@ -3178,19 +3205,24 @@ class AISignalAnalyzer:
         if macd_signal == "bearish":
             strong_bearish_signals += 1
         
+        # Логирование подсчёта сильных сигналов
+        logger.info(f"Strong signals count: bullish={strong_bullish_signals}, bearish={strong_bearish_signals}")
+        
         # ПРАВИЛО 1: Сильные экстремальные сигналы переопределяют общий score
         conflict_note = ""
         adjusted_score = total_score
         
-        # Если есть 3+ сильных бычьих сигнала, но score отрицательный
-        if strong_bullish_signals >= 3 and total_score < 0:
+        # ИЗМЕНЕНО: Снижен порог с 3 до 2 сильных сигналов
+        # Если есть 2+ сильных бычьих сигнала, но score отрицательный
+        if strong_bullish_signals >= 2 and total_score < 0:
             # Переопределяем на бычий
             adjusted_score = abs(total_score) * self.CONFLICT_SCORE_ADJUSTMENT_FACTOR + self.CONFLICT_SCORE_BOOST  # Умеренно положительный
             conflict_note = f"⚠️ Конфликт разрешен: {strong_bullish_signals} сильных бычьих сигнала переопределяют score"
             logger.warning(f"Signal conflict detected: {strong_bullish_signals} strong bullish signals but score was {total_score:.2f}, adjusted to {adjusted_score:.2f}")
         
-        # Если есть 3+ сильных медвежьих сигнала, но score положительный
-        elif strong_bearish_signals >= 3 and total_score > 0:
+        # ИЗМЕНЕНО: Снижен порог с 3 до 2 сильных сигналов
+        # Если есть 2+ сильных медвежьих сигнала, но score положительный
+        elif strong_bearish_signals >= 2 and total_score > 0:
             # Переопределяем на медвежий
             adjusted_score = -abs(total_score) * self.CONFLICT_SCORE_ADJUSTMENT_FACTOR - self.CONFLICT_SCORE_BOOST  # Умеренно отрицательный
             conflict_note = f"⚠️ Конфликт разрешен: {strong_bearish_signals} сильных медвежьих сигнала переопределяют score"
@@ -4178,25 +4210,28 @@ class AISignalAnalyzer:
         # ====== CONSENSUS PROTECTION ======
         # If consensus is strongly bullish but signal is short, adjust score to be less bearish
         # If consensus is strongly bearish but signal is long, adjust score to be less bullish
+        # Применяется для ВСЕХ монет (BTC, ETH, TON)
         bullish_count = consensus_data["bullish_count"]
         bearish_count = consensus_data["bearish_count"]
         
-        if bullish_count > bearish_count * 2 and total_score < 0:
-            # Strong bullish consensus but bearish signal
-            logger.warning(f"Consensus override: {symbol} has bullish consensus ({bullish_count} vs {bearish_count}) but bearish signal (score: {total_score:.2f}), reducing bearish strength")
-            # Reduce bearish score by 70% to make it neutral or weakly bearish
-            total_score = total_score * 0.3
-            logger.info(f"Adjusted score after consensus protection: {total_score:.2f}")
-            # Recalculate direction based on adjusted score
-            raw_direction = self._determine_direction_from_score(total_score)
-        elif bearish_count > bullish_count * 2 and total_score > 0:
-            # Strong bearish consensus but bullish signal
-            logger.warning(f"Consensus override: {symbol} has bearish consensus ({bearish_count} vs {bullish_count}) but bullish signal (score: {total_score:.2f}), reducing bullish strength")
-            # Reduce bullish score by 70% to make it neutral or weakly bullish
-            total_score = total_score * 0.3
-            logger.info(f"Adjusted score after consensus protection: {total_score:.2f}")
-            # Recalculate direction based on adjusted score
-            raw_direction = self._determine_direction_from_score(total_score)
+        # ИЗМЕНЕНО: Добавлена проверка порога score для более точного срабатывания
+        # Consensus protection применяется только при сильном противоречии (score < -20 или > 20)
+        if bullish_count > bearish_count * 2:
+            if total_score < -20:  # Сильный медвежий сигнал при бычьем консенсусе
+                old_score = total_score
+                total_score = total_score * 0.3  # Уменьшить на 70%
+                logger.warning(f"Consensus override: {symbol} has bullish consensus ({bullish_count} vs {bearish_count}) but bearish signal (score: {old_score:.2f}), reducing bearish strength")
+                logger.info(f"Adjusted score after consensus protection: {total_score:.2f}")
+                # Recalculate direction based on adjusted score
+                raw_direction = self._determine_direction_from_score(total_score)
+        elif bearish_count > bullish_count * 2:
+            if total_score > 20:  # Сильный бычий сигнал при медвежьем консенсусе
+                old_score = total_score
+                total_score = total_score * 0.3
+                logger.warning(f"Consensus override: {symbol} has bearish consensus ({bearish_count} vs {bullish_count}) but bullish signal (score: {old_score:.2f}), reducing bullish strength")
+                logger.info(f"Adjusted score after consensus protection: {total_score:.2f}")
+                # Recalculate direction based on adjusted score
+                raw_direction = self._determine_direction_from_score(total_score)
         
         # ====== ФИНАЛЬНОЕ НАПРАВЛЕНИЕ И ТЕКСТ ======
         # Направление определяется ТОЛЬКО по score (уже учтена корреляция)
