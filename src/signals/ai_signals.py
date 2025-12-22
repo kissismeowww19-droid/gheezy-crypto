@@ -160,6 +160,24 @@ class AISignalAnalyzer:
     MAX_TOTAL_SCORE = 130  # ±130 - максимальный общий score (с учётом Phase 3)
     MAX_PROBABILITY = 78  # Максимальная вероятность (реалистичная)
     
+    # NEW: Weighted Factor System (100% total)
+    FACTOR_WEIGHTS = {
+        'whales': 0.25,        # 25% - Smart money, leads market
+        'derivatives': 0.20,   # 20% - Trader positions (OI, Funding, L/S)
+        'trend': 0.15,         # 15% - EMA, Ichimoku, Market Structure
+        'momentum': 0.12,      # 12% - RSI, MACD, Stoch
+        'volume': 0.10,        # 10% - Volume, CVD, Volume Spike
+        'adx': 0.05,           # 5%  - Trend strength filter
+        'divergence': 0.05,    # 5%  - Reversal signals
+        'sentiment': 0.04,     # 4%  - Fear & Greed
+        'macro': 0.03,         # 3%  - DXY, S&P500, Gold
+        'options': 0.01,       # 1%  - Put/Call ratio
+    }
+    
+    # Price prediction constants
+    MAX_PREDICTED_MOVEMENT_PCT = 3.0  # Maximum predicted price change percentage
+    MACRO_SCORE_NORMALIZER = 1.5  # Normalize macro score from wider range to -10/+10
+    
     def __init__(self, whale_tracker):
         """
         Инициализация анализатора.
@@ -283,6 +301,246 @@ class AISignalAnalyzer:
         
         if expired:
             logger.info(f"Cleaned up {len(expired)} expired correlation signals: {expired}")
+    
+    def calculate_weighted_score(self, factors: Dict[str, float]) -> float:
+        """
+        Calculate weighted score from factor scores.
+        
+        Each factor score is expected to be in range -10 to +10.
+        Multiply by weight and sum to get final weighted score.
+        
+        Args:
+            factors: Dictionary of factor names to scores (-10 to +10)
+            
+        Returns:
+            Weighted score (-10 to +10)
+            
+        Note:
+            Factors outside the -10/+10 range are clamped to avoid outliers.
+        """
+        total = 0.0
+        for factor, score in factors.items():
+            weight = self.FACTOR_WEIGHTS.get(factor, 0)
+            # Clamp score to -10/+10 range for safety
+            clamped_score = max(-10, min(10, score))
+            total += clamped_score * weight
+        
+        return total
+    
+    def calculate_real_sr_levels(self, ohlcv_data: List[dict], current_price: float) -> Dict:
+        """
+        Calculate REAL support and resistance levels from actual price data.
+        
+        Finds levels from:
+        1. Recent swing highs/lows (last 50-100 candles)
+        2. Round numbers ($85000, $90000, etc.)
+        3. Previous day/week high/low
+        
+        Args:
+            ohlcv_data: List of OHLCV candles with 'high', 'low', 'close' keys
+            current_price: Current price
+            
+        Returns:
+            Dict with resistances, supports, nearest_resistance, nearest_support
+        """
+        from signals.indicators import find_swing_points, count_touches, calculate_level_strength
+        
+        levels = []
+        
+        if not ohlcv_data or len(ohlcv_data) < 5:
+            # Fallback to simple levels based on current price
+            return {
+                'resistances': [
+                    {'price': current_price * 1.02, 'strength': 2, 'source': 'calculated'},
+                    {'price': current_price * 1.04, 'strength': 2, 'source': 'calculated'},
+                    {'price': current_price * 1.06, 'strength': 2, 'source': 'calculated'},
+                ],
+                'supports': [
+                    {'price': current_price * 0.98, 'strength': 2, 'source': 'calculated'},
+                    {'price': current_price * 0.96, 'strength': 2, 'source': 'calculated'},
+                    {'price': current_price * 0.94, 'strength': 2, 'source': 'calculated'},
+                ],
+                'nearest_resistance': current_price * 1.02,
+                'nearest_support': current_price * 0.98,
+            }
+        
+        # 1. Find swing highs/lows
+        swing_highs, swing_lows = find_swing_points(ohlcv_data, lookback=min(100, len(ohlcv_data)))
+        
+        for swing in swing_highs:
+            touches = count_touches(ohlcv_data, swing.price)
+            strength = calculate_level_strength(swing.price, 'swing_high', touches)
+            if swing.price > current_price:
+                levels.append({
+                    'price': swing.price,
+                    'type': 'resistance',
+                    'source': 'swing_high',
+                    'strength': strength,
+                    'touches': touches
+                })
+        
+        for swing in swing_lows:
+            touches = count_touches(ohlcv_data, swing.price)
+            strength = calculate_level_strength(swing.price, 'swing_low', touches)
+            if swing.price < current_price:
+                levels.append({
+                    'price': swing.price,
+                    'type': 'support',
+                    'source': 'swing_low',
+                    'strength': strength,
+                    'touches': touches
+                })
+        
+        # 2. Round numbers (every $1000 for BTC, or appropriate for other coins)
+        if current_price >= 1000:
+            step = 1000
+        elif current_price >= 100:
+            step = 100
+        elif current_price >= 10:
+            step = 10
+        else:
+            step = 1
+        
+        base = round(current_price / step) * step
+        for offset in [-2*step, -step, 0, step, 2*step]:
+            level = base + offset
+            if level > 0 and abs(level - current_price) / current_price > 0.005:  # At least 0.5% away
+                if level > current_price:
+                    levels.append({
+                        'price': level,
+                        'type': 'resistance',
+                        'source': 'round_number',
+                        'strength': 3,
+                        'touches': 0
+                    })
+                elif level < current_price:
+                    levels.append({
+                        'price': level,
+                        'type': 'support',
+                        'source': 'round_number',
+                        'strength': 3,
+                        'touches': 0
+                    })
+        
+        # 3. Previous day/week high/low (last 24-48 4h candles)
+        lookback_candles = min(48, len(ohlcv_data))
+        if lookback_candles >= 24:
+            recent_data = ohlcv_data[-lookback_candles:]
+            prev_high = max(c.get('high', 0) for c in recent_data)
+            prev_low = min(c.get('low', float('inf')) for c in recent_data)
+            
+            if prev_high != current_price and prev_high > 0:
+                levels.append({
+                    'price': prev_high,
+                    'type': 'resistance' if prev_high > current_price else 'support',
+                    'source': 'prev_high',
+                    'strength': 5,
+                    'touches': 1
+                })
+            
+            if prev_low != current_price and prev_low < float('inf'):
+                levels.append({
+                    'price': prev_low,
+                    'type': 'support' if prev_low < current_price else 'resistance',
+                    'source': 'prev_low',
+                    'strength': 5,
+                    'touches': 1
+                })
+        
+        # Filter and sort
+        resistances = [l for l in levels if l['type'] == 'resistance' and l['price'] > current_price]
+        supports = [l for l in levels if l['type'] == 'support' and l['price'] < current_price]
+        
+        # Sort resistances by price (ascending) and take top 3
+        resistances = sorted(resistances, key=lambda x: x['price'])[:3]
+        
+        # Sort supports by price (descending) and take top 3
+        supports = sorted(supports, key=lambda x: x['price'], reverse=True)[:3]
+        
+        # Get nearest levels
+        nearest_resistance = resistances[0]['price'] if resistances else current_price * 1.02
+        nearest_support = supports[0]['price'] if supports else current_price * 0.98
+        
+        return {
+            'resistances': resistances,
+            'supports': supports,
+            'nearest_resistance': nearest_resistance,
+            'nearest_support': nearest_support,
+        }
+    
+    def predict_price_4h(
+        self, 
+        current_price: float, 
+        weighted_score: float, 
+        sr_levels: Dict, 
+        atr: float
+    ) -> Dict:
+        """
+        Predict price movement for next 4 hours.
+        
+        Logic:
+        - weighted_score > 0: expect price UP
+        - weighted_score < 0: expect price DOWN
+        - Magnitude based on score strength and ATR
+        - Respect S/R levels as targets/barriers
+        
+        Args:
+            current_price: Current price
+            weighted_score: Weighted score from -10 to +10
+            sr_levels: Support/resistance levels dict
+            atr: Average True Range value
+            
+        Returns:
+            Dict with predicted_price, predicted_change_pct, direction, confidence, price_range
+        """
+        # Base movement based on score (-10 to +10 scale)
+        # Typical 4h move is 0.5-2% for BTC
+        base_move_pct = weighted_score * 0.3  # -3% to +3% max
+        
+        # Adjust for ATR (volatility)
+        atr_pct = (atr / current_price) * 100 if current_price > 0 else 1.5
+        adjusted_move = base_move_pct * (atr_pct / 1.5)  # Normalize to typical ATR
+        
+        # Cap movement to prevent unrealistic predictions
+        adjusted_move = max(-self.MAX_PREDICTED_MOVEMENT_PCT, min(self.MAX_PREDICTED_MOVEMENT_PCT, adjusted_move))
+        
+        predicted_price = current_price * (1 + adjusted_move / 100)
+        
+        # Respect S/R levels
+        if adjusted_move > 0:
+            # Going up - resistance is barrier
+            nearest_r = sr_levels.get('nearest_resistance', current_price * 1.02)
+            if predicted_price > nearest_r:
+                predicted_price = nearest_r * 0.995  # Stop just before resistance
+        else:
+            # Going down - support is barrier
+            nearest_s = sr_levels.get('nearest_support', current_price * 0.98)
+            if predicted_price < nearest_s:
+                predicted_price = nearest_s * 1.005  # Stop just before support
+        
+        # Calculate confidence (50-85%)
+        confidence = min(85, 50 + abs(weighted_score) * 3.5)
+        
+        # Direction
+        direction = 'UP' if predicted_price > current_price else 'DOWN'
+        
+        # Price range based on ATR
+        price_range_low = current_price - atr
+        price_range_high = current_price + atr
+        
+        # Calculate predicted change percentage
+        predicted_change_pct = ((predicted_price / current_price) - 1) * 100 if current_price > 0 else 0
+        
+        return {
+            'predicted_price': predicted_price,
+            'predicted_change_pct': predicted_change_pct,
+            'direction': direction,
+            'confidence': confidence,
+            'price_range': {
+                'low': price_range_low,
+                'high': price_range_high,
+            }
+        }
     
     async def get_whale_data(self, symbol: str) -> Optional[Dict]:
         """
@@ -4392,6 +4650,114 @@ class AISignalAnalyzer:
         # Calculate signal strength using the new method
         strength_percent = self.calculate_signal_strength(total_score)
         
+        # ====== NEW: WEIGHTED FACTOR SYSTEM (10 factors, 100% total) ======
+        # Calculate 10 factor scores for new weighted system
+        factor_scores = {}
+        
+        # 1. Whales (25%) - consolidate whale_score and exchange flows
+        factor_scores['whales'] = whale_score  # Already -10 to +10
+        
+        # 2. Derivatives (20%) - consolidate all derivatives factors
+        factor_scores['derivatives'] = derivatives_score  # Already -10 to +10
+        
+        # 3. Trend (15%) - technical trend indicators
+        factor_scores['trend'] = trend_score  # Already -10 to +10
+        
+        # 4. Momentum (12%) - RSI, MACD, momentum
+        factor_scores['momentum'] = momentum_score  # Already -10 to +10
+        
+        # 5. Volume (10%) - volume analysis
+        factor_scores['volume'] = volume_score  # Already -10 to +10
+        
+        # 6. ADX (5%) - trend strength from technical_data
+        adx_factor_score = 0.0
+        if technical_data and "adx" in technical_data:
+            adx_value = technical_data["adx"]["value"]
+            adx_direction = technical_data["adx"].get("direction", "neutral")
+            if adx_value > 40:
+                adx_factor_score = 7.0 if adx_direction == "bullish" else -7.0
+            elif adx_value > 25:
+                adx_factor_score = 4.0 if adx_direction == "bullish" else -4.0
+            elif adx_value < 20:
+                adx_factor_score = -3.0  # Weak trend is negative
+        factor_scores['adx'] = adx_factor_score
+        
+        # 7. Divergence (5%) - RSI divergence from technical_data
+        divergence_factor_score = 0.0
+        if technical_data and "rsi_divergence" in technical_data:
+            div_type = technical_data["rsi_divergence"]["type"]
+            if div_type == "bullish":
+                divergence_factor_score = 10.0
+            elif div_type == "bearish":
+                divergence_factor_score = -10.0
+        factor_scores['divergence'] = divergence_factor_score
+        
+        # 8. Sentiment (4%) - Fear & Greed
+        sentiment_factor_score = 0.0
+        if fear_greed:
+            fg_value = fear_greed.get("value", 50)
+            if fg_value < 25:
+                sentiment_factor_score = 10.0  # Extreme fear = contrarian buy
+            elif fg_value > 75:
+                sentiment_factor_score = -10.0  # Extreme greed = contrarian sell
+            elif fg_value < 40:
+                sentiment_factor_score = 5.0  # Fear
+            elif fg_value > 60:
+                sentiment_factor_score = -5.0  # Greed
+        factor_scores['sentiment'] = sentiment_factor_score
+        
+        # 9. Macro (3%) - from macro_data (Phase 3)
+        macro_factor_score = 0.0
+        if macro_data and macro_data.get('score', 0) != 0:
+            # Normalize macro score from wider range to -10/+10 using MACRO_SCORE_NORMALIZER
+            macro_factor_score = max(-10, min(10, macro_data['score'] / self.MACRO_SCORE_NORMALIZER))
+        factor_scores['macro'] = macro_factor_score
+        
+        # 10. Options (1%) - from options_data (Phase 3)
+        options_factor_score = 0.0
+        if options_data and options_data.get('score', 0) != 0:
+            options_factor_score = max(-10, min(10, options_data['score']))  # Already -10/+10
+        factor_scores['options'] = options_factor_score
+        
+        # Calculate weighted score using new system
+        new_weighted_score = self.calculate_weighted_score(factor_scores)
+        
+        # ====== NEW: REAL S/R LEVELS ======
+        sr_levels = {}
+        if ohlcv_data and len(ohlcv_data) > 0:
+            current_price = market_data.get("price_usd", 0)
+            sr_levels = self.calculate_real_sr_levels(ohlcv_data, current_price)
+        else:
+            # Fallback if no OHLCV data
+            current_price = market_data.get("price_usd", 0)
+            sr_levels = {
+                'resistances': [],
+                'supports': [],
+                'nearest_resistance': current_price * 1.02 if current_price > 0 else 0,
+                'nearest_support': current_price * 0.98 if current_price > 0 else 0,
+            }
+        
+        # ====== NEW: 4-HOUR PRICE PREDICTION ======
+        price_prediction = {}
+        if ohlcv_data and len(ohlcv_data) > 0:
+            # Get ATR from technical_data
+            atr_value = 0.0
+            if technical_data and "atr" in technical_data:
+                atr_value = technical_data["atr"]["value"]
+            else:
+                # Fallback: estimate ATR as 1.5% of price
+                current_price = market_data.get("price_usd", 0)
+                atr_value = current_price * 0.015 if current_price > 0 else 0
+            
+            current_price = market_data.get("price_usd", 0)
+            if current_price > 0 and atr_value > 0:
+                price_prediction = self.predict_price_4h(
+                    current_price=current_price,
+                    weighted_score=new_weighted_score,
+                    sr_levels=sr_levels,
+                    atr=atr_value
+                )
+        
         return {
             "symbol": symbol,
             "direction": direction,
@@ -4449,6 +4815,13 @@ class AISignalAnalyzer:
             "options": options_data if options_data else {'score': 0, 'verdict': 'neutral'},
             # Social sentiment (Phase 3.3)
             "sentiment": sentiment_data if sentiment_data else {'score': 0, 'verdict': 'neutral'},
+            # NEW: Weighted factor system results
+            "factor_scores": factor_scores,  # Individual factor scores (-10 to +10)
+            "weighted_score": round(new_weighted_score, 2),  # Final weighted score (-10 to +10)
+            # NEW: Real S/R levels
+            "sr_levels": sr_levels,
+            # NEW: 4-hour price prediction
+            "price_prediction": price_prediction,
         }
     
     @staticmethod
@@ -4736,6 +5109,146 @@ class AISignalAnalyzer:
             
             text += "\n"
         
+        # ===== NEW: ВЗВЕШЕННЫЙ АНАЛИЗ (ТОП-10 ФАКТОРОВ) =====
+        # Get factor scores and weighted score from signal_data
+        factor_scores = signal_data.get('factor_scores', {})
+        weighted_score = signal_data.get('weighted_score', 0)
+        
+        if factor_scores:
+            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            text += "📊 *ВЗВЕШЕННЫЙ АНАЛИЗ \\(ТОП\\-10 ФАКТОРОВ\\)*\n"
+            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            
+            # Helper function for verdict emoji
+            def verdict_emoji(score):
+                if score > 5:
+                    return "🟢"
+                elif score < -5:
+                    return "🔴"
+                else:
+                    return "🟡"
+            
+            # Helper function for verdict text
+            def verdict_text(score):
+                if score > 7:
+                    return "СИЛЬНО БЫЧИЙ"
+                elif score > 3:
+                    return "БЫЧИЙ"
+                elif score < -7:
+                    return "СИЛЬНО МЕДВЕЖИЙ"
+                elif score < -3:
+                    return "МЕДВЕЖИЙ"
+                else:
+                    return "НЕЙТРАЛЬНЫЙ"
+            
+            # 1. КИТЫ (25% веса)
+            whale_score = factor_scores.get('whales', 0)
+            text += f"🐋 *КИТЫ \\(25% веса\\)*\n"
+            text += f"• Score: {whale_score:+.1f}/10\n"
+            if whale_data:
+                tx_count = whale_data.get('transaction_count', 0)
+                total_vol = whale_data.get('total_volume_usd', 0)
+                deposits = whale_data.get('deposits', 0)
+                withdrawals = whale_data.get('withdrawals', 0)
+                text += f"• Транзакций: {tx_count} \\(${total_vol/1_000_000:.1f}M\\)\n"
+                text += f"• На биржи: {deposits} tx \\| С бирж: {withdrawals} tx\n"
+            text += f"• Вердикт: {verdict_emoji(whale_score)} {verdict_text(whale_score)}\n\n"
+            
+            # 2. ДЕРИВАТИВЫ (20% веса)
+            derivatives_score_val = factor_scores.get('derivatives', 0)
+            text += f"📊 *ДЕРИВАТИВЫ \\(20% веса\\)*\n"
+            text += f"• Score: {derivatives_score_val:+.1f}/10\n"
+            if funding_rate:
+                rate = funding_rate.get('rate_percent', 0)
+                text += f"• Funding: {rate:.4f}%\n"
+            if deep_derivatives_data and deep_derivatives_data.get('ls_ratio_by_exchange'):
+                ls_ratio = deep_derivatives_data['ls_ratio_by_exchange'].get('average_ratio', 1.0)
+                text += f"• L/S Ratio: {ls_ratio:.2f}\n"
+            text += f"• Вердикт: {verdict_emoji(derivatives_score_val)} {verdict_text(derivatives_score_val)}\n\n"
+            
+            # 3. ТРЕНД (15% веса)
+            trend_score_val = factor_scores.get('trend', 0)
+            text += f"📈 *ТРЕНД \\(15% веса\\)*\n"
+            text += f"• Score: {trend_score_val:+.1f}/10\n"
+            if technical_data:
+                if "macd" in technical_data:
+                    macd_signal = technical_data["macd"].get("signal", "neutral")
+                    macd_emoji = "✅" if macd_signal == "bullish" else "❌" if macd_signal == "bearish" else "➖"
+                    text += f"• MACD: {macd_signal} {macd_emoji}\n"
+            text += f"• Вердикт: {verdict_emoji(trend_score_val)} {verdict_text(trend_score_val)}\n\n"
+            
+            # 4. ИМПУЛЬС (12% веса)
+            momentum_score_val = factor_scores.get('momentum', 0)
+            text += f"⚡ *ИМПУЛЬС \\(12% веса\\)*\n"
+            text += f"• Score: {momentum_score_val:+.1f}/10\n"
+            if technical_data and "rsi" in technical_data:
+                rsi_val = technical_data["rsi"]["value"]
+                rsi_status = "перепродан" if rsi_val < 30 else "перекуплен" if rsi_val > 70 else "нейтральный"
+                text += f"• RSI\\(14\\): {rsi_val:.0f} \\({rsi_status}\\)\n"
+            text += f"• Вердикт: {verdict_emoji(momentum_score_val)} {verdict_text(momentum_score_val)}\n\n"
+            
+            # 5. ОБЪЁМ (10% веса)
+            volume_score_val = factor_scores.get('volume', 0)
+            text += f"📊 *ОБЪЁМ \\(10% веса\\)*\n"
+            text += f"• Score: {volume_score_val:+.1f}/10\n"
+            vol_24h = market_data.get('volume_24h', 0)
+            text += f"• Volume 24h: ${vol_24h/1_000_000_000:.1f}B\n"
+            text += f"• Вердикт: {verdict_emoji(volume_score_val)} {verdict_text(volume_score_val)}\n\n"
+            
+            # 6. СИЛА ТРЕНДА / ADX (5% веса)
+            adx_score_val = factor_scores.get('adx', 0)
+            text += f"💪 *СИЛА ТРЕНДА \\(5% веса\\)*\n"
+            text += f"• Score: {adx_score_val:+.1f}/10\n"
+            if technical_data and "adx" in technical_data:
+                adx_value = technical_data["adx"]["value"]
+                trend_strength = technical_data["adx"].get("trend_strength", "weak")
+                text += f"• ADX: {adx_value:.0f} \\({trend_strength}\\)\n"
+            text += f"• Вердикт: {verdict_emoji(adx_score_val)} {verdict_text(adx_score_val)}\n\n"
+            
+            # 7. ДИВЕРГЕНЦИЯ (5% веса)
+            divergence_score_val = factor_scores.get('divergence', 0)
+            text += f"📈 *ДИВЕРГЕНЦИЯ \\(5% веса\\)*\n"
+            text += f"• Score: {divergence_score_val:+.1f}/10\n"
+            if technical_data and "rsi_divergence" in technical_data:
+                div_type = technical_data["rsi_divergence"]["type"]
+                if div_type != "none":
+                    text += f"• RSI Divergence: {div_type}\n"
+                else:
+                    text += "• RSI Divergence: нет\n"
+            else:
+                text += "• Вердикт: 🟡 НЕТ СИГНАЛА\n"
+            text += "\n"
+            
+            # 8. НАСТРОЕНИЯ (4% веса)
+            sentiment_score_val = factor_scores.get('sentiment', 0)
+            text += f"😱 *НАСТРОЕНИЯ \\(4% веса\\)*\n"
+            text += f"• Score: {sentiment_score_val:+.1f}/10\n"
+            if fear_greed:
+                fg_value = fear_greed.get('value', 50)
+                fg_class = fear_greed.get('classification', 'Neutral')
+                text += f"• Fear & Greed: {fg_value} \\({fg_class}\\)\n"
+            text += f"• Вердикт: {verdict_emoji(sentiment_score_val)} {verdict_text(sentiment_score_val)}\n\n"
+            
+            # 9. МАКРО (3% веса)
+            macro_score_val = factor_scores.get('macro', 0)
+            text += f"🌍 *МАКРО \\(3% веса\\)*\n"
+            text += f"• Score: {macro_score_val:+.1f}/10\n"
+            macro = signal_data.get('macro', {})
+            if macro and macro.get('dxy'):
+                dxy = macro['dxy']
+                text += f"• DXY: {dxy.get('value', 0):.1f} \\({dxy.get('change_24h', 0):+.2f}%\\)\n"
+            text += f"• Вердикт: {verdict_emoji(macro_score_val)} {verdict_text(macro_score_val)}\n\n"
+            
+            # 10. ОПЦИОНЫ (1% веса)
+            options_score_val = factor_scores.get('options', 0)
+            text += f"📈 *ОПЦИОНЫ \\(1% веса\\)*\n"
+            text += f"• Score: {options_score_val:+.1f}/10\n"
+            options = signal_data.get('options', {})
+            if options and options.get('put_call_ratio'):
+                pc_ratio = options['put_call_ratio']
+                text += f"• Put/Call: {pc_ratio:.2f}\n"
+            text += f"• Вердикт: {verdict_emoji(options_score_val)} {verdict_text(options_score_val)}\n\n"
+        
         # ===== РАЗБИВКА ПО БЛОКАМ =====
         block_trend = signal_data.get('block_trend_score', 0)
         block_momentum = signal_data.get('block_momentum_score', 0)
@@ -4802,6 +5315,116 @@ class AISignalAnalyzer:
             text += f"📉 S1: {format_price(s1)} | S2: {format_price(s2)}\n"
         
         text += "\n"
+        
+        # ===== NEW: РЕАЛЬНЫЕ УРОВНИ S/R =====
+        sr_levels = signal_data.get('sr_levels', {})
+        if sr_levels:
+            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            text += "🎯 *РЕАЛЬНЫЕ УРОВНИ S/R*\n"
+            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            
+            # Resistances
+            resistances = sr_levels.get('resistances', [])
+            if resistances:
+                text += "📈 *СОПРОТИВЛЕНИЯ:*\n"
+                for i, r in enumerate(resistances[:3], 1):
+                    price = r.get('price', 0)
+                    strength = r.get('strength', 1)
+                    source = r.get('source', 'calculated')
+                    touches = r.get('touches', 0)
+                    stars = "⭐" * strength
+                    
+                    source_text = {
+                        'swing_high': 'swing high',
+                        'round_number': 'круглый уровень',
+                        'prev_high': 'недельный high',
+                        'fib_level': 'Fibonacci',
+                    }.get(source, source)
+                    
+                    if touches > 0:
+                        text += f"• R{i}: {format_price(price)} \\({source_text}, {touches} касания\\) {stars}\n"
+                    else:
+                        text += f"• R{i}: {format_price(price)} \\({source_text}\\) {stars}\n"
+            
+            text += "\n"
+            
+            # Supports
+            supports = sr_levels.get('supports', [])
+            if supports:
+                text += "📉 *ПОДДЕРЖКИ:*\n"
+                for i, s in enumerate(supports[:3], 1):
+                    price = s.get('price', 0)
+                    strength = s.get('strength', 1)
+                    source = s.get('source', 'calculated')
+                    touches = s.get('touches', 0)
+                    stars = "⭐" * strength
+                    
+                    source_text = {
+                        'swing_low': 'swing low',
+                        'round_number': 'круглый уровень',
+                        'prev_low': 'недельный low',
+                        'fib_level': 'Fibonacci',
+                    }.get(source, source)
+                    
+                    if touches > 0:
+                        text += f"• S{i}: {format_price(price)} \\({source_text}, {touches} касания\\) {stars}\n"
+                    else:
+                        text += f"• S{i}: {format_price(price)} \\({source_text}\\) {stars}\n"
+            
+            text += "\n"
+            
+            # Liquidation levels if available
+            if deep_derivatives_data and deep_derivatives_data.get('liquidation_levels'):
+                liq_levels = deep_derivatives_data['liquidation_levels']
+                nearest_short = liq_levels.get('nearest_short_liq', 0)
+                nearest_long = liq_levels.get('nearest_long_liq', 0)
+                if nearest_short > 0 or nearest_long > 0:
+                    text += "🎯 *ЛИКВИДАЦИИ:*\n"
+                    if nearest_short > 0:
+                        text += f"• Шорты: ${nearest_short:,.0f} \\(магнит вверх\\)\n"
+                    if nearest_long > 0:
+                        text += f"• Лонги: ${nearest_long:,.0f} \\(магнит вниз\\)\n"
+                    text += "\n"
+        
+        # ===== NEW: СЦЕНАРИИ НА 4 ЧАСА =====
+        price_prediction = signal_data.get('price_prediction', {})
+        if price_prediction:
+            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            text += "📈 *СЦЕНАРИИ НА 4 ЧАСА*\n"
+            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            
+            predicted_price = price_prediction.get('predicted_price', current_price)
+            predicted_change = price_prediction.get('predicted_change_pct', 0)
+            direction_pred = price_prediction.get('direction', 'NEUTRAL')
+            confidence_pred = price_prediction.get('confidence', 50)
+            
+            # Calculate scenario probabilities based on signal
+            if direction_pred == 'UP':
+                bull_prob = min(85, confidence_pred + 10)
+                bear_prob = max(5, 100 - bull_prob - 25)
+                side_prob = 100 - bull_prob - bear_prob
+            elif direction_pred == 'DOWN':
+                bear_prob = min(85, confidence_pred + 10)
+                bull_prob = max(5, 100 - bear_prob - 25)
+                side_prob = 100 - bull_prob - bear_prob
+            else:  # NEUTRAL
+                side_prob = min(70, confidence_pred + 10)
+                bull_prob = (100 - side_prob) // 2
+                bear_prob = 100 - side_prob - bull_prob
+            
+            # Calculate targets for each scenario
+            nearest_r = sr_levels.get('nearest_resistance', current_price * 1.02) if sr_levels else current_price * 1.02
+            nearest_s = sr_levels.get('nearest_support', current_price * 0.98) if sr_levels else current_price * 0.98
+            
+            text += f"🟢 *Бычий \\({bull_prob}%\\):* → {format_price(nearest_r)}\n"
+            text += f"   Триггер: пробой ${current_price * 1.005:,.0f} \\+ объём\n"
+            text += "\n"
+            text += f"🟡 *Боковик \\({side_prob}%\\):* → {format_price(current_price * 0.995)}\\-{format_price(current_price * 1.005)}\n"
+            text += f"   Триггер: ADX < 20, нет объёма\n"
+            text += "\n"
+            text += f"🔴 *Медвежий \\({bear_prob}%\\):* → {format_price(nearest_s)}\n"
+            text += f"   Триггер: пробой ${current_price * 0.995:,.0f} вниз\n"
+            text += "\n"
         
         # ===== DEEP WHALE ANALYSIS (Phase 2) =====
         if deep_whale_data:
@@ -5264,6 +5887,104 @@ class AISignalAnalyzer:
         
         if is_weak:
             text += "⚠️ *Сигнал слабый. Рекомендуется ПРОПУСТИТЬ этот сетап.*\n\n"
+        
+        # ===== NEW: ИТОГОВЫЙ РАСЧЁТ (Weighted calculation breakdown) =====
+        factor_scores = signal_data.get('factor_scores', {})
+        weighted_score = signal_data.get('weighted_score', 0)
+        
+        if factor_scores:
+            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            text += "🔥 *ИТОГОВЫЙ РАСЧЁТ*\n"
+            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            
+            # Show calculation for each factor
+            whale_s = factor_scores.get('whales', 0)
+            derivatives_s = factor_scores.get('derivatives', 0)
+            trend_s = factor_scores.get('trend', 0)
+            momentum_s = factor_scores.get('momentum', 0)
+            volume_s = factor_scores.get('volume', 0)
+            adx_s = factor_scores.get('adx', 0)
+            divergence_s = factor_scores.get('divergence', 0)
+            sentiment_s = factor_scores.get('sentiment', 0)
+            macro_s = factor_scores.get('macro', 0)
+            options_s = factor_scores.get('options', 0)
+            
+            # Calculate weighted contributions
+            whale_contrib = whale_s * 0.25
+            derivatives_contrib = derivatives_s * 0.20
+            trend_contrib = trend_s * 0.15
+            momentum_contrib = momentum_s * 0.12
+            volume_contrib = volume_s * 0.10
+            adx_contrib = adx_s * 0.05
+            divergence_contrib = divergence_s * 0.05
+            sentiment_contrib = sentiment_s * 0.04
+            macro_contrib = macro_s * 0.03
+            options_contrib = options_s * 0.01
+            
+            text += f"• Киты:       {whale_s:+.1f} × 25% = {whale_contrib:+.2f}\n"
+            text += f"• Деривативы: {derivatives_s:+.1f} × 20% = {derivatives_contrib:+.2f}\n"
+            text += f"• Тренд:      {trend_s:+.1f} × 15% = {trend_contrib:+.2f}\n"
+            text += f"• Импульс:    {momentum_s:+.1f} × 12% = {momentum_contrib:+.2f}\n"
+            text += f"• Объём:      {volume_s:+.1f} × 10% = {volume_contrib:+.2f}\n"
+            text += f"• ADX:        {adx_s:+.1f} × 5%  = {adx_contrib:+.2f}\n"
+            text += f"• Дивергенция:{divergence_s:+.1f} × 5%  = {divergence_contrib:+.2f}\n"
+            text += f"• Настроения: {sentiment_s:+.1f} × 4%  = {sentiment_contrib:+.2f}\n"
+            text += f"• Макро:      {macro_s:+.1f} × 3%  = {macro_contrib:+.2f}\n"
+            text += f"• Опционы:    {options_s:+.1f} × 1%  = {options_contrib:+.2f}\n"
+            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            text += f"📊 *ИТОГО: {weighted_score:+.2f}*\n\n"
+            
+            # Add verdict based on weighted score
+            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            text += "🎯 *ВЕРДИКТ*\n"
+            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            
+            # Determine signal type and recommendation
+            price_pred = signal_data.get('price_prediction', {})
+            if price_pred:
+                direction_pred = price_pred.get('direction', 'NEUTRAL')
+                confidence_pred = price_pred.get('confidence', 50)
+                predicted_price = price_pred.get('predicted_price', current_price)
+                predicted_change = price_pred.get('predicted_change_pct', 0)
+                
+                direction_emoji = "📈" if direction_pred == 'UP' else "📉" if direction_pred == 'DOWN' else "➡️"
+                direction_ru = "ЛОНГ" if direction_pred == 'UP' else "ШОРТ" if direction_pred == 'DOWN' else "БОКОВИК"
+                
+                text += f"{direction_emoji} *{direction_ru}* \\({confidence_pred}% уверенность\\)\n\n"
+                text += f"💰 Цена сейчас: {format_price(current_price)}\n"
+                text += f"🎯 Цель 4ч: {format_price(predicted_price)} \\({predicted_change:+.1f}%\\)\n"
+                
+                # Calculate stop loss
+                if direction_pred == 'UP':
+                    stop_price = current_price * 0.992  # -0.8% stop
+                    stop_pct = -0.8
+                elif direction_pred == 'DOWN':
+                    stop_price = current_price * 1.008  # +0.8% stop
+                    stop_pct = +0.8
+                else:
+                    stop_price = 0
+                    stop_pct = 0
+                
+                if stop_price > 0:
+                    text += f"🛑 Стоп: {format_price(stop_price)} \\({stop_pct:+.1f}%\\)\n"
+                    # Calculate R:R
+                    risk = abs(stop_pct)
+                    reward = abs(predicted_change)
+                    rr = reward / risk if risk > 0 else 0
+                    text += f"📊 R:R = {rr:.1f}\n\n"
+                
+                # Recommendation based on confidence
+                if confidence_pred >= 70:
+                    text += "⚠️ *РЕКОМЕНДАЦИЯ:*\n"
+                    text += "Сигнал СИЛЬНЫЙ\\. Можно входить с\n"
+                    text += "нормальным размером позиции\\.\n\n"
+                elif confidence_pred >= 60:
+                    text += "⚠️ *РЕКОМЕНДАЦИЯ:*\n"
+                    text += "Сигнал СРЕДНИЙ\\. Можно входить с\n"
+                    text += "уменьшенным размером позиции\\.\n\n"
+                else:
+                    text += "⚠️ *РЕКОМЕНДАЦИЯ:*\n"
+                    text += "Сигнал СЛАБЫЙ\\. Рекомендуется ПРОПУСТИТЬ\\.\n\n"
         
         # ===== FOOTER =====
         text += f"📡 Факторов: {data_sources_count}\n"

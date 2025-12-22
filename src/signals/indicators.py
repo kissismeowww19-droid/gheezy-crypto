@@ -1415,3 +1415,169 @@ def calculate_all_indicators(
     bb = calculate_bollinger_bands(prices)
 
     return rsi, macd, bb
+
+
+@dataclass
+class SwingPoint:
+    """
+    Swing high/low point.
+    
+    Attributes:
+        price: Price at the swing point
+        index: Index in the data array
+        type: 'high' or 'low'
+        strength: Number of touches (validation count)
+    """
+    price: float
+    index: int
+    type: str  # 'high' or 'low'
+    strength: int = 1
+
+
+def find_swing_points(ohlcv_data: List[dict], lookback: int = 50) -> Tuple[List[SwingPoint], List[SwingPoint]]:
+    """
+    Find swing highs and lows in OHLCV data.
+    
+    A swing high is a candle where the high is higher than 2 candles on each side.
+    A swing low is a candle where the low is lower than 2 candles on each side.
+    
+    Args:
+        ohlcv_data: List of OHLCV candles with 'high', 'low', 'close' keys
+        lookback: Number of candles to analyze (default 50)
+        
+    Returns:
+        Tuple of (swing_highs, swing_lows) as lists of SwingPoint objects
+    """
+    if len(ohlcv_data) < 5:
+        return [], []
+    
+    # Use only the most recent candles
+    data = ohlcv_data[-lookback:] if len(ohlcv_data) > lookback else ohlcv_data
+    
+    swing_highs = []
+    swing_lows = []
+    
+    # Need at least 5 candles (2 before, 1 center, 2 after)
+    for i in range(2, len(data) - 2):
+        # Check for swing high
+        if (data[i]['high'] > data[i-1]['high'] and 
+            data[i]['high'] > data[i-2]['high'] and
+            data[i]['high'] > data[i+1]['high'] and
+            data[i]['high'] > data[i+2]['high']):
+            
+            swing_highs.append(SwingPoint(
+                price=data[i]['high'],
+                index=i,
+                type='high',
+                strength=1
+            ))
+        
+        # Check for swing low
+        if (data[i]['low'] < data[i-1]['low'] and 
+            data[i]['low'] < data[i-2]['low'] and
+            data[i]['low'] < data[i+1]['low'] and
+            data[i]['low'] < data[i+2]['low']):
+            
+            swing_lows.append(SwingPoint(
+                price=data[i]['low'],
+                index=i,
+                type='low',
+                strength=1
+            ))
+    
+    return swing_highs, swing_lows
+
+
+def count_touches(ohlcv_data: List[dict], level: float, tolerance_pct: float = 0.5) -> int:
+    """
+    Count how many times price has touched a specific level.
+    
+    A touch is counted when the high or low comes within tolerance_pct of the level.
+    
+    Args:
+        ohlcv_data: List of OHLCV candles
+        level: Price level to check
+        tolerance_pct: Tolerance as percentage (default 0.5%)
+        
+    Returns:
+        Number of touches (0 if no data or invalid level)
+        
+    Note:
+        Returns 0 for invalid inputs (empty data or level <= 0) rather than
+        raising an exception to allow graceful handling in higher-level functions.
+    """
+    if not ohlcv_data or level <= 0:
+        return 0
+    
+    tolerance = level * (tolerance_pct / 100.0)
+    touches = 0
+    
+    for candle in ohlcv_data:
+        high = candle.get('high', 0)
+        low = candle.get('low', 0)
+        
+        # Check if candle touched the level
+        if abs(high - level) <= tolerance or abs(low - level) <= tolerance:
+            touches += 1
+        # Also count if the level is within the candle range
+        elif low <= level <= high:
+            touches += 1
+    
+    return touches
+
+
+def calculate_level_strength(
+    level: float,
+    source: str,
+    touches: int,
+    volume_at_level: float = 0.0,
+    age_factor: float = 1.0
+) -> int:
+    """
+    Calculate strength of a support/resistance level.
+    
+    Strength is scored from 1-5 based on:
+    - Source (swing points = higher, round numbers = medium)
+    - Number of touches (more = stronger)
+    - Volume at level (optional, higher = stronger)
+    - Age factor (optional, more recent = stronger)
+    
+    Args:
+        level: Price level
+        source: Source type ('swing_high', 'swing_low', 'round_number', 'prev_high', 'prev_low', etc.)
+        touches: Number of times price touched this level
+        volume_at_level: Volume traded at this level (optional)
+        age_factor: Factor for recency (1.0 = recent, 0.5 = old) (optional)
+        
+    Returns:
+        Strength score from 1-5 stars
+    """
+    strength = 0
+    
+    # Base strength from source
+    source_strength = {
+        'swing_high': 3,
+        'swing_low': 3,
+        'prev_high': 4,
+        'prev_low': 4,
+        'round_number': 2,
+        'fib_level': 3,
+        'volume_poc': 4,
+    }
+    strength = source_strength.get(source, 2)
+    
+    # Bonus from touches (max +2)
+    if touches >= 5:
+        strength += 2
+    elif touches >= 3:
+        strength += 1
+    
+    # Small bonus from volume (max +1)
+    if volume_at_level > 0:
+        strength = min(5, strength + 1)
+    
+    # Apply age factor (reduce if old)
+    strength = int(strength * age_factor)
+    
+    # Ensure within range 1-5
+    return max(1, min(5, strength))
