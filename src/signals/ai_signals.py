@@ -178,6 +178,9 @@ class AISignalAnalyzer:
     MAX_PREDICTED_MOVEMENT_PCT = 3.0  # Maximum predicted price change percentage
     MACRO_SCORE_NORMALIZER = 1.5  # Normalize macro score from wider range to -10/+10
     
+    # Weighted score scaling factor (converts -10/+10 to -100/+100 for compatibility)
+    WEIGHTED_SCORE_SCALE_FACTOR = 10
+    
     def __init__(self, whale_tracker):
         """
         Инициализация анализатора.
@@ -4723,7 +4726,7 @@ class AISignalAnalyzer:
         self.last_symbol_signals[symbol] = {
             "direction": final_direction,
             "probability": final_probability,
-            "total_score": new_weighted_score * 10,  # Scale to -100/+100 for compatibility
+            "total_score": new_weighted_score * self.WEIGHTED_SCORE_SCALE_FACTOR,  # Scale to -100/+100 for compatibility
             "trend_score": block_trend_score,
             "generated_at": current_time,
         }
@@ -4731,7 +4734,7 @@ class AISignalAnalyzer:
         self._correlation_signals[symbol] = {
             "direction": final_direction,
             "probability": final_probability,
-            "total_score": new_weighted_score * 10,  # Scale to -100/+100 for compatibility
+            "total_score": new_weighted_score * self.WEIGHTED_SCORE_SCALE_FACTOR,  # Scale to -100/+100 for compatibility
             "trend_score": block_trend_score,
             "generated_at": current_time,
             "expires_at": current_time + self.CORRELATION_SIGNAL_TTL,
@@ -4739,7 +4742,7 @@ class AISignalAnalyzer:
         logger.info(f"Saved weighted signal for {symbol}: direction={final_direction}, probability={final_probability}, weighted_score={new_weighted_score:.2f}")
         
         # Calculate signal strength from weighted score
-        strength_percent = self.calculate_signal_strength(new_weighted_score * 10)  # Scale to -100/+100
+        strength_percent = self.calculate_signal_strength(new_weighted_score * self.WEIGHTED_SCORE_SCALE_FACTOR)  # Scale to -100/+100
         
         # ====== NEW: REAL S/R LEVELS ======
         sr_levels = {}

@@ -1055,6 +1055,9 @@ async def callback_signals(callback: CallbackQuery):
 # Section divider used in signal messages
 MESSAGE_SECTION_DIVIDER = "━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
+# Maximum length for each message part (Telegram limit is 4096, we use 3900 for safety margin)
+MAX_MESSAGE_PART_LENGTH = 3900
+
 
 async def send_signal_in_parts(message_or_callback, symbol: str, signal_text: str) -> None:
     """
@@ -1125,7 +1128,7 @@ async def send_signal_in_parts(message_or_callback, symbol: str, signal_text: st
             test_part = current_part + section
         
         # Check if adding this section would exceed limit
-        if len(test_part) > 3900:  # Leave some margin
+        if len(test_part) > MAX_MESSAGE_PART_LENGTH:  # Leave some margin
             if current_part:
                 parts.append(current_part)
             current_part = section
