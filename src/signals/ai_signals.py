@@ -640,6 +640,49 @@ class AISignalAnalyzer:
                         "status": vol_sma.status
                     }
                 
+                # Volume Spike Detection (NEW)
+                vol_spike = detect_volume_spike(volumes, threshold=2.0, lookback=20)
+                if vol_spike:
+                    result["volume_spike"] = {
+                        "is_spike": vol_spike.is_spike,
+                        "spike_percentage": vol_spike.spike_percentage,
+                        "current_volume": vol_spike.current_volume,
+                        "average_volume": vol_spike.average_volume
+                    }
+                
+                # ADX - Average Directional Index (NEW)
+                adx = calculate_adx(high_prices, low_prices, close_prices, period=14)
+                if adx:
+                    result["adx"] = {
+                        "value": adx.value,
+                        "plus_di": adx.plus_di,
+                        "minus_di": adx.minus_di,
+                        "trend_strength": adx.trend_strength,
+                        "direction": adx.direction
+                    }
+                
+                # RSI Divergence Detection (NEW)
+                # Need to calculate RSI values for divergence detection
+                if rsi and len(close_prices) >= 30:
+                    # Calculate RSI for all historical points
+                    rsi_values = []
+                    for i in range(14, len(close_prices)):
+                        temp_rsi = calculate_rsi(close_prices[:i+1], period=14)
+                        if temp_rsi:
+                            rsi_values.append(temp_rsi.value)
+                    
+                    if len(rsi_values) >= 14:
+                        # Use the last part of prices that matches rsi_values
+                        prices_for_div = close_prices[14:]
+                        rsi_div = calculate_rsi_divergence(prices_for_div, rsi_values, lookback=14)
+                        if rsi_div:
+                            result["rsi_divergence"] = {
+                                "type": rsi_div.type,
+                                "strength": rsi_div.strength,
+                                "explanation": rsi_div.explanation
+                            }
+
+                
                 # Pivot Points (using previous day's data)
                 if len(ohlcv_data) >= 2:
                     prev_candle = ohlcv_data[-2]
@@ -2146,7 +2189,7 @@ class AISignalAnalyzer:
     def _calculate_trend_score(self, technical_data: Dict) -> float:
         """
         Calculate trend score (-10 to +10).
-        Combines RSI, MACD, MA Crossover.
+        Combines RSI, MACD, MA Crossover, RSI Divergence, ADX.
         
         Args:
             technical_data: Technical indicator data
@@ -2184,7 +2227,30 @@ class AISignalAnalyzer:
             elif technical_data["ma_crossover"]["trend"] == "bearish":
                 score -= 1
         
-        return max(min(score, 10), -10)
+        # RSI Divergence (NEW - affects by +10 for bullish, -10 for bearish as per requirement)
+        # Note: To keep the score in -10 to +10 range, we'll scale the divergence contribution
+        divergence_adjustment = 0.0
+        if "rsi_divergence" in technical_data:
+            div_type = technical_data["rsi_divergence"]["type"]
+            if div_type == "bullish":
+                divergence_adjustment = 10  # Full +10 for bullish divergence
+            elif div_type == "bearish":
+                divergence_adjustment = -10  # Full -10 for bearish divergence
+        
+        # ADX Trend Strength (NEW - modifies confidence)
+        # ADX < 20: reduce score by 20%, ADX > 40: increase score by 20%
+        adx_multiplier = 1.0
+        if "adx" in technical_data:
+            adx_value = technical_data["adx"]["value"]
+            if adx_value < 20:
+                adx_multiplier = 0.8  # Reduce by 20% for weak trend
+            elif adx_value > 40:
+                adx_multiplier = 1.2  # Increase by 20% for strong trend
+        
+        # Apply ADX multiplier to base score, then add divergence
+        score = (score * adx_multiplier) + divergence_adjustment
+        
+        return max(min(score, 20), -20)  # Extended range to accommodate divergence
     
     def _calculate_momentum_score(self, technical_data: Dict) -> float:
         """
@@ -2285,7 +2351,7 @@ class AISignalAnalyzer:
     def _calculate_volume_score(self, technical_data: Dict, ohlcv_data: Optional[List] = None) -> float:
         """
         Calculate volume score (-10 to +10).
-        Combines OBV, VWAP, Volume SMA.
+        Combines OBV, VWAP, Volume SMA, Volume Spike.
         
         Args:
             technical_data: Technical indicator data
@@ -2321,7 +2387,17 @@ class AISignalAnalyzer:
             elif status == "low":
                 score -= 2
         
-        return max(min(score, 10), -10)
+        # Volume Spike (NEW - adds +5 to +10 based on spike size as per requirement)
+        if "volume_spike" in technical_data:
+            is_spike = technical_data["volume_spike"]["is_spike"]
+            spike_pct = technical_data["volume_spike"]["spike_percentage"]
+            if is_spike and spike_pct > 50:  # Only if spike > 50%
+                # Scale from +5 to +10 based on spike size
+                # spike_pct of 50-100% = +5, 100-200% = +7.5, 200%+ = +10
+                spike_score = min(10, 5 + (spike_pct / 40))  # Scaling formula
+                score += spike_score
+        
+        return max(min(score, 20), -20)  # Extended range to accommodate volume spike
     
     def _calculate_market_score(self, market_data: Dict) -> float:
         """
@@ -4667,12 +4743,46 @@ class AISignalAnalyzer:
         block_derivatives = signal_data.get('block_derivatives_score', 0)
         block_sentiment = signal_data.get('block_sentiment_score', 0)
         
+        # Calculate new factor scores
+        divergence_score = 0.0
+        volume_spike_score = 0.0
+        adx_score = 0.0
+        
+        if technical_data:
+            # Divergence score
+            if "rsi_divergence" in technical_data:
+                div_type = technical_data["rsi_divergence"]["type"]
+                if div_type == "bullish":
+                    divergence_score = 10.0
+                elif div_type == "bearish":
+                    divergence_score = -10.0
+            
+            # Volume spike score
+            if "volume_spike" in technical_data:
+                vol_spike = technical_data["volume_spike"]
+                if vol_spike["is_spike"] and vol_spike["spike_percentage"] > 50:
+                    spike_pct = vol_spike["spike_percentage"]
+                    volume_spike_score = min(10.0, 5.0 + (spike_pct / 40))  # 5-10 based on size
+            
+            # ADX trend strength score
+            if "adx" in technical_data:
+                adx_value = technical_data["adx"]["value"]
+                if adx_value > 40:
+                    adx_score = 7.0  # Strong trend
+                elif adx_value > 25:
+                    adx_score = 4.0  # Moderate trend
+                elif adx_value < 20:
+                    adx_score = -3.0  # Weak trend (negative)
+        
         text += f"📈 *РАЗБИВКА ПО БЛОКАМ*\n"
         text += f"• Тренд: {'+' if block_trend > 0 else ''}{block_trend:.1f}/10\n"
         text += f"• Импульс: {'+' if block_momentum > 0 else ''}{block_momentum:.1f}/10\n"
         text += f"• Киты: {'+' if block_whales > 0 else ''}{block_whales:.1f}/10\n"
         text += f"• Деривативы: {'+' if block_derivatives > 0 else ''}{block_derivatives:.1f}/10\n"
-        text += f"• Настроения: {'+' if block_sentiment > 0 else ''}{block_sentiment:.1f}/10\n\n"
+        text += f"• Настроения: {'+' if block_sentiment > 0 else ''}{block_sentiment:.1f}/10\n"
+        text += f"• Дивергенция: {'+' if divergence_score > 0 else ''}{divergence_score:.1f}/10\n"
+        text += f"• Объём: {'+' if volume_spike_score > 0 else ''}{volume_spike_score:.1f}/10\n"
+        text += f"• Сила тренда: {'+' if adx_score > 0 else ''}{adx_score:.1f}/10\n\n"
         
         # ===== KEY LEVELS (NEW - Pivot Points) =====
         # Calculate pivot points from technical_data or market_data
@@ -4928,6 +5038,45 @@ class AISignalAnalyzer:
         text += f"• С бирж: {withdrawals_count} тx\n"
         text += f"• Net Flow: {net_flow_text} tx {net_flow_sentiment}\n\n"
         
+        # ===== ДОПОЛНИТЕЛЬНЫЙ АНАЛИЗ (NEW) =====
+        if technical_data and any(k in technical_data for k in ["rsi_divergence", "volume_spike", "adx"]):
+            text += "📈 *ДОПОЛНИТЕЛЬНЫЙ АНАЛИЗ*\n"
+            
+            # RSI Divergence
+            if "rsi_divergence" in technical_data:
+                div_data = technical_data["rsi_divergence"]
+                div_type = div_data["type"]
+                if div_type == "bullish":
+                    text += "• 📈 Дивергенция: 🟢 Бычья RSI\n"
+                elif div_type == "bearish":
+                    text += "• 📈 Дивергенция: 🔴 Медвежья RSI\n"
+                else:
+                    text += "• 📈 Дивергенция: нет\n"
+            
+            # Volume Spike
+            if "volume_spike" in technical_data:
+                vol_spike = technical_data["volume_spike"]
+                if vol_spike["is_spike"] and vol_spike["spike_percentage"] > 50:
+                    spike_pct = vol_spike["spike_percentage"]
+                    text += f"• 📊 Объём: Spike +{spike_pct:.0f}% ⚠️\n"
+                else:
+                    text += "• 📊 Объём: нормальный\n"
+            
+            # ADX Trend Strength
+            if "adx" in technical_data:
+                adx_data = technical_data["adx"]
+                adx_value = adx_data["value"]
+                trend_strength = adx_data["trend_strength"]
+                strength_text = {
+                    "weak": "слабый тренд",
+                    "medium": "умеренный тренд", 
+                    "strong": "сильный тренд",
+                    "very_strong": "очень сильный тренд"
+                }.get(trend_strength, "тренд")
+                text += f"• 💪 ADX: {adx_value:.0f} ({strength_text})\n"
+            
+            text += "\n"
+        
         # ===== ТЕХНИЧЕСКИЙ АНАЛИЗ =====
         text += "⚡ *ТЕХНИЧЕСКИЙ АНАЛИЗ*\n"
         
@@ -5048,6 +5197,31 @@ class AISignalAnalyzer:
                 reasons.append((True, f"✅ Buy/Sell ratio: {ratio:.2f} (покупки)"))
             elif ratio < 0.67:
                 reasons.append((False, f"❌ Buy/Sell ratio: {ratio:.2f} (продажи)"))
+        
+        # 8. RSI Divergence (NEW)
+        if technical_data and "rsi_divergence" in technical_data:
+            div_data = technical_data["rsi_divergence"]
+            div_type = div_data["type"]
+            if div_type == "bullish":
+                reasons.append((True, f"✅ Бычья дивергенция RSI"))
+            elif div_type == "bearish":
+                reasons.append((False, f"❌ Медвежья дивергенция RSI"))
+        
+        # 9. Volume Spike (NEW)
+        if technical_data and "volume_spike" in technical_data:
+            vol_spike = technical_data["volume_spike"]
+            if vol_spike["is_spike"] and vol_spike["spike_percentage"] > 50:
+                spike_pct = vol_spike["spike_percentage"]
+                reasons.append((True, f"✅ Спайк объёма: +{spike_pct:.0f}%"))
+        
+        # 10. ADX Trend Strength (NEW)
+        if technical_data and "adx" in technical_data:
+            adx_data = technical_data["adx"]
+            adx_value = adx_data["value"]
+            if adx_value > 40:
+                reasons.append((True, f"✅ Сильный тренд (ADX {adx_value:.0f})"))
+            elif adx_value < 20:
+                reasons.append((False, f"❌ Слабый тренд (ADX {adx_value:.0f})"))
         
         # Показать топ 5 причин
         for i, (_, reason_text) in enumerate(reasons[:5], 1):
