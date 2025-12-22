@@ -160,6 +160,20 @@ class AISignalAnalyzer:
     MAX_TOTAL_SCORE = 130  # ±130 - максимальный общий score (с учётом Phase 3)
     MAX_PROBABILITY = 78  # Максимальная вероятность (реалистичная)
     
+    # NEW: Weighted Factor System (100% total)
+    FACTOR_WEIGHTS = {
+        'whales': 0.25,        # 25% - Smart money, leads market
+        'derivatives': 0.20,   # 20% - Trader positions (OI, Funding, L/S)
+        'trend': 0.15,         # 15% - EMA, Ichimoku, Market Structure
+        'momentum': 0.12,      # 12% - RSI, MACD, Stoch
+        'volume': 0.10,        # 10% - Volume, CVD, Volume Spike
+        'adx': 0.05,           # 5%  - Trend strength filter
+        'divergence': 0.05,    # 5%  - Reversal signals
+        'sentiment': 0.04,     # 4%  - Fear & Greed
+        'macro': 0.03,         # 3%  - DXY, S&P500, Gold
+        'options': 0.01,       # 1%  - Put/Call ratio
+    }
+    
     def __init__(self, whale_tracker):
         """
         Инициализация анализатора.
@@ -283,6 +297,241 @@ class AISignalAnalyzer:
         
         if expired:
             logger.info(f"Cleaned up {len(expired)} expired correlation signals: {expired}")
+    
+    def calculate_weighted_score(self, factors: Dict[str, float]) -> float:
+        """
+        Calculate weighted score from factor scores.
+        
+        Each factor score is expected to be in range -10 to +10.
+        Multiply by weight and sum to get final weighted score.
+        
+        Args:
+            factors: Dictionary of factor names to scores (-10 to +10)
+            
+        Returns:
+            Weighted score (-10 to +10)
+        """
+        total = 0.0
+        for factor, score in factors.items():
+            weight = self.FACTOR_WEIGHTS.get(factor, 0)
+            total += score * weight
+        
+        return total
+    
+    def calculate_real_sr_levels(self, ohlcv_data: List[dict], current_price: float) -> Dict:
+        """
+        Calculate REAL support and resistance levels from actual price data.
+        
+        Finds levels from:
+        1. Recent swing highs/lows (last 50-100 candles)
+        2. Round numbers ($85000, $90000, etc.)
+        3. Previous day/week high/low
+        
+        Args:
+            ohlcv_data: List of OHLCV candles with 'high', 'low', 'close' keys
+            current_price: Current price
+            
+        Returns:
+            Dict with resistances, supports, nearest_resistance, nearest_support
+        """
+        from signals.indicators import find_swing_points, count_touches, calculate_level_strength
+        
+        levels = []
+        
+        if not ohlcv_data or len(ohlcv_data) < 5:
+            # Fallback to simple levels based on current price
+            return {
+                'resistances': [
+                    {'price': current_price * 1.02, 'strength': 2, 'source': 'calculated'},
+                    {'price': current_price * 1.04, 'strength': 2, 'source': 'calculated'},
+                    {'price': current_price * 1.06, 'strength': 2, 'source': 'calculated'},
+                ],
+                'supports': [
+                    {'price': current_price * 0.98, 'strength': 2, 'source': 'calculated'},
+                    {'price': current_price * 0.96, 'strength': 2, 'source': 'calculated'},
+                    {'price': current_price * 0.94, 'strength': 2, 'source': 'calculated'},
+                ],
+                'nearest_resistance': current_price * 1.02,
+                'nearest_support': current_price * 0.98,
+            }
+        
+        # 1. Find swing highs/lows
+        swing_highs, swing_lows = find_swing_points(ohlcv_data, lookback=min(100, len(ohlcv_data)))
+        
+        for swing in swing_highs:
+            touches = count_touches(ohlcv_data, swing.price)
+            strength = calculate_level_strength(swing.price, 'swing_high', touches)
+            if swing.price > current_price:
+                levels.append({
+                    'price': swing.price,
+                    'type': 'resistance',
+                    'source': 'swing_high',
+                    'strength': strength,
+                    'touches': touches
+                })
+        
+        for swing in swing_lows:
+            touches = count_touches(ohlcv_data, swing.price)
+            strength = calculate_level_strength(swing.price, 'swing_low', touches)
+            if swing.price < current_price:
+                levels.append({
+                    'price': swing.price,
+                    'type': 'support',
+                    'source': 'swing_low',
+                    'strength': strength,
+                    'touches': touches
+                })
+        
+        # 2. Round numbers (every $1000 for BTC, or appropriate for other coins)
+        if current_price >= 1000:
+            step = 1000
+        elif current_price >= 100:
+            step = 100
+        elif current_price >= 10:
+            step = 10
+        else:
+            step = 1
+        
+        base = round(current_price / step) * step
+        for offset in [-2*step, -step, 0, step, 2*step]:
+            level = base + offset
+            if level > 0 and abs(level - current_price) / current_price > 0.005:  # At least 0.5% away
+                if level > current_price:
+                    levels.append({
+                        'price': level,
+                        'type': 'resistance',
+                        'source': 'round_number',
+                        'strength': 3,
+                        'touches': 0
+                    })
+                elif level < current_price:
+                    levels.append({
+                        'price': level,
+                        'type': 'support',
+                        'source': 'round_number',
+                        'strength': 3,
+                        'touches': 0
+                    })
+        
+        # 3. Previous day/week high/low (last 24-48 4h candles)
+        lookback_candles = min(48, len(ohlcv_data))
+        if lookback_candles >= 24:
+            recent_data = ohlcv_data[-lookback_candles:]
+            prev_high = max(c.get('high', 0) for c in recent_data)
+            prev_low = min(c.get('low', float('inf')) for c in recent_data)
+            
+            if prev_high != current_price and prev_high > 0:
+                levels.append({
+                    'price': prev_high,
+                    'type': 'resistance' if prev_high > current_price else 'support',
+                    'source': 'prev_high',
+                    'strength': 5,
+                    'touches': 1
+                })
+            
+            if prev_low != current_price and prev_low < float('inf'):
+                levels.append({
+                    'price': prev_low,
+                    'type': 'support' if prev_low < current_price else 'resistance',
+                    'source': 'prev_low',
+                    'strength': 5,
+                    'touches': 1
+                })
+        
+        # Filter and sort
+        resistances = [l for l in levels if l['type'] == 'resistance' and l['price'] > current_price]
+        supports = [l for l in levels if l['type'] == 'support' and l['price'] < current_price]
+        
+        # Sort resistances by price (ascending) and take top 3
+        resistances = sorted(resistances, key=lambda x: x['price'])[:3]
+        
+        # Sort supports by price (descending) and take top 3
+        supports = sorted(supports, key=lambda x: x['price'], reverse=True)[:3]
+        
+        # Get nearest levels
+        nearest_resistance = resistances[0]['price'] if resistances else current_price * 1.02
+        nearest_support = supports[0]['price'] if supports else current_price * 0.98
+        
+        return {
+            'resistances': resistances,
+            'supports': supports,
+            'nearest_resistance': nearest_resistance,
+            'nearest_support': nearest_support,
+        }
+    
+    def predict_price_4h(
+        self, 
+        current_price: float, 
+        weighted_score: float, 
+        sr_levels: Dict, 
+        atr: float
+    ) -> Dict:
+        """
+        Predict price movement for next 4 hours.
+        
+        Logic:
+        - weighted_score > 0: expect price UP
+        - weighted_score < 0: expect price DOWN
+        - Magnitude based on score strength and ATR
+        - Respect S/R levels as targets/barriers
+        
+        Args:
+            current_price: Current price
+            weighted_score: Weighted score from -10 to +10
+            sr_levels: Support/resistance levels dict
+            atr: Average True Range value
+            
+        Returns:
+            Dict with predicted_price, predicted_change_pct, direction, confidence, price_range
+        """
+        # Base movement based on score (-10 to +10 scale)
+        # Typical 4h move is 0.5-2% for BTC
+        base_move_pct = weighted_score * 0.3  # -3% to +3% max
+        
+        # Adjust for ATR (volatility)
+        atr_pct = (atr / current_price) * 100 if current_price > 0 else 1.5
+        adjusted_move = base_move_pct * (atr_pct / 1.5)  # Normalize to typical ATR
+        
+        # Cap movement
+        adjusted_move = max(-3.0, min(3.0, adjusted_move))
+        
+        predicted_price = current_price * (1 + adjusted_move / 100)
+        
+        # Respect S/R levels
+        if adjusted_move > 0:
+            # Going up - resistance is barrier
+            nearest_r = sr_levels.get('nearest_resistance', current_price * 1.02)
+            if predicted_price > nearest_r:
+                predicted_price = nearest_r * 0.995  # Stop just before resistance
+        else:
+            # Going down - support is barrier
+            nearest_s = sr_levels.get('nearest_support', current_price * 0.98)
+            if predicted_price < nearest_s:
+                predicted_price = nearest_s * 1.005  # Stop just before support
+        
+        # Calculate confidence (50-85%)
+        confidence = min(85, 50 + abs(weighted_score) * 3.5)
+        
+        # Direction
+        direction = 'UP' if predicted_price > current_price else 'DOWN'
+        
+        # Price range based on ATR
+        price_range_low = current_price - atr
+        price_range_high = current_price + atr
+        
+        # Calculate predicted change percentage
+        predicted_change_pct = ((predicted_price / current_price) - 1) * 100 if current_price > 0 else 0
+        
+        return {
+            'predicted_price': predicted_price,
+            'predicted_change_pct': predicted_change_pct,
+            'direction': direction,
+            'confidence': confidence,
+            'price_range': {
+                'low': price_range_low,
+                'high': price_range_high,
+            }
+        }
     
     async def get_whale_data(self, symbol: str) -> Optional[Dict]:
         """
