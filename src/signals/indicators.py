@@ -1066,11 +1066,16 @@ def calculate_rsi_divergence(
     Returns:
         RSIDivergence or None if insufficient data
     """
-    if len(prices) < lookback + 5 or len(prices) != len(rsi_values):
+    # Minimum 5 extra periods needed for reliable peak/trough detection (2 on each side + 1 center)
+    MIN_EXTRA_PERIODS = 5
+    if len(prices) < lookback + MIN_EXTRA_PERIODS or len(prices) != len(rsi_values):
         return None
     
     prices_array = np.array(prices[-lookback:])
     rsi_array = np.array(rsi_values[-lookback:])
+    
+    # Strength multiplier for divergence detection
+    DIVERGENCE_STRENGTH_MULTIPLIER = 3
     
     # Find local highs and lows
     price_highs = []
@@ -1104,7 +1109,7 @@ def calculate_rsi_divergence(
         
         if last_price_low < prev_price_low and last_rsi_low > prev_rsi_low:
             divergence_type = "bullish"
-            strength = min(100, abs(last_rsi_low - prev_rsi_low) * 3)
+            strength = min(100, abs(last_rsi_low - prev_rsi_low) * DIVERGENCE_STRENGTH_MULTIPLIER)
             explanation = "🟢 Bullish Divergence: Price making lower lows but RSI making higher lows. Potential reversal up."
     
     # Bearish divergence: price makes higher high, RSI makes lower high
@@ -1116,7 +1121,7 @@ def calculate_rsi_divergence(
         
         if last_price_high > prev_price_high and last_rsi_high < prev_rsi_high:
             divergence_type = "bearish"
-            strength = min(100, abs(last_rsi_high - prev_rsi_high) * 3)
+            strength = min(100, abs(last_rsi_high - prev_rsi_high) * DIVERGENCE_STRENGTH_MULTIPLIER)
             explanation = "🔴 Bearish Divergence: Price making higher highs but RSI making lower highs. Potential reversal down."
     
     return RSIDivergence(type=divergence_type, strength=strength, explanation=explanation)
@@ -1187,7 +1192,9 @@ def calculate_adx(
     di_sum = plus_di + minus_di
     dx = abs(plus_di - minus_di) / di_sum * 100 if di_sum > 0 else 0
     
-    # For simplicity, use DX as ADX (proper ADX needs smoothing over period)
+    # NOTE: For simplicity, we use DX as ADX without smoothing.
+    # A proper ADX implementation would smooth DX values over the period using EMA.
+    # This simplified version is sufficient for basic trend strength detection.
     adx_value = float(dx)
     
     # Determine trend strength
