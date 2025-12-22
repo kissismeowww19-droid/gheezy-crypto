@@ -7,7 +7,7 @@ AI Signals - анализ и прогнозирование движения ц�
 import logging
 import time
 from datetime import datetime, timedelta
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Tuple
 import aiohttp
 import asyncio
 import numpy as np
@@ -125,6 +125,12 @@ class AISignalAnalyzer:
     TRADES_FLOW_BULLISH_THRESHOLD = 1.5   # Buy/Sell ratio threshold for bullish
     TRADES_FLOW_BEARISH_THRESHOLD = 0.67  # Buy/Sell ratio threshold for bearish
     TRADES_FLOW_NEUTRAL_DIVISOR = 0.33    # Normalization divisor for neutral range
+    
+    # Conflict detection constants
+    CONFLICT_SCORE_ADJUSTMENT_FACTOR = 0.5  # Factor to adjust score when resolving conflicts
+    CONFLICT_SCORE_BOOST = 15  # Score boost when strong signals override weak ones
+    CONFLICT_HIGH_NEUTRAL_THRESHOLD = 0.6  # Threshold for high neutral factor ratio
+    CONFLICT_MIN_FACTORS_FOR_BALANCE = 15  # Minimum factors needed to check balance
     
     # Signal direction thresholds
     WEAK_SIGNAL_THRESHOLD = 5  # Порог слабого сигнала (боковик)
@@ -1754,8 +1760,14 @@ class AISignalAnalyzer:
         """
         Score на основе потока сделок.
         
-        - flow_ratio > 1.5 = +5 (много покупок)
-        - flow_ratio < 0.67 = -5 (много продаж)
+        - flow_ratio > 50 = +10 (экстремальные покупки)
+        - flow_ratio > 10 = +9 (очень много покупок)
+        - flow_ratio > 5 = +8 (много покупок)
+        - flow_ratio > 1.5 = +5..+7 (покупки)
+        - flow_ratio < 0.02 = -10 (экстремальные продажи)
+        - flow_ratio < 0.1 = -9 (очень много продаж)
+        - flow_ratio < 0.2 = -8 (много продаж)
+        - flow_ratio < 0.67 = -5..-7 (продажи)
         - Градиент между ними
         
         Args:
@@ -1768,12 +1780,26 @@ class AISignalAnalyzer:
         
         flow_ratio = trades_flow.get("flow_ratio", 1.0)
         
-        if flow_ratio > self.TRADES_FLOW_BULLISH_THRESHOLD:
-            # Много покупок - максимально бычье
-            score = 10
+        # Экстремальные покупки
+        if flow_ratio > 50:
+            score = 10  # Аномально много покупок (как 122:1 в примере BTC)
+        elif flow_ratio > 10:
+            score = 9
+        elif flow_ratio > 5:
+            score = 8
+        elif flow_ratio > self.TRADES_FLOW_BULLISH_THRESHOLD:
+            # Много покупок (1.5 < flow_ratio <= 5)
+            score = 7
+        # Экстремальные продажи
+        elif flow_ratio < 0.02:
+            score = -10  # Аномально много продаж
+        elif flow_ratio < 0.1:
+            score = -9
+        elif flow_ratio < 0.2:
+            score = -8
         elif flow_ratio < self.TRADES_FLOW_BEARISH_THRESHOLD:
-            # Много продаж - максимально медвежье
-            score = -10
+            # Много продаж (0.2 <= flow_ratio < 0.67)
+            score = -7
         else:
             # Градиент между thresholds
             # Normalize to -10 to +10
@@ -2839,15 +2865,19 @@ class AISignalAnalyzer:
         if rsi is not None:
             factors += 1
             if rsi < 20:
-                score += 12  # Сильно перепродан = сильный ЛОНГ сигнал
+                score += 20  # ОЧЕНЬ перепродан = ОЧЕНЬ СИЛЬНЫЙ ЛОНГ сигнал
+            elif rsi < 25:
+                score += 15  # Сильно перепродан = СИЛЬНЫЙ ЛОНГ
             elif rsi < 30:
-                score += 8   # Перепродан = ЛОНГ
+                score += 10  # Перепродан = ЛОНГ
             elif rsi < 40:
                 score += 4
             elif rsi > 80:
-                score -= 12  # Сильно перекуплен = сильный ШОРТ сигнал
+                score -= 20  # ОЧЕНЬ перекуплен = ОЧЕНЬ СИЛЬНЫЙ ШОРТ сигнал
+            elif rsi > 75:
+                score -= 15  # Сильно перекуплен = СИЛЬНЫЙ ШОРТ
             elif rsi > 70:
-                score -= 8   # Перекуплен = ШОРТ
+                score -= 10  # Перекуплен = ШОРТ
             elif rsi > 60:
                 score -= 4
         
@@ -2855,10 +2885,14 @@ class AISignalAnalyzer:
         if rsi_5m is not None:
             factors += 1
             if rsi_5m < 20:
+                score += 10  # ОЧЕНЬ перепродан = СИЛЬНЫЙ ЛОНГ
+            elif rsi_5m < 25:
                 score += 8   # Сильно перепродан = ЛОНГ
             elif rsi_5m < 30:
                 score += 5   # Перепродан = ЛОНГ
             elif rsi_5m > 80:
+                score -= 10  # ОЧЕНЬ перекуплен = СИЛЬНЫЙ ШОРТ
+            elif rsi_5m > 75:
                 score -= 8   # Сильно перекуплен = ШОРТ
             elif rsi_5m > 70:
                 score -= 5   # Перекуплен = ШОРТ
@@ -2867,10 +2901,14 @@ class AISignalAnalyzer:
         if rsi_15m is not None:
             factors += 1
             if rsi_15m < 20:
+                score += 10  # ОЧЕНЬ перепродан = СИЛЬНЫЙ ЛОНГ
+            elif rsi_15m < 25:
                 score += 8   # Сильно перепродан = ЛОНГ
             elif rsi_15m < 30:
                 score += 5   # Перепродан = ЛОНГ
             elif rsi_15m > 80:
+                score -= 10  # ОЧЕНЬ перекуплен = СИЛЬНЫЙ ШОРТ
+            elif rsi_15m > 75:
                 score -= 8   # Сильно перекуплен = ШОРТ
             elif rsi_15m > 70:
                 score -= 5   # Перекуплен = ШОРТ
@@ -3004,14 +3042,18 @@ class AISignalAnalyzer:
         
         if fear_greed is not None:
             factors += 1
-            if fear_greed < 20:
-                score += 10
+            if fear_greed < 15:
+                score += 20  # EXTREME Fear = ОЧЕНЬ СИЛЬНЫЙ ЛОНГ
+            elif fear_greed < 25:
+                score += 15  # Extreme Fear = СИЛЬНЫЙ ЛОНГ
             elif fear_greed < 35:
-                score += 5
-            elif fear_greed > 80:
-                score -= 10
+                score += 10  # Fear = ЛОНГ
+            elif fear_greed > 85:
+                score -= 20  # EXTREME Greed = ОЧЕНЬ СИЛЬНЫЙ ШОРТ
+            elif fear_greed > 75:
+                score -= 15  # Extreme Greed = СИЛЬНЫЙ ШОРТ
             elif fear_greed > 65:
-                score -= 5
+                score -= 10  # Greed = ШОРТ
         
         if tradingview_rating:
             factors += 1
@@ -3068,6 +3110,113 @@ class AISignalAnalyzer:
             "neutral_count": neutral,
             "consensus": consensus
         }
+    
+    def _detect_signal_conflicts(
+        self,
+        rsi: Optional[float],
+        fear_greed: Optional[int],
+        trades_flow_ratio: Optional[float],
+        macd_signal: Optional[str],
+        total_score: float,
+        bullish_count: int,
+        bearish_count: int,
+        neutral_count: int
+    ) -> Tuple[float, str]:
+        """
+        Обнаружение и разрешение противоречий между сигналами.
+        
+        ПРАВИЛО 1: Сильные сигналы переопределяют слабые
+        - Если RSI < 25 И Fear & Greed < 25 И trades_flow_ratio > 10 И total_score < 0
+          → override to LONG (score adjustment)
+        - Если RSI > 75 И Fear & Greed > 75 И trades_flow_ratio < 0.1 И total_score > 0
+          → override to SHORT (score adjustment)
+        
+        ПРАВИЛО 2: Много противоречий = нейтральный
+        - Если conflict_ratio > 0.5 → sideways (score → 0)
+        
+        Args:
+            rsi: RSI значение
+            fear_greed: Fear & Greed индекс
+            trades_flow_ratio: Buy/Sell соотношение
+            macd_signal: MACD сигнал ("bullish"/"bearish"/"neutral")
+            total_score: Текущий итоговый score
+            bullish_count: Количество бычьих факторов
+            bearish_count: Количество медвежьих факторов
+            neutral_count: Количество нейтральных факторов
+            
+        Returns:
+            Tuple[adjusted_score, conflict_note]
+        """
+        # Подсчет сильных бычьих сигналов
+        strong_bullish_signals = 0
+        if rsi is not None and rsi < 25:
+            strong_bullish_signals += 1
+        if fear_greed is not None and fear_greed < 25:
+            strong_bullish_signals += 1
+        if trades_flow_ratio is not None and trades_flow_ratio > 10:
+            strong_bullish_signals += 1
+        if macd_signal == "bullish":
+            strong_bullish_signals += 1
+            
+        # Подсчет сильных медвежьих сигналов
+        strong_bearish_signals = 0
+        if rsi is not None and rsi > 75:
+            strong_bearish_signals += 1
+        if fear_greed is not None and fear_greed > 75:
+            strong_bearish_signals += 1
+        if trades_flow_ratio is not None and trades_flow_ratio < 0.1:
+            strong_bearish_signals += 1
+        if macd_signal == "bearish":
+            strong_bearish_signals += 1
+        
+        # ПРАВИЛО 1: Сильные экстремальные сигналы переопределяют общий score
+        conflict_note = ""
+        adjusted_score = total_score
+        
+        # Если есть 3+ сильных бычьих сигнала, но score отрицательный
+        if strong_bullish_signals >= 3 and total_score < 0:
+            # Переопределяем на бычий
+            adjusted_score = abs(total_score) * self.CONFLICT_SCORE_ADJUSTMENT_FACTOR + self.CONFLICT_SCORE_BOOST  # Умеренно положительный
+            conflict_note = f"⚠️ Конфликт разрешен: {strong_bullish_signals} сильных бычьих сигнала переопределяют score"
+            logger.warning(f"Signal conflict detected: {strong_bullish_signals} strong bullish signals but score was {total_score:.2f}, adjusted to {adjusted_score:.2f}")
+        
+        # Если есть 3+ сильных медвежьих сигнала, но score положительный
+        elif strong_bearish_signals >= 3 and total_score > 0:
+            # Переопределяем на медвежий
+            adjusted_score = -abs(total_score) * self.CONFLICT_SCORE_ADJUSTMENT_FACTOR - self.CONFLICT_SCORE_BOOST  # Умеренно отрицательный
+            conflict_note = f"⚠️ Конфликт разрешен: {strong_bearish_signals} сильных медвежьих сигнала переопределяют score"
+            logger.warning(f"Signal conflict detected: {strong_bearish_signals} strong bearish signals but score was {total_score:.2f}, adjusted to {adjusted_score:.2f}")
+        
+        # ПРАВИЛО 2: Много противоречий между факторами = боковик
+        # НО ТОЛЬКО если нет сильных экстремальных сигналов (не было override выше)
+        total_factors = bullish_count + bearish_count + neutral_count
+        if total_factors > 0 and not conflict_note:  # Применяем только если не было override
+            # Проверяем, если сигналы слишком разделены
+            conflict_ratio = neutral_count / total_factors
+            
+            # Проверяем консенсус: если бычьих/медвежьих значительно больше, чем противоположных
+            bullish_consensus = bullish_count > bearish_count * 2  # Бычьих в 2 раза больше
+            bearish_consensus = bearish_count > bullish_count * 2  # Медвежьих в 2 раза больше
+            has_consensus = bullish_consensus or bearish_consensus
+            
+            # Если слишком много нейтральных или равное количество бычьих и медвежьих
+            # НО не сглаживаем, если есть сильные сигналы или явный консенсус
+            if conflict_ratio > self.CONFLICT_HIGH_NEUTRAL_THRESHOLD or (abs(bullish_count - bearish_count) <= 2 and total_factors >= self.CONFLICT_MIN_FACTORS_FOR_BALANCE):
+                should_smooth = True
+                
+                # Не сглаживаем если:
+                # 1. Есть >= 2 сильных экстремальных сигнала
+                # 2. Есть явный консенсус факторов (одна сторона в 2 раза больше)
+                if (strong_bullish_signals >= 2 or strong_bearish_signals >= 2 or has_consensus):
+                    should_smooth = False
+                    logger.info(f"Skipping smoothing: strong_bullish={strong_bullish_signals}, strong_bearish={strong_bearish_signals}, has_consensus={has_consensus}")
+                
+                if should_smooth:
+                    adjusted_score = adjusted_score * 0.3
+                    conflict_note = f"⚠️ Много противоречий: {neutral_count}/{total_factors} нейтральных факторов"
+                    logger.info(f"High conflict ratio: {conflict_ratio:.2f}, score adjusted from {total_score:.2f} to {adjusted_score:.2f}")
+        
+        return adjusted_score, conflict_note
     
     def _determine_direction_from_score(self, total_score: float) -> str:
         """
@@ -3947,6 +4096,33 @@ class AISignalAnalyzer:
             whale_alert is not None,
             social_data is not None,
         ])
+        
+        # ====== ОБНАРУЖЕНИЕ КОНФЛИКТОВ СИГНАЛОВ ======
+        # Собираем данные для проверки конфликтов
+        macd_signal_value = None
+        if technical_data and "macd" in technical_data:
+            macd_signal_value = technical_data["macd"].get("signal")
+        
+        trades_flow_ratio_value = None
+        if trades_flow:
+            trades_flow_ratio_value = trades_flow.get("flow_ratio")
+        
+        # Применяем фильтр конфликтов
+        adjusted_score_conflict, conflict_note = self._detect_signal_conflicts(
+            rsi=rsi,
+            fear_greed=fear_greed_value,
+            trades_flow_ratio=trades_flow_ratio_value,
+            macd_signal=macd_signal_value,
+            total_score=total_score,
+            bullish_count=consensus_data["bullish_count"],
+            bearish_count=consensus_data["bearish_count"],
+            neutral_count=consensus_data["neutral_count"]
+        )
+        
+        # Применяем корректировку score после обнаружения конфликтов
+        if adjusted_score_conflict != total_score:
+            logger.info(f"Conflict detection adjusted score from {total_score:.2f} to {adjusted_score_conflict:.2f}")
+            total_score = adjusted_score_conflict
         
         # ====== МЕЖМОНЕТНАЯ КОРРЕЛЯЦИЯ ======
         # Корректируем сигнал с учётом BTC (ведущий индикатор рынка)
