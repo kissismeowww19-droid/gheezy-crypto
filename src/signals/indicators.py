@@ -1328,9 +1328,12 @@ def calculate_supertrend(
             direction = "short"
             supertrend_value = basic_upper
     
-    # Check for reversal
-    prev_direction = "short" if prev_close < hl_avg[-2] - (multiplier * atr.value) else "long"
-    is_reversal = direction != prev_direction
+    # Check for reversal (only if we have enough data)
+    if len(hl_avg) >= 2:
+        prev_direction = "short" if prev_close < hl_avg[-2] - (multiplier * atr.value) else "long"
+        is_reversal = direction != prev_direction
+    else:
+        is_reversal = False
     
     return Supertrend(value=supertrend_value, direction=direction, is_reversal=is_reversal)
 

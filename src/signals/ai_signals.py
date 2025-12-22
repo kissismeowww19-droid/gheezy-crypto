@@ -126,6 +126,12 @@ class AISignalAnalyzer:
     TRADES_FLOW_BEARISH_THRESHOLD = 0.67  # Buy/Sell ratio threshold for bearish
     TRADES_FLOW_NEUTRAL_DIVISOR = 0.33    # Normalization divisor for neutral range
     
+    # Conflict detection constants
+    CONFLICT_SCORE_ADJUSTMENT_FACTOR = 0.5  # Factor to adjust score when resolving conflicts
+    CONFLICT_SCORE_BOOST = 15  # Score boost when strong signals override weak ones
+    CONFLICT_HIGH_NEUTRAL_THRESHOLD = 0.6  # Threshold for high neutral factor ratio
+    CONFLICT_MIN_FACTORS_FOR_BALANCE = 15  # Minimum factors needed to check balance
+    
     # Signal direction thresholds
     WEAK_SIGNAL_THRESHOLD = 5  # Порог слабого сигнала (боковик)
     
@@ -1782,8 +1788,8 @@ class AISignalAnalyzer:
         elif flow_ratio > 5:
             score = 8
         elif flow_ratio > self.TRADES_FLOW_BULLISH_THRESHOLD:
-            # Много покупок - максимально бычье
-            score = 10
+            # Много покупок (1.5 < flow_ratio <= 5)
+            score = 7
         # Экстремальные продажи
         elif flow_ratio < 0.02:
             score = -10  # Аномально много продаж
@@ -1792,8 +1798,8 @@ class AISignalAnalyzer:
         elif flow_ratio < 0.2:
             score = -8
         elif flow_ratio < self.TRADES_FLOW_BEARISH_THRESHOLD:
-            # Много продаж - максимально медвежье
-            score = -10
+            # Много продаж (0.2 <= flow_ratio < 0.67)
+            score = -7
         else:
             # Градиент между thresholds
             # Normalize to -10 to +10
@@ -3170,14 +3176,14 @@ class AISignalAnalyzer:
         # Если есть 3+ сильных бычьих сигнала, но score отрицательный
         if strong_bullish_signals >= 3 and total_score < 0:
             # Переопределяем на бычий
-            adjusted_score = abs(total_score) * 0.5 + 15  # Умеренно положительный
+            adjusted_score = abs(total_score) * self.CONFLICT_SCORE_ADJUSTMENT_FACTOR + self.CONFLICT_SCORE_BOOST  # Умеренно положительный
             conflict_note = f"⚠️ Конфликт разрешен: {strong_bullish_signals} сильных бычьих сигнала переопределяют score"
             logger.warning(f"Signal conflict detected: {strong_bullish_signals} strong bullish signals but score was {total_score:.2f}, adjusted to {adjusted_score:.2f}")
         
         # Если есть 3+ сильных медвежьих сигнала, но score положительный
         elif strong_bearish_signals >= 3 and total_score > 0:
             # Переопределяем на медвежий
-            adjusted_score = -abs(total_score) * 0.5 - 15  # Умеренно отрицательный
+            adjusted_score = -abs(total_score) * self.CONFLICT_SCORE_ADJUSTMENT_FACTOR - self.CONFLICT_SCORE_BOOST  # Умеренно отрицательный
             conflict_note = f"⚠️ Конфликт разрешен: {strong_bearish_signals} сильных медвежьих сигнала переопределяют score"
             logger.warning(f"Signal conflict detected: {strong_bearish_signals} strong bearish signals but score was {total_score:.2f}, adjusted to {adjusted_score:.2f}")
         
@@ -3195,7 +3201,7 @@ class AISignalAnalyzer:
             
             # Если слишком много нейтральных или равное количество бычьих и медвежьих
             # НО не сглаживаем, если есть сильные сигналы или явный консенсус
-            if conflict_ratio > 0.6 or (abs(bullish_count - bearish_count) <= 2 and total_factors >= 15):
+            if conflict_ratio > self.CONFLICT_HIGH_NEUTRAL_THRESHOLD or (abs(bullish_count - bearish_count) <= 2 and total_factors >= self.CONFLICT_MIN_FACTORS_FOR_BALANCE):
                 should_smooth = True
                 
                 # Не сглаживаем если:
