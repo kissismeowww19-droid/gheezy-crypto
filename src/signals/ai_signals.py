@@ -3182,18 +3182,33 @@ class AISignalAnalyzer:
             logger.warning(f"Signal conflict detected: {strong_bearish_signals} strong bearish signals but score was {total_score:.2f}, adjusted to {adjusted_score:.2f}")
         
         # ПРАВИЛО 2: Много противоречий между факторами = боковик
+        # НО ТОЛЬКО если нет сильных экстремальных сигналов (не было override выше)
         total_factors = bullish_count + bearish_count + neutral_count
-        if total_factors > 0:
+        if total_factors > 0 and not conflict_note:  # Применяем только если не было override
             # Проверяем, если сигналы слишком разделены
             conflict_ratio = neutral_count / total_factors
             
+            # Проверяем консенсус: если бычьих/медвежьих значительно больше, чем противоположных
+            bullish_consensus = bullish_count > bearish_count * 2  # Бычьих в 2 раза больше
+            bearish_consensus = bearish_count > bullish_count * 2  # Медвежьих в 2 раза больше
+            has_consensus = bullish_consensus or bearish_consensus
+            
             # Если слишком много нейтральных или равное количество бычьих и медвежьих
-            if conflict_ratio > 0.5 or (abs(bullish_count - bearish_count) <= 2 and total_factors >= 10):
-                # Сглаживаем score к нейтральному
-                adjusted_score = adjusted_score * 0.3
-                if not conflict_note:
+            # НО не сглаживаем, если есть сильные сигналы или явный консенсус
+            if conflict_ratio > 0.6 or (abs(bullish_count - bearish_count) <= 2 and total_factors >= 15):
+                should_smooth = True
+                
+                # Не сглаживаем если:
+                # 1. Есть >= 2 сильных экстремальных сигнала
+                # 2. Есть явный консенсус факторов (одна сторона в 2 раза больше)
+                if (strong_bullish_signals >= 2 or strong_bearish_signals >= 2 or has_consensus):
+                    should_smooth = False
+                    logger.info(f"Skipping smoothing: strong_bullish={strong_bullish_signals}, strong_bearish={strong_bearish_signals}, has_consensus={has_consensus}")
+                
+                if should_smooth:
+                    adjusted_score = adjusted_score * 0.3
                     conflict_note = f"⚠️ Много противоречий: {neutral_count}/{total_factors} нейтральных факторов"
-                logger.info(f"High conflict ratio: {conflict_ratio:.2f}, score adjusted from {total_score:.2f} to {adjusted_score:.2f}")
+                    logger.info(f"High conflict ratio: {conflict_ratio:.2f}, score adjusted from {total_score:.2f} to {adjusted_score:.2f}")
         
         return adjusted_score, conflict_note
     
