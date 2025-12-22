@@ -652,5 +652,109 @@ class TestAISignalAnalyzer:
             assert f"\\{char}" in escaped_all
 
 
+class TestSOLAndXRPSignals:
+    """Tests for SOL and XRP signal generation."""
+    
+    @pytest.fixture
+    def mock_whale_tracker(self):
+        """Create a mock whale tracker."""
+        tracker = Mock()
+        tracker.get_transactions_by_blockchain = AsyncMock(return_value=[])
+        return tracker
+    
+    @pytest.fixture
+    def analyzer(self, mock_whale_tracker):
+        """Create an analyzer instance."""
+        return AISignalAnalyzer(mock_whale_tracker)
+    
+    def test_sol_in_supported_coins(self, analyzer):
+        """Test that SOL is in supported coins."""
+        assert "SOL" in analyzer.SUPPORTED_SIGNAL_COINS
+        
+    def test_xrp_in_supported_coins(self, analyzer):
+        """Test that XRP is in supported coins."""
+        assert "XRP" in analyzer.SUPPORTED_SIGNAL_COINS
+    
+    def test_sol_signal_generation(self, analyzer):
+        """Test signal generation for SOL."""
+        whale_data = {
+            "transaction_count": 10,
+            "total_volume_usd": 50_000_000,
+            "deposits": 2,
+            "withdrawals": 8,
+            "largest_transaction": 10_000_000,
+            "sentiment": "bullish"
+        }
+        
+        market_data = {
+            "price_usd": 150.0,
+            "change_24h": 5.0,
+            "volume_24h": 2_000_000_000,
+            "market_cap": 50_000_000_000
+        }
+        
+        result = analyzer.calculate_signal("SOL", whale_data, market_data)
+        
+        assert result is not None
+        assert "total_score" in result
+        assert "probability" in result
+        assert result["whale_score"] > 0  # More withdrawals than deposits
+        
+    def test_xrp_signal_generation(self, analyzer):
+        """Test signal generation for XRP."""
+        whale_data = {
+            "transaction_count": 15,
+            "total_volume_usd": 75_000_000,
+            "deposits": 8,
+            "withdrawals": 7,
+            "largest_transaction": 15_000_000,
+            "sentiment": "neutral"
+        }
+        
+        market_data = {
+            "price_usd": 0.60,
+            "change_24h": 2.0,
+            "volume_24h": 1_500_000_000,
+            "market_cap": 30_000_000_000
+        }
+        
+        result = analyzer.calculate_signal("XRP", whale_data, market_data)
+        
+        assert result is not None
+        assert "total_score" in result
+        assert "probability" in result
+        # XRP should work just like other coins
+        
+    def test_sol_mappings(self, analyzer):
+        """Test that SOL has correct mappings."""
+        assert analyzer.blockchain_mapping["SOL"] == "Solana"
+        assert analyzer.coingecko_mapping["SOL"] == "solana"
+        assert analyzer.bybit_mapping["SOL"] == "SOLUSDT"
+        
+    def test_xrp_mappings(self, analyzer):
+        """Test that XRP has correct mappings."""
+        assert analyzer.blockchain_mapping["XRP"] == "XRP"
+        assert analyzer.coingecko_mapping["XRP"] == "ripple"
+        assert analyzer.bybit_mapping["XRP"] == "XRPUSDT"
+        
+    @pytest.mark.asyncio
+    async def test_sol_options_support(self, analyzer):
+        """Test that SOL has options support."""
+        # SOL should be included in options analysis
+        result = await analyzer.get_options_data("SOL")
+        # Result should either be actual data or a neutral fallback
+        assert result is not None
+        assert "score" in result
+        
+    @pytest.mark.asyncio
+    async def test_xrp_no_options_support(self, analyzer):
+        """Test that XRP does not have options support."""
+        # XRP should return neutral data (no options)
+        result = await analyzer.get_options_data("XRP")
+        assert result is not None
+        assert result["score"] == 0
+        assert result["verdict"] == "neutral"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
