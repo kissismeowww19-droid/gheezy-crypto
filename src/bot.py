@@ -1048,6 +1048,140 @@ async def callback_signals(callback: CallbackQuery):
     await callback. answer()
 
 
+async def send_signal_in_parts(message_or_callback, symbol: str, signal_text: str) -> None:
+    """
+    Send signal message in multiple parts to avoid MESSAGE_TOO_LONG error.
+    Telegram has a 4096 character limit per message.
+    
+    Args:
+        message_or_callback: Message or CallbackQuery object
+        symbol: Symbol being analyzed
+        signal_text: Full signal text from analyzer
+    """
+    # Check if message is already short enough
+    if len(signal_text) <= 4000:
+        # Can send in one message
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="💰 Цена", callback_data="price_" + symbol.lower()),
+                InlineKeyboardButton(text="🔄 Обновить", callback_data="signal_" + symbol.lower()),
+            ],
+            [
+                InlineKeyboardButton(text="🔙 Назад", callback_data="menu_signals"),
+                InlineKeyboardButton(text="🏠 Меню", callback_data="menu_back"),
+            ],
+        ])
+        
+        try:
+            if isinstance(message_or_callback, CallbackQuery):
+                await safe_send_message(
+                    message_or_callback.message.edit_text,
+                    signal_text,
+                    reply_markup=keyboard,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            else:
+                await safe_send_message(
+                    message_or_callback.answer,
+                    signal_text,
+                    reply_markup=keyboard,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+        except TelegramBadRequest as e:
+            if "message to edit not found" in str(e):
+                # Fallback: send as new message
+                bot = message_or_callback.bot if isinstance(message_or_callback, CallbackQuery) else message_or_callback.bot
+                chat_id = message_or_callback.message.chat.id if isinstance(message_or_callback, CallbackQuery) else message_or_callback.chat.id
+                await safe_send_message(
+                    bot.send_message,
+                    signal_text,
+                    chat_id=chat_id,
+                    reply_markup=keyboard,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+        return
+    
+    # Message is too long - split into parts
+    # Find natural split points based on section markers
+    parts = []
+    
+    # Try to split at section boundaries
+    sections = signal_text.split("━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    
+    current_part = ""
+    for i, section in enumerate(sections):
+        # Add section divider back except for first section
+        if i > 0:
+            test_part = current_part + "━━━━━━━━━━━━━━━━━━━━━━━━━━━" + section
+        else:
+            test_part = current_part + section
+        
+        # Check if adding this section would exceed limit
+        if len(test_part) > 3900:  # Leave some margin
+            if current_part:
+                parts.append(current_part)
+            current_part = section
+        else:
+            current_part = test_part
+    
+    # Add remaining content
+    if current_part:
+        parts.append(current_part)
+    
+    # Send parts
+    bot = message_or_callback.bot if isinstance(message_or_callback, CallbackQuery) else message_or_callback.bot
+    chat_id = message_or_callback.message.chat.id if isinstance(message_or_callback, CallbackQuery) else message_or_callback.chat.id
+    
+    # First part - replace original message if callback
+    if isinstance(message_or_callback, CallbackQuery) and parts:
+        try:
+            await safe_send_message(
+                message_or_callback.message.edit_text,
+                parts[0],
+                parse_mode=ParseMode.MARKDOWN
+            )
+        except TelegramBadRequest:
+            # Fallback: send as new message
+            await safe_send_message(
+                bot.send_message,
+                parts[0],
+                chat_id=chat_id,
+                parse_mode=ParseMode.MARKDOWN
+            )
+        parts = parts[1:]  # Remove first part
+    
+    # Send remaining parts as separate messages
+    for i, part in enumerate(parts):
+        is_last = (i == len(parts) - 1)
+        
+        # Add keyboard to last message only
+        if is_last:
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="💰 Цена", callback_data="price_" + symbol.lower()),
+                    InlineKeyboardButton(text="🔄 Обновить", callback_data="signal_" + symbol.lower()),
+                ],
+                [
+                    InlineKeyboardButton(text="🔙 Назад", callback_data="menu_signals"),
+                    InlineKeyboardButton(text="🏠 Меню", callback_data="menu_back"),
+                ],
+            ])
+            await safe_send_message(
+                bot.send_message,
+                part,
+                chat_id=chat_id,
+                reply_markup=keyboard,
+                parse_mode=ParseMode.MARKDOWN
+            )
+        else:
+            await safe_send_message(
+                bot.send_message,
+                part,
+                chat_id=chat_id,
+                parse_mode=ParseMode.MARKDOWN
+            )
+
+
 @router.callback_query(lambda c: c. data. startswith("signal_"))
 async def callback_signal_coin(callback: CallbackQuery):
     symbol = callback.data.replace("signal_", ""). upper()
@@ -1066,48 +1200,27 @@ async def callback_signal_coin(callback: CallbackQuery):
             f"Произошла ошибка при анализе {symbol}.\n"
             "Попробуйте позже."
         )
-    
-    # Клавиатура с кнопками
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="💰 Цена", callback_data="price_" + symbol. lower()),
-            InlineKeyboardButton(text="🔄 Обновить", callback_data=callback.data),
-        ],
-        [
-            InlineKeyboardButton(text="🔙 Назад", callback_data="menu_signals"),
-            InlineKeyboardButton(text="🏠 Меню", callback_data="menu_back"),
-        ],
-    ])
-    
-    # Use safe_send_message for fail-soft Markdown handling
-    try:
-        await safe_send_message(
-            callback.message.edit_text,
-            signal_text,
-            reply_markup=keyboard,
-            parse_mode=ParseMode.MARKDOWN
-        )
-    except TelegramBadRequest as e:
-        if "message to edit not found" in str(e):
-            # Message was deleted, send a new one
-            try:
-                await safe_send_message(
-                    callback.bot.send_message,
-                    signal_text,
-                    chat_id=callback.message.chat.id,
-                    reply_markup=keyboard,
-                    parse_mode=ParseMode.MARKDOWN
-                )
-            except Exception as send_error:
-                logger.error(f"Failed to send new message: {send_error}")
-        elif "message is not modified" in str(e):
-            # Message content unchanged, ignore
+        
+        # Send error message
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🔙 Назад", callback_data="menu_signals"),
+                InlineKeyboardButton(text="🏠 Меню", callback_data="menu_back"),
+            ],
+        ])
+        
+        try:
+            await callback.message.edit_text(signal_text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+        except Exception:
             pass
-        else:
-            logger.error(f"TelegramBadRequest error: {e}")
+        return
+    
+    # Send signal (possibly in multiple parts)
+    try:
+        await send_signal_in_parts(callback, symbol, signal_text)
     except Exception as e:
-        logger.error(f"Error in signal callback: {e}")
-        await callback.answer("❌ Ошибка при формировании сигнала", show_alert=True)
+        logger.error(f"Error sending signal: {e}", exc_info=True)
+        await callback.answer("❌ Ошибка при отправке сигнала", show_alert=True)
 
 
 @router.callback_query(lambda c: c.data == "menu_market")
