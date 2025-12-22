@@ -986,6 +986,355 @@ def calculate_fibonacci_levels(high: float, low: float, current_price: float) ->
     )
 
 
+@dataclass
+class RSIDivergence:
+    """
+    RSI Divergence detection.
+    
+    Attributes:
+        type: Type of divergence ('bullish', 'bearish', 'hidden_bullish', 'hidden_bearish', 'none')
+        strength: Strength of divergence (0-100)
+        explanation: Human-readable explanation
+    """
+    type: str
+    strength: float
+    explanation: str
+
+
+@dataclass
+class ADX:
+    """
+    Average Directional Index (ADX).
+    
+    Attributes:
+        value: ADX value (0-100)
+        plus_di: +DI value
+        minus_di: -DI value
+        trend_strength: Strength of trend ('weak', 'medium', 'strong', 'very_strong')
+        direction: Trend direction ('bullish', 'bearish', 'neutral')
+    """
+    value: float
+    plus_di: float
+    minus_di: float
+    trend_strength: str
+    direction: str
+
+
+@dataclass
+class SqueezeMomentum:
+    """
+    Squeeze Momentum Indicator.
+    
+    Attributes:
+        is_squeezed: Whether Bollinger Bands are inside Keltner Channels
+        momentum: Momentum value
+        signal: Trading signal ('bullish', 'bearish', 'neutral')
+    """
+    is_squeezed: bool
+    momentum: float
+    signal: str
+
+
+@dataclass
+class Supertrend:
+    """
+    Supertrend Indicator.
+    
+    Attributes:
+        value: Supertrend line value
+        direction: Trend direction ('long', 'short')
+        is_reversal: Whether there was a reversal
+    """
+    value: float
+    direction: str
+    is_reversal: bool
+
+
+def calculate_rsi_divergence(
+    prices: List[float],
+    rsi_values: List[float],
+    lookback: int = 14
+) -> Optional[RSIDivergence]:
+    """
+    Calculate RSI Divergence (bullish/bearish/hidden).
+    
+    Args:
+        prices: List of closing prices
+        rsi_values: List of RSI values
+        lookback: Lookback period for detecting divergence
+        
+    Returns:
+        RSIDivergence or None if insufficient data
+    """
+    if len(prices) < lookback + 5 or len(prices) != len(rsi_values):
+        return None
+    
+    prices_array = np.array(prices[-lookback:])
+    rsi_array = np.array(rsi_values[-lookback:])
+    
+    # Find local highs and lows
+    price_highs = []
+    price_lows = []
+    rsi_highs = []
+    rsi_lows = []
+    
+    for i in range(2, len(prices_array) - 2):
+        # Local high
+        if prices_array[i] > prices_array[i-1] and prices_array[i] > prices_array[i+1]:
+            if prices_array[i] > prices_array[i-2] and prices_array[i] > prices_array[i+2]:
+                price_highs.append((i, prices_array[i]))
+                rsi_highs.append((i, rsi_array[i]))
+        
+        # Local low
+        if prices_array[i] < prices_array[i-1] and prices_array[i] < prices_array[i+1]:
+            if prices_array[i] < prices_array[i-2] and prices_array[i] < prices_array[i+2]:
+                price_lows.append((i, prices_array[i]))
+                rsi_lows.append((i, rsi_array[i]))
+    
+    divergence_type = "none"
+    strength = 0.0
+    explanation = "No divergence detected"
+    
+    # Bullish divergence: price makes lower low, RSI makes higher low
+    if len(price_lows) >= 2 and len(rsi_lows) >= 2:
+        last_price_low = price_lows[-1][1]
+        prev_price_low = price_lows[-2][1]
+        last_rsi_low = rsi_lows[-1][1]
+        prev_rsi_low = rsi_lows[-2][1]
+        
+        if last_price_low < prev_price_low and last_rsi_low > prev_rsi_low:
+            divergence_type = "bullish"
+            strength = min(100, abs(last_rsi_low - prev_rsi_low) * 3)
+            explanation = "🟢 Bullish Divergence: Price making lower lows but RSI making higher lows. Potential reversal up."
+    
+    # Bearish divergence: price makes higher high, RSI makes lower high
+    if len(price_highs) >= 2 and len(rsi_highs) >= 2:
+        last_price_high = price_highs[-1][1]
+        prev_price_high = price_highs[-2][1]
+        last_rsi_high = rsi_highs[-1][1]
+        prev_rsi_high = rsi_highs[-2][1]
+        
+        if last_price_high > prev_price_high and last_rsi_high < prev_rsi_high:
+            divergence_type = "bearish"
+            strength = min(100, abs(last_rsi_high - prev_rsi_high) * 3)
+            explanation = "🔴 Bearish Divergence: Price making higher highs but RSI making lower highs. Potential reversal down."
+    
+    return RSIDivergence(type=divergence_type, strength=strength, explanation=explanation)
+
+
+def calculate_adx(
+    high: List[float],
+    low: List[float],
+    close: List[float],
+    period: int = 14
+) -> Optional[ADX]:
+    """
+    Calculate Average Directional Index (ADX).
+    
+    Args:
+        high: List of high prices
+        low: List of low prices
+        close: List of closing prices
+        period: Period for calculation
+        
+    Returns:
+        ADX or None if insufficient data
+    """
+    if len(high) < period + 1 or len(high) != len(low) or len(high) != len(close):
+        return None
+    
+    high_array = np.array(high)
+    low_array = np.array(low)
+    close_array = np.array(close)
+    
+    # Calculate True Range and Directional Movement
+    tr = []
+    plus_dm = []
+    minus_dm = []
+    
+    for i in range(1, len(high_array)):
+        h_l = high_array[i] - low_array[i]
+        h_c = abs(high_array[i] - close_array[i-1])
+        l_c = abs(low_array[i] - close_array[i-1])
+        tr.append(max(h_l, h_c, l_c))
+        
+        up_move = high_array[i] - high_array[i-1]
+        down_move = low_array[i-1] - low_array[i]
+        
+        if up_move > down_move and up_move > 0:
+            plus_dm.append(up_move)
+        else:
+            plus_dm.append(0)
+        
+        if down_move > up_move and down_move > 0:
+            minus_dm.append(down_move)
+        else:
+            minus_dm.append(0)
+    
+    if len(tr) < period:
+        return None
+    
+    # Smooth the values
+    tr_smooth = float(np.mean(tr[-period:]))
+    plus_dm_smooth = float(np.mean(plus_dm[-period:]))
+    minus_dm_smooth = float(np.mean(minus_dm[-period:]))
+    
+    # Calculate DI
+    plus_di = (plus_dm_smooth / tr_smooth) * 100 if tr_smooth > 0 else 0
+    minus_di = (minus_dm_smooth / tr_smooth) * 100 if tr_smooth > 0 else 0
+    
+    # Calculate DX and ADX
+    di_sum = plus_di + minus_di
+    dx = abs(plus_di - minus_di) / di_sum * 100 if di_sum > 0 else 0
+    
+    # For simplicity, use DX as ADX (proper ADX needs smoothing over period)
+    adx_value = float(dx)
+    
+    # Determine trend strength
+    if adx_value < 20:
+        trend_strength = "weak"
+    elif adx_value < 40:
+        trend_strength = "medium"
+    elif adx_value < 60:
+        trend_strength = "strong"
+    else:
+        trend_strength = "very_strong"
+    
+    # Determine direction
+    if plus_di > minus_di:
+        direction = "bullish"
+    elif minus_di > plus_di:
+        direction = "bearish"
+    else:
+        direction = "neutral"
+    
+    return ADX(
+        value=adx_value,
+        plus_di=plus_di,
+        minus_di=minus_di,
+        trend_strength=trend_strength,
+        direction=direction
+    )
+
+
+def calculate_squeeze_momentum(
+    high: List[float],
+    low: List[float],
+    close: List[float],
+    period: int = 20
+) -> Optional[SqueezeMomentum]:
+    """
+    Calculate Squeeze Momentum Indicator.
+    
+    The squeeze occurs when Bollinger Bands move inside Keltner Channels,
+    indicating low volatility that often precedes a breakout.
+    
+    Args:
+        high: List of high prices
+        low: List of low prices
+        close: List of closing prices
+        period: Period for calculation
+        
+    Returns:
+        SqueezeMomentum or None if insufficient data
+    """
+    if len(high) < period + 10 or len(high) != len(low) or len(high) != len(close):
+        return None
+    
+    # Calculate Bollinger Bands
+    bb = calculate_bollinger_bands(close, period)
+    if not bb:
+        return None
+    
+    # Calculate Keltner Channels
+    kc = calculate_keltner_channels(high, low, close, period)
+    if not kc:
+        return None
+    
+    # Check if squeeze is on
+    is_squeezed = bb.lower > kc.lower and bb.upper < kc.upper
+    
+    # Calculate momentum (simplified: linear regression of close prices)
+    close_array = np.array(close[-period:])
+    x = np.arange(len(close_array))
+    coeffs = np.polyfit(x, close_array, 1)
+    momentum = float(coeffs[0])  # Slope of the line
+    
+    # Determine signal
+    if is_squeezed:
+        signal = "neutral"  # Waiting for breakout
+    elif momentum > 0:
+        signal = "bullish"
+    elif momentum < 0:
+        signal = "bearish"
+    else:
+        signal = "neutral"
+    
+    return SqueezeMomentum(is_squeezed=is_squeezed, momentum=momentum, signal=signal)
+
+
+def calculate_supertrend(
+    high: List[float],
+    low: List[float],
+    close: List[float],
+    period: int = 10,
+    multiplier: float = 3.0
+) -> Optional[Supertrend]:
+    """
+    Calculate Supertrend Indicator.
+    
+    Supertrend is a trend-following indicator based on ATR.
+    
+    Args:
+        high: List of high prices
+        low: List of low prices
+        close: List of closing prices
+        period: ATR period
+        multiplier: ATR multiplier
+        
+    Returns:
+        Supertrend or None if insufficient data
+    """
+    if len(high) < period + 10 or len(high) != len(low) or len(high) != len(close):
+        return None
+    
+    # Calculate ATR
+    atr = calculate_atr(high, low, close, period)
+    if not atr:
+        return None
+    
+    # Calculate basic upper and lower bands
+    hl_avg = [(h + l) / 2 for h, l in zip(high, low)]
+    
+    basic_upper = hl_avg[-1] + (multiplier * atr.value)
+    basic_lower = hl_avg[-1] - (multiplier * atr.value)
+    
+    current_close = close[-1]
+    prev_close = close[-2] if len(close) > 1 else current_close
+    
+    # Determine direction
+    if current_close > basic_upper:
+        direction = "long"
+        supertrend_value = basic_lower
+    elif current_close < basic_lower:
+        direction = "short"
+        supertrend_value = basic_upper
+    else:
+        # Use previous direction or default to short
+        if prev_close > basic_upper:
+            direction = "long"
+            supertrend_value = basic_lower
+        else:
+            direction = "short"
+            supertrend_value = basic_upper
+    
+    # Check for reversal
+    prev_direction = "short" if prev_close < hl_avg[-2] - (multiplier * atr.value) else "long"
+    is_reversal = direction != prev_direction
+    
+    return Supertrend(value=supertrend_value, direction=direction, is_reversal=is_reversal)
+
+
 def calculate_all_indicators(
     prices: List[float],
 ) -> Tuple[Optional[RSI], Optional[MACD], Optional[BollingerBands]]:
