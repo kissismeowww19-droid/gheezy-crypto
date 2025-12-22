@@ -48,6 +48,9 @@ class DataSourceManager:
     BYBIT_MAPPING = {
         "BTC": "BTCUSDT",
         "ETH": "ETHUSDT",
+        "TON": "TONUSDT",
+        "SOL": "SOLUSDT",
+        "XRP": "XRPUSDT",
     }
     
     # Threshold for "large" trade in USD

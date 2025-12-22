@@ -18,7 +18,8 @@ from signals.indicators import (
     calculate_ma_crossover, calculate_stochastic_rsi, calculate_mfi,
     calculate_roc, calculate_williams_r, calculate_atr, calculate_keltner_channels,
     calculate_obv, calculate_vwap, calculate_volume_sma,
-    calculate_pivot_points, calculate_fibonacci_levels
+    calculate_pivot_points, calculate_fibonacci_levels,
+    calculate_rsi_divergence, calculate_adx, detect_volume_spike
 )
 from signals.data_sources import DataSourceManager
 from signals.multi_timeframe import MultiTimeframeAnalyzer
@@ -149,7 +150,7 @@ class AISignalAnalyzer:
     SIDEWAYS_RANGE_PERCENT = 1.0  # Диапазон для боковика (+/-1.0%)
     
     # Supported coins for AI signals
-    SUPPORTED_SIGNAL_COINS = {"BTC", "ETH", "TON"}
+    SUPPORTED_SIGNAL_COINS = {"BTC", "ETH", "TON", "SOL", "XRP"}
     
     # Correlation signals TTL (10 minutes)
     CORRELATION_SIGNAL_TTL = 600  # 10 минут - время жизни сигналов для корреляции
@@ -1152,8 +1153,8 @@ class AISignalAnalyzer:
             return {'score': 0, 'verdict': 'neutral'}
     
     async def get_options_data(self, symbol: str) -> Dict:
-        """Получить опционные данные (только BTC/ETH)"""
-        if not self.options_analyzer or symbol.upper() not in ['BTC', 'ETH']:
+        """Получить опционные данные (только BTC/ETH/SOL)"""
+        if not self.options_analyzer or symbol.upper() not in ['BTC', 'ETH', 'SOL']:
             return {'score': 0, 'verdict': 'neutral'}
         try:
             return await self.options_analyzer.analyze(symbol)
