@@ -131,6 +131,8 @@ class AISignalAnalyzer:
     CONFLICT_SCORE_BOOST = 15  # Score boost when strong signals override weak ones
     CONFLICT_HIGH_NEUTRAL_THRESHOLD = 0.6  # Threshold for high neutral factor ratio
     CONFLICT_MIN_FACTORS_FOR_BALANCE = 15  # Minimum factors needed to check balance
+    RSI_EXTREME_OVERRIDE_FACTOR = 0.3  # Factor for RSI extreme override (more aggressive than normal conflicts)
+    RSI_EXTREME_OVERRIDE_BOOST = 20  # Score boost for RSI extreme override
     
     # Signal direction thresholds
     WEAK_SIGNAL_THRESHOLD = 5  # Порог слабого сигнала (боковик)
@@ -3169,14 +3171,14 @@ class AISignalAnalyzer:
             if rsi < 20:  # Экстремальная перепроданность
                 if total_score < 0:
                     # Переопределяем на ЛОНГ
-                    adjusted_score = abs(total_score) * 0.3 + 20
+                    adjusted_score = abs(total_score) * self.RSI_EXTREME_OVERRIDE_FACTOR + self.RSI_EXTREME_OVERRIDE_BOOST
                     conflict_note = f"⚠️ RSI Override: RSI={rsi:.1f} экстремально перепродан, переопределяем на ЛОНГ"
                     logger.warning(f"RSI extreme override: RSI={rsi:.1f} < 20, score {total_score:.2f} → {adjusted_score:.2f}")
                     return adjusted_score, conflict_note
             
             elif rsi > 80:  # Экстремальная перекупленность
                 if total_score > 0:
-                    adjusted_score = -abs(total_score) * 0.3 - 20
+                    adjusted_score = -abs(total_score) * self.RSI_EXTREME_OVERRIDE_FACTOR - self.RSI_EXTREME_OVERRIDE_BOOST
                     conflict_note = f"⚠️ RSI Override: RSI={rsi:.1f} экстремально перекуплен, переопределяем на ШОРТ"
                     logger.warning(f"RSI extreme override: RSI={rsi:.1f} > 80, score {total_score:.2f} → {adjusted_score:.2f}")
                     return adjusted_score, conflict_note

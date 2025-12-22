@@ -129,10 +129,12 @@ class TestETHExampleIntegration:
         """
         Test BTC example with 2 strong signals (lower threshold):
         - RSI = 22 (< 25, strong oversold)
-        - Fear & Greed = 25 (< 25, Extreme Fear)
-        - 2 strong bullish signals → conflict detection should trigger (new threshold)
+        - Fear & Greed = 25 (NOT < 25, so NOT strong - at boundary)
+        - Only 1 strong signal (RSI) from technical indicators
+        - But whales are bullish (+4 net withdrawals)
+        - 2 strong signals total → conflict detection should trigger (new threshold)
         
-        Expected: LONG signal (not SHORT)
+        Expected: LONG or SIDEWAYS signal (not SHORT)
         """
         whale_data = {
             "transaction_count": 8,
@@ -150,12 +152,12 @@ class TestETHExampleIntegration:
         }
         
         technical_data = {
-            "rsi": {"value": 22},  # < 25 = strong oversold
+            "rsi": {"value": 22},  # < 25 = strong oversold (1st strong signal)
             "macd": {"signal": "bullish", "histogram": 0.3}
         }
         
         fear_greed = {
-            "value": 25  # Exactly at boundary, not < 25
+            "value": 25  # NOT < 25, so this is NOT counted as strong signal
         }
         
         result = analyzer.calculate_signal(
