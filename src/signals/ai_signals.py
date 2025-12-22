@@ -4641,6 +4641,113 @@ class AISignalAnalyzer:
         # Calculate signal strength using the new method
         strength_percent = self.calculate_signal_strength(total_score)
         
+        # ====== NEW: WEIGHTED FACTOR SYSTEM (10 factors, 100% total) ======
+        # Calculate 10 factor scores for new weighted system
+        factor_scores = {}
+        
+        # 1. Whales (25%) - consolidate whale_score and exchange flows
+        factor_scores['whales'] = whale_score  # Already -10 to +10
+        
+        # 2. Derivatives (20%) - consolidate all derivatives factors
+        factor_scores['derivatives'] = derivatives_score  # Already -10 to +10
+        
+        # 3. Trend (15%) - technical trend indicators
+        factor_scores['trend'] = trend_score  # Already -10 to +10
+        
+        # 4. Momentum (12%) - RSI, MACD, momentum
+        factor_scores['momentum'] = momentum_score  # Already -10 to +10
+        
+        # 5. Volume (10%) - volume analysis
+        factor_scores['volume'] = volume_score  # Already -10 to +10
+        
+        # 6. ADX (5%) - trend strength from technical_data
+        adx_factor_score = 0.0
+        if technical_data and "adx" in technical_data:
+            adx_value = technical_data["adx"]["value"]
+            adx_direction = technical_data["adx"].get("direction", "neutral")
+            if adx_value > 40:
+                adx_factor_score = 7.0 if adx_direction == "bullish" else -7.0
+            elif adx_value > 25:
+                adx_factor_score = 4.0 if adx_direction == "bullish" else -4.0
+            elif adx_value < 20:
+                adx_factor_score = -3.0  # Weak trend is negative
+        factor_scores['adx'] = adx_factor_score
+        
+        # 7. Divergence (5%) - RSI divergence from technical_data
+        divergence_factor_score = 0.0
+        if technical_data and "rsi_divergence" in technical_data:
+            div_type = technical_data["rsi_divergence"]["type"]
+            if div_type == "bullish":
+                divergence_factor_score = 10.0
+            elif div_type == "bearish":
+                divergence_factor_score = -10.0
+        factor_scores['divergence'] = divergence_factor_score
+        
+        # 8. Sentiment (4%) - Fear & Greed
+        sentiment_factor_score = 0.0
+        if fear_greed:
+            fg_value = fear_greed.get("value", 50)
+            if fg_value < 25:
+                sentiment_factor_score = 10.0  # Extreme fear = contrarian buy
+            elif fg_value > 75:
+                sentiment_factor_score = -10.0  # Extreme greed = contrarian sell
+            elif fg_value < 40:
+                sentiment_factor_score = 5.0  # Fear
+            elif fg_value > 60:
+                sentiment_factor_score = -5.0  # Greed
+        factor_scores['sentiment'] = sentiment_factor_score
+        
+        # 9. Macro (3%) - from macro_data (Phase 3)
+        macro_factor_score = 0.0
+        if macro_data and macro_data.get('score', 0) != 0:
+            macro_factor_score = max(-10, min(10, macro_data['score'] / 1.5))  # Normalize to -10/+10
+        factor_scores['macro'] = macro_factor_score
+        
+        # 10. Options (1%) - from options_data (Phase 3)
+        options_factor_score = 0.0
+        if options_data and options_data.get('score', 0) != 0:
+            options_factor_score = max(-10, min(10, options_data['score']))  # Already -10/+10
+        factor_scores['options'] = options_factor_score
+        
+        # Calculate weighted score using new system
+        new_weighted_score = self.calculate_weighted_score(factor_scores)
+        
+        # ====== NEW: REAL S/R LEVELS ======
+        sr_levels = {}
+        if ohlcv_data and len(ohlcv_data) > 0:
+            current_price = market_data.get("price_usd", 0)
+            sr_levels = self.calculate_real_sr_levels(ohlcv_data, current_price)
+        else:
+            # Fallback if no OHLCV data
+            current_price = market_data.get("price_usd", 0)
+            sr_levels = {
+                'resistances': [],
+                'supports': [],
+                'nearest_resistance': current_price * 1.02 if current_price > 0 else 0,
+                'nearest_support': current_price * 0.98 if current_price > 0 else 0,
+            }
+        
+        # ====== NEW: 4-HOUR PRICE PREDICTION ======
+        price_prediction = {}
+        if ohlcv_data and len(ohlcv_data) > 0:
+            # Get ATR from technical_data
+            atr_value = 0.0
+            if technical_data and "atr" in technical_data:
+                atr_value = technical_data["atr"]["value"]
+            else:
+                # Fallback: estimate ATR as 1.5% of price
+                current_price = market_data.get("price_usd", 0)
+                atr_value = current_price * 0.015 if current_price > 0 else 0
+            
+            current_price = market_data.get("price_usd", 0)
+            if current_price > 0 and atr_value > 0:
+                price_prediction = self.predict_price_4h(
+                    current_price=current_price,
+                    weighted_score=new_weighted_score,
+                    sr_levels=sr_levels,
+                    atr=atr_value
+                )
+        
         return {
             "symbol": symbol,
             "direction": direction,
@@ -4698,6 +4805,13 @@ class AISignalAnalyzer:
             "options": options_data if options_data else {'score': 0, 'verdict': 'neutral'},
             # Social sentiment (Phase 3.3)
             "sentiment": sentiment_data if sentiment_data else {'score': 0, 'verdict': 'neutral'},
+            # NEW: Weighted factor system results
+            "factor_scores": factor_scores,  # Individual factor scores (-10 to +10)
+            "weighted_score": round(new_weighted_score, 2),  # Final weighted score (-10 to +10)
+            # NEW: Real S/R levels
+            "sr_levels": sr_levels,
+            # NEW: 4-hour price prediction
+            "price_prediction": price_prediction,
         }
     
     @staticmethod
