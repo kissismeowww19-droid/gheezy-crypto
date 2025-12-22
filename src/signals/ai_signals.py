@@ -462,25 +462,25 @@ class AISignalAnalyzer:
                             return prices
                     elif response.status == 429:
                         logger.warning(f"CoinGecko rate limit reached for {symbol}, trying Bybit fallback...")
-                        # Use Bybit as fallback
-                        bybit_prices = await self.get_price_history_bybit(symbol, interval="60", limit=min(days * 24, 300))
+                        # Use Bybit as fallback with 200 candles for better technical indicator calculation
+                        bybit_prices = await self.get_price_history_bybit(symbol, interval="60", limit=200)
                         if bybit_prices:
                             self._set_cache(cache_key, bybit_prices)
                             return bybit_prices
                         return None
                     else:
                         logger.warning(f"Failed to fetch price history for {symbol}: {response.status}")
-                        # Try Bybit as fallback for any error
-                        bybit_prices = await self.get_price_history_bybit(symbol, interval="60", limit=min(days * 24, 300))
+                        # Try Bybit as fallback for any error with 200 candles
+                        bybit_prices = await self.get_price_history_bybit(symbol, interval="60", limit=200)
                         if bybit_prices:
                             self._set_cache(cache_key, bybit_prices)
                             return bybit_prices
                         return None
         except Exception as e:
             logger.error(f"Error getting price history for {symbol}: {e}")
-            # Try Bybit as last resort fallback
+            # Try Bybit as last resort fallback with 200 candles
             try:
-                bybit_prices = await self.get_price_history_bybit(symbol, interval="60", limit=min(days * 24, 300))
+                bybit_prices = await self.get_price_history_bybit(symbol, interval="60", limit=200)
                 if bybit_prices:
                     self._set_cache(cache_key, bybit_prices)
                     return bybit_prices
@@ -2106,6 +2106,10 @@ class AISignalAnalyzer:
         """
         Calculate whale score (-10 to +10).
         
+        Logic:
+        - Withdrawals from exchanges > Deposits to exchanges = POSITIVE score (bullish)
+        - Deposits to exchanges > Withdrawals from exchanges = NEGATIVE score (bearish)
+        
         Args:
             whale_data: Whale transaction data
             exchange_flows: Exchange flow data
@@ -2116,12 +2120,17 @@ class AISignalAnalyzer:
         score = 0.0
         
         # Whale transactions score (max ±6)
+        # Positive when withdrawals > deposits (whales accumulating off-exchange = bullish)
+        # Negative when deposits > withdrawals (whales sending to exchanges = bearish)
         total_txs = whale_data["withdrawals"] + whale_data["deposits"]
         if total_txs > 0:
             ratio = (whale_data["withdrawals"] - whale_data["deposits"]) / total_txs
             score += ratio * 6
         
         # Exchange flows score (max ±4)
+        # net_flow_usd = outflow_volume - inflow_volume
+        # Positive net_flow (outflows > inflows) = bullish
+        # Negative net_flow (inflows > outflows) = bearish
         if exchange_flows:
             net_flow = exchange_flows.get("net_flow_usd", 0)
             total_flow = exchange_flows.get("inflow_volume_usd", 0) + exchange_flows.get("outflow_volume_usd", 0)
@@ -3566,13 +3575,18 @@ class AISignalAnalyzer:
             logger.info(f"BTC in sideways (score={btc_total_score:.2f}), no correlation applied to {symbol}")
             return direction, probability, total_score, False
         
+        # Не применяем корреляцию при недостатке данных (менее 15 источников из 30)
+        if data_sources_count < 15:
+            logger.warning(f"Skipping cross-asset correlation for {symbol}: insufficient data sources ({data_sources_count}/30)")
+            return direction, probability, total_score, False
+        
         # ====== ОПРЕДЕЛЯЕМ СИЛУ КОРРЕЛЯЦИИ ======
         if symbol == "ETH":
-            correlation = 0.70  # 70% влияние BTC на ETH (усиленная корреляция)
+            correlation = 0.30  # 30% влияние BTC на ETH (уменьшено с 0.70 для меньшей агрессивности)
         elif symbol == "TON":
-            correlation = 0.30  # 30% влияние BTC на TON (средняя корреляция)
+            correlation = 0.20  # 20% влияние BTC на TON (уменьшено с 0.30 для меньшей агрессивности)
         else:
-            correlation = 0.20  # Для других монет
+            correlation = 0.15  # Для других монет
         
         # ====== КОРРЕКТИРОВКА TOTAL_SCORE ======
         # Добавляем влияние BTC к собственному score монеты
@@ -4160,6 +4174,29 @@ class AISignalAnalyzer:
         
         # Final score limit (after all adjustments including Phase 3 and correlation)
         total_score = max(min(total_score, 100), -100)
+        
+        # ====== CONSENSUS PROTECTION ======
+        # If consensus is strongly bullish but signal is short, adjust score to be less bearish
+        # If consensus is strongly bearish but signal is long, adjust score to be less bullish
+        bullish_count = consensus_data["bullish_count"]
+        bearish_count = consensus_data["bearish_count"]
+        
+        if bullish_count > bearish_count * 2 and total_score < 0:
+            # Strong bullish consensus but bearish signal
+            logger.warning(f"Consensus override: {symbol} has bullish consensus ({bullish_count} vs {bearish_count}) but bearish signal (score: {total_score:.2f}), reducing bearish strength")
+            # Reduce bearish score by 70% to make it neutral or weakly bearish
+            total_score = total_score * 0.3
+            logger.info(f"Adjusted score after consensus protection: {total_score:.2f}")
+            # Recalculate direction based on adjusted score
+            raw_direction = self._determine_direction_from_score(total_score)
+        elif bearish_count > bullish_count * 2 and total_score > 0:
+            # Strong bearish consensus but bullish signal
+            logger.warning(f"Consensus override: {symbol} has bearish consensus ({bearish_count} vs {bullish_count}) but bullish signal (score: {total_score:.2f}), reducing bullish strength")
+            # Reduce bullish score by 70% to make it neutral or weakly bullish
+            total_score = total_score * 0.3
+            logger.info(f"Adjusted score after consensus protection: {total_score:.2f}")
+            # Recalculate direction based on adjusted score
+            raw_direction = self._determine_direction_from_score(total_score)
         
         # ====== ФИНАЛЬНОЕ НАПРАВЛЕНИЕ И ТЕКСТ ======
         # Направление определяется ТОЛЬКО по score (уже учтена корреляция)
