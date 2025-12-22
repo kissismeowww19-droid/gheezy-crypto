@@ -162,6 +162,71 @@ class TestSignalConflictDetection:
         print(f"  Adjusted Score: {adjusted_score}")
         print(f"  Note: {note}")
     
+    def test_detect_signal_conflicts_two_signals_override(self, analyzer):
+        """Test conflict detection with exactly 2 strong bullish signals (new threshold)."""
+        adjusted_score, note = analyzer._detect_signal_conflicts(
+            rsi=22.0,  # Strong oversold (< 25)
+            fear_greed=24,  # Extreme fear (< 25) 
+            trades_flow_ratio=1.5,  # NOT strong (< 10)
+            macd_signal="neutral",  # NOT strong
+            total_score=-35.0,  # Contradictory negative score
+            bullish_count=3,
+            bearish_count=11,
+            neutral_count=8
+        )
+        
+        # With 2 strong signals (RSI + FG), should override to positive
+        assert adjusted_score > 0, f"Expected positive adjusted score with 2 signals but got {adjusted_score}"
+        assert "конфликт" in note.lower() or "conflict" in note.lower()
+        print(f"\nConflict Detection Test (2 Signals Override - New Threshold):")
+        print(f"  Original Score: -35.0")
+        print(f"  Adjusted Score: {adjusted_score}")
+        print(f"  Note: {note}")
+    
+    def test_rsi_extreme_override_under_20(self, analyzer):
+        """Test RSI < 20 extreme override (highest priority)."""
+        adjusted_score, note = analyzer._detect_signal_conflicts(
+            rsi=19.0,  # EXTREME oversold (< 20) - should override everything
+            fear_greed=50,  # Neutral
+            trades_flow_ratio=0.5,  # Bearish
+            macd_signal="bearish",  # Bearish
+            total_score=-65.0,  # Strong bearish score
+            bullish_count=2,
+            bearish_count=18,
+            neutral_count=2
+        )
+        
+        # RSI < 20 should ALWAYS override to positive, regardless of other factors
+        assert adjusted_score > 0, f"Expected positive score with RSI=19 but got {adjusted_score}"
+        assert "RSI" in note and "Override" in note
+        print(f"\nRSI Extreme Override Test (RSI < 20):")
+        print(f"  RSI: 19.0")
+        print(f"  Original Score: -65.0")
+        print(f"  Adjusted Score: {adjusted_score}")
+        print(f"  Note: {note}")
+    
+    def test_rsi_extreme_override_over_80(self, analyzer):
+        """Test RSI > 80 extreme override (highest priority)."""
+        adjusted_score, note = analyzer._detect_signal_conflicts(
+            rsi=82.0,  # EXTREME overbought (> 80) - should override everything
+            fear_greed=50,  # Neutral
+            trades_flow_ratio=2.0,  # Bullish
+            macd_signal="bullish",  # Bullish
+            total_score=70.0,  # Strong bullish score
+            bullish_count=18,
+            bearish_count=2,
+            neutral_count=2
+        )
+        
+        # RSI > 80 should ALWAYS override to negative, regardless of other factors
+        assert adjusted_score < 0, f"Expected negative score with RSI=82 but got {adjusted_score}"
+        assert "RSI" in note and "Override" in note
+        print(f"\nRSI Extreme Override Test (RSI > 80):")
+        print(f"  RSI: 82.0")
+        print(f"  Original Score: 70.0")
+        print(f"  Adjusted Score: {adjusted_score}")
+        print(f"  Note: {note}")
+    
     def test_detect_signal_conflicts_bearish_override(self, analyzer):
         """Test conflict detection with strong bearish signals overriding positive score."""
         adjusted_score, note = analyzer._detect_signal_conflicts(
