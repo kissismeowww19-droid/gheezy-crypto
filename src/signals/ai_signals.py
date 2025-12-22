@@ -5099,6 +5099,146 @@ class AISignalAnalyzer:
             
             text += "\n"
         
+        # ===== NEW: ВЗВЕШЕННЫЙ АНАЛИЗ (ТОП-10 ФАКТОРОВ) =====
+        # Get factor scores and weighted score from signal_data
+        factor_scores = signal_data.get('factor_scores', {})
+        weighted_score = signal_data.get('weighted_score', 0)
+        
+        if factor_scores:
+            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            text += "📊 *ВЗВЕШЕННЫЙ АНАЛИЗ \\(ТОП\\-10 ФАКТОРОВ\\)*\n"
+            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            
+            # Helper function for verdict emoji
+            def verdict_emoji(score):
+                if score > 5:
+                    return "🟢"
+                elif score < -5:
+                    return "🔴"
+                else:
+                    return "🟡"
+            
+            # Helper function for verdict text
+            def verdict_text(score):
+                if score > 7:
+                    return "СИЛЬНО БЫЧИЙ"
+                elif score > 3:
+                    return "БЫЧИЙ"
+                elif score < -7:
+                    return "СИЛЬНО МЕДВЕЖИЙ"
+                elif score < -3:
+                    return "МЕДВЕЖИЙ"
+                else:
+                    return "НЕЙТРАЛЬНЫЙ"
+            
+            # 1. КИТЫ (25% веса)
+            whale_score = factor_scores.get('whales', 0)
+            text += f"🐋 *КИТЫ \\(25% веса\\)*\n"
+            text += f"• Score: {whale_score:+.1f}/10\n"
+            if whale_data:
+                tx_count = whale_data.get('transaction_count', 0)
+                total_vol = whale_data.get('total_volume_usd', 0)
+                deposits = whale_data.get('deposits', 0)
+                withdrawals = whale_data.get('withdrawals', 0)
+                text += f"• Транзакций: {tx_count} \\(${total_vol/1_000_000:.1f}M\\)\n"
+                text += f"• На биржи: {deposits} tx \\| С бирж: {withdrawals} tx\n"
+            text += f"• Вердикт: {verdict_emoji(whale_score)} {verdict_text(whale_score)}\n\n"
+            
+            # 2. ДЕРИВАТИВЫ (20% веса)
+            derivatives_score_val = factor_scores.get('derivatives', 0)
+            text += f"📊 *ДЕРИВАТИВЫ \\(20% веса\\)*\n"
+            text += f"• Score: {derivatives_score_val:+.1f}/10\n"
+            if funding_rate:
+                rate = funding_rate.get('rate_percent', 0)
+                text += f"• Funding: {rate:.4f}%\n"
+            if deep_derivatives_data and deep_derivatives_data.get('ls_ratio_by_exchange'):
+                ls_ratio = deep_derivatives_data['ls_ratio_by_exchange'].get('average_ratio', 1.0)
+                text += f"• L/S Ratio: {ls_ratio:.2f}\n"
+            text += f"• Вердикт: {verdict_emoji(derivatives_score_val)} {verdict_text(derivatives_score_val)}\n\n"
+            
+            # 3. ТРЕНД (15% веса)
+            trend_score_val = factor_scores.get('trend', 0)
+            text += f"📈 *ТРЕНД \\(15% веса\\)*\n"
+            text += f"• Score: {trend_score_val:+.1f}/10\n"
+            if technical_data:
+                if "macd" in technical_data:
+                    macd_signal = technical_data["macd"].get("signal", "neutral")
+                    macd_emoji = "✅" if macd_signal == "bullish" else "❌" if macd_signal == "bearish" else "➖"
+                    text += f"• MACD: {macd_signal} {macd_emoji}\n"
+            text += f"• Вердикт: {verdict_emoji(trend_score_val)} {verdict_text(trend_score_val)}\n\n"
+            
+            # 4. ИМПУЛЬС (12% веса)
+            momentum_score_val = factor_scores.get('momentum', 0)
+            text += f"⚡ *ИМПУЛЬС \\(12% веса\\)*\n"
+            text += f"• Score: {momentum_score_val:+.1f}/10\n"
+            if technical_data and "rsi" in technical_data:
+                rsi_val = technical_data["rsi"]["value"]
+                rsi_status = "перепродан" if rsi_val < 30 else "перекуплен" if rsi_val > 70 else "нейтральный"
+                text += f"• RSI\\(14\\): {rsi_val:.0f} \\({rsi_status}\\)\n"
+            text += f"• Вердикт: {verdict_emoji(momentum_score_val)} {verdict_text(momentum_score_val)}\n\n"
+            
+            # 5. ОБЪЁМ (10% веса)
+            volume_score_val = factor_scores.get('volume', 0)
+            text += f"📊 *ОБЪЁМ \\(10% веса\\)*\n"
+            text += f"• Score: {volume_score_val:+.1f}/10\n"
+            vol_24h = market_data.get('volume_24h', 0)
+            text += f"• Volume 24h: ${vol_24h/1_000_000_000:.1f}B\n"
+            text += f"• Вердикт: {verdict_emoji(volume_score_val)} {verdict_text(volume_score_val)}\n\n"
+            
+            # 6. СИЛА ТРЕНДА / ADX (5% веса)
+            adx_score_val = factor_scores.get('adx', 0)
+            text += f"💪 *СИЛА ТРЕНДА \\(5% веса\\)*\n"
+            text += f"• Score: {adx_score_val:+.1f}/10\n"
+            if technical_data and "adx" in technical_data:
+                adx_value = technical_data["adx"]["value"]
+                trend_strength = technical_data["adx"].get("trend_strength", "weak")
+                text += f"• ADX: {adx_value:.0f} \\({trend_strength}\\)\n"
+            text += f"• Вердикт: {verdict_emoji(adx_score_val)} {verdict_text(adx_score_val)}\n\n"
+            
+            # 7. ДИВЕРГЕНЦИЯ (5% веса)
+            divergence_score_val = factor_scores.get('divergence', 0)
+            text += f"📈 *ДИВЕРГЕНЦИЯ \\(5% веса\\)*\n"
+            text += f"• Score: {divergence_score_val:+.1f}/10\n"
+            if technical_data and "rsi_divergence" in technical_data:
+                div_type = technical_data["rsi_divergence"]["type"]
+                if div_type != "none":
+                    text += f"• RSI Divergence: {div_type}\n"
+                else:
+                    text += "• RSI Divergence: нет\n"
+            else:
+                text += "• Вердикт: 🟡 НЕТ СИГНАЛА\n"
+            text += "\n"
+            
+            # 8. НАСТРОЕНИЯ (4% веса)
+            sentiment_score_val = factor_scores.get('sentiment', 0)
+            text += f"😱 *НАСТРОЕНИЯ \\(4% веса\\)*\n"
+            text += f"• Score: {sentiment_score_val:+.1f}/10\n"
+            if fear_greed:
+                fg_value = fear_greed.get('value', 50)
+                fg_class = fear_greed.get('classification', 'Neutral')
+                text += f"• Fear & Greed: {fg_value} \\({fg_class}\\)\n"
+            text += f"• Вердикт: {verdict_emoji(sentiment_score_val)} {verdict_text(sentiment_score_val)}\n\n"
+            
+            # 9. МАКРО (3% веса)
+            macro_score_val = factor_scores.get('macro', 0)
+            text += f"🌍 *МАКРО \\(3% веса\\)*\n"
+            text += f"• Score: {macro_score_val:+.1f}/10\n"
+            macro = signal_data.get('macro', {})
+            if macro and macro.get('dxy'):
+                dxy = macro['dxy']
+                text += f"• DXY: {dxy.get('value', 0):.1f} \\({dxy.get('change_24h', 0):+.2f}%\\)\n"
+            text += f"• Вердикт: {verdict_emoji(macro_score_val)} {verdict_text(macro_score_val)}\n\n"
+            
+            # 10. ОПЦИОНЫ (1% веса)
+            options_score_val = factor_scores.get('options', 0)
+            text += f"📈 *ОПЦИОНЫ \\(1% веса\\)*\n"
+            text += f"• Score: {options_score_val:+.1f}/10\n"
+            options = signal_data.get('options', {})
+            if options and options.get('put_call_ratio'):
+                pc_ratio = options['put_call_ratio']
+                text += f"• Put/Call: {pc_ratio:.2f}\n"
+            text += f"• Вердикт: {verdict_emoji(options_score_val)} {verdict_text(options_score_val)}\n\n"
+        
         # ===== РАЗБИВКА ПО БЛОКАМ =====
         block_trend = signal_data.get('block_trend_score', 0)
         block_momentum = signal_data.get('block_momentum_score', 0)
@@ -5165,6 +5305,116 @@ class AISignalAnalyzer:
             text += f"📉 S1: {format_price(s1)} | S2: {format_price(s2)}\n"
         
         text += "\n"
+        
+        # ===== NEW: РЕАЛЬНЫЕ УРОВНИ S/R =====
+        sr_levels = signal_data.get('sr_levels', {})
+        if sr_levels:
+            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            text += "🎯 *РЕАЛЬНЫЕ УРОВНИ S/R*\n"
+            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            
+            # Resistances
+            resistances = sr_levels.get('resistances', [])
+            if resistances:
+                text += "📈 *СОПРОТИВЛЕНИЯ:*\n"
+                for i, r in enumerate(resistances[:3], 1):
+                    price = r.get('price', 0)
+                    strength = r.get('strength', 1)
+                    source = r.get('source', 'calculated')
+                    touches = r.get('touches', 0)
+                    stars = "⭐" * strength
+                    
+                    source_text = {
+                        'swing_high': 'swing high',
+                        'round_number': 'круглый уровень',
+                        'prev_high': 'недельный high',
+                        'fib_level': 'Fibonacci',
+                    }.get(source, source)
+                    
+                    if touches > 0:
+                        text += f"• R{i}: {format_price(price)} \\({source_text}, {touches} касания\\) {stars}\n"
+                    else:
+                        text += f"• R{i}: {format_price(price)} \\({source_text}\\) {stars}\n"
+            
+            text += "\n"
+            
+            # Supports
+            supports = sr_levels.get('supports', [])
+            if supports:
+                text += "📉 *ПОДДЕРЖКИ:*\n"
+                for i, s in enumerate(supports[:3], 1):
+                    price = s.get('price', 0)
+                    strength = s.get('strength', 1)
+                    source = s.get('source', 'calculated')
+                    touches = s.get('touches', 0)
+                    stars = "⭐" * strength
+                    
+                    source_text = {
+                        'swing_low': 'swing low',
+                        'round_number': 'круглый уровень',
+                        'prev_low': 'недельный low',
+                        'fib_level': 'Fibonacci',
+                    }.get(source, source)
+                    
+                    if touches > 0:
+                        text += f"• S{i}: {format_price(price)} \\({source_text}, {touches} касания\\) {stars}\n"
+                    else:
+                        text += f"• S{i}: {format_price(price)} \\({source_text}\\) {stars}\n"
+            
+            text += "\n"
+            
+            # Liquidation levels if available
+            if deep_derivatives_data and deep_derivatives_data.get('liquidation_levels'):
+                liq_levels = deep_derivatives_data['liquidation_levels']
+                nearest_short = liq_levels.get('nearest_short_liq', 0)
+                nearest_long = liq_levels.get('nearest_long_liq', 0)
+                if nearest_short > 0 or nearest_long > 0:
+                    text += "🎯 *ЛИКВИДАЦИИ:*\n"
+                    if nearest_short > 0:
+                        text += f"• Шорты: ${nearest_short:,.0f} \\(магнит вверх\\)\n"
+                    if nearest_long > 0:
+                        text += f"• Лонги: ${nearest_long:,.0f} \\(магнит вниз\\)\n"
+                    text += "\n"
+        
+        # ===== NEW: СЦЕНАРИИ НА 4 ЧАСА =====
+        price_prediction = signal_data.get('price_prediction', {})
+        if price_prediction:
+            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            text += "📈 *СЦЕНАРИИ НА 4 ЧАСА*\n"
+            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            
+            predicted_price = price_prediction.get('predicted_price', current_price)
+            predicted_change = price_prediction.get('predicted_change_pct', 0)
+            direction_pred = price_prediction.get('direction', 'NEUTRAL')
+            confidence_pred = price_prediction.get('confidence', 50)
+            
+            # Calculate scenario probabilities based on signal
+            if direction_pred == 'UP':
+                bull_prob = min(85, confidence_pred + 10)
+                bear_prob = max(5, 100 - bull_prob - 25)
+                side_prob = 100 - bull_prob - bear_prob
+            elif direction_pred == 'DOWN':
+                bear_prob = min(85, confidence_pred + 10)
+                bull_prob = max(5, 100 - bear_prob - 25)
+                side_prob = 100 - bull_prob - bear_prob
+            else:  # NEUTRAL
+                side_prob = min(70, confidence_pred + 10)
+                bull_prob = (100 - side_prob) // 2
+                bear_prob = 100 - side_prob - bull_prob
+            
+            # Calculate targets for each scenario
+            nearest_r = sr_levels.get('nearest_resistance', current_price * 1.02) if sr_levels else current_price * 1.02
+            nearest_s = sr_levels.get('nearest_support', current_price * 0.98) if sr_levels else current_price * 0.98
+            
+            text += f"🟢 *Бычий \\({bull_prob}%\\):* → {format_price(nearest_r)}\n"
+            text += f"   Триггер: пробой ${current_price * 1.005:,.0f} \\+ объём\n"
+            text += "\n"
+            text += f"🟡 *Боковик \\({side_prob}%\\):* → {format_price(current_price * 0.995)}\\-{format_price(current_price * 1.005)}\n"
+            text += f"   Триггер: ADX < 20, нет объёма\n"
+            text += "\n"
+            text += f"🔴 *Медвежий \\({bear_prob}%\\):* → {format_price(nearest_s)}\n"
+            text += f"   Триггер: пробой ${current_price * 0.995:,.0f} вниз\n"
+            text += "\n"
         
         # ===== DEEP WHALE ANALYSIS (Phase 2) =====
         if deep_whale_data:
@@ -5627,6 +5877,104 @@ class AISignalAnalyzer:
         
         if is_weak:
             text += "⚠️ *Сигнал слабый. Рекомендуется ПРОПУСТИТЬ этот сетап.*\n\n"
+        
+        # ===== NEW: ИТОГОВЫЙ РАСЧЁТ (Weighted calculation breakdown) =====
+        factor_scores = signal_data.get('factor_scores', {})
+        weighted_score = signal_data.get('weighted_score', 0)
+        
+        if factor_scores:
+            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            text += "🔥 *ИТОГОВЫЙ РАСЧЁТ*\n"
+            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            
+            # Show calculation for each factor
+            whale_s = factor_scores.get('whales', 0)
+            derivatives_s = factor_scores.get('derivatives', 0)
+            trend_s = factor_scores.get('trend', 0)
+            momentum_s = factor_scores.get('momentum', 0)
+            volume_s = factor_scores.get('volume', 0)
+            adx_s = factor_scores.get('adx', 0)
+            divergence_s = factor_scores.get('divergence', 0)
+            sentiment_s = factor_scores.get('sentiment', 0)
+            macro_s = factor_scores.get('macro', 0)
+            options_s = factor_scores.get('options', 0)
+            
+            # Calculate weighted contributions
+            whale_contrib = whale_s * 0.25
+            derivatives_contrib = derivatives_s * 0.20
+            trend_contrib = trend_s * 0.15
+            momentum_contrib = momentum_s * 0.12
+            volume_contrib = volume_s * 0.10
+            adx_contrib = adx_s * 0.05
+            divergence_contrib = divergence_s * 0.05
+            sentiment_contrib = sentiment_s * 0.04
+            macro_contrib = macro_s * 0.03
+            options_contrib = options_s * 0.01
+            
+            text += f"• Киты:       {whale_s:+.1f} × 25% = {whale_contrib:+.2f}\n"
+            text += f"• Деривативы: {derivatives_s:+.1f} × 20% = {derivatives_contrib:+.2f}\n"
+            text += f"• Тренд:      {trend_s:+.1f} × 15% = {trend_contrib:+.2f}\n"
+            text += f"• Импульс:    {momentum_s:+.1f} × 12% = {momentum_contrib:+.2f}\n"
+            text += f"• Объём:      {volume_s:+.1f} × 10% = {volume_contrib:+.2f}\n"
+            text += f"• ADX:        {adx_s:+.1f} × 5%  = {adx_contrib:+.2f}\n"
+            text += f"• Дивергенция:{divergence_s:+.1f} × 5%  = {divergence_contrib:+.2f}\n"
+            text += f"• Настроения: {sentiment_s:+.1f} × 4%  = {sentiment_contrib:+.2f}\n"
+            text += f"• Макро:      {macro_s:+.1f} × 3%  = {macro_contrib:+.2f}\n"
+            text += f"• Опционы:    {options_s:+.1f} × 1%  = {options_contrib:+.2f}\n"
+            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            text += f"📊 *ИТОГО: {weighted_score:+.2f}*\n\n"
+            
+            # Add verdict based on weighted score
+            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            text += "🎯 *ВЕРДИКТ*\n"
+            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            
+            # Determine signal type and recommendation
+            price_pred = signal_data.get('price_prediction', {})
+            if price_pred:
+                direction_pred = price_pred.get('direction', 'NEUTRAL')
+                confidence_pred = price_pred.get('confidence', 50)
+                predicted_price = price_pred.get('predicted_price', current_price)
+                predicted_change = price_pred.get('predicted_change_pct', 0)
+                
+                direction_emoji = "📈" if direction_pred == 'UP' else "📉" if direction_pred == 'DOWN' else "➡️"
+                direction_ru = "ЛОНГ" if direction_pred == 'UP' else "ШОРТ" if direction_pred == 'DOWN' else "БОКОВИК"
+                
+                text += f"{direction_emoji} *{direction_ru}* \\({confidence_pred}% уверенность\\)\n\n"
+                text += f"💰 Цена сейчас: {format_price(current_price)}\n"
+                text += f"🎯 Цель 4ч: {format_price(predicted_price)} \\({predicted_change:+.1f}%\\)\n"
+                
+                # Calculate stop loss
+                if direction_pred == 'UP':
+                    stop_price = current_price * 0.992  # -0.8% stop
+                    stop_pct = -0.8
+                elif direction_pred == 'DOWN':
+                    stop_price = current_price * 1.008  # +0.8% stop
+                    stop_pct = +0.8
+                else:
+                    stop_price = 0
+                    stop_pct = 0
+                
+                if stop_price > 0:
+                    text += f"🛑 Стоп: {format_price(stop_price)} \\({stop_pct:+.1f}%\\)\n"
+                    # Calculate R:R
+                    risk = abs(stop_pct)
+                    reward = abs(predicted_change)
+                    rr = reward / risk if risk > 0 else 0
+                    text += f"📊 R:R = {rr:.1f}\n\n"
+                
+                # Recommendation based on confidence
+                if confidence_pred >= 70:
+                    text += "⚠️ *РЕКОМЕНДАЦИЯ:*\n"
+                    text += "Сигнал СИЛЬНЫЙ\\. Можно входить с\n"
+                    text += "нормальным размером позиции\\.\n\n"
+                elif confidence_pred >= 60:
+                    text += "⚠️ *РЕКОМЕНДАЦИЯ:*\n"
+                    text += "Сигнал СРЕДНИЙ\\. Можно входить с\n"
+                    text += "уменьшенным размером позиции\\.\n\n"
+                else:
+                    text += "⚠️ *РЕКОМЕНДАЦИЯ:*\n"
+                    text += "Сигнал СЛАБЫЙ\\. Рекомендуется ПРОПУСТИТЬ\\.\n\n"
         
         # ===== FOOTER =====
         text += f"📡 Факторов: {data_sources_count}\n"
