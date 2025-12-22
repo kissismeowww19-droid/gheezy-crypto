@@ -360,14 +360,16 @@ def get_price_keyboard(symbol: str) -> InlineKeyboardMarkup:
 
 
 def get_signals_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура для AI-сигналов по 3 монетам: BTC, ETH, TON."""
+    """Клавиатура для AI-сигналов по 5 монетам: BTC, ETH, TON, SOL, XRP."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="₿ BTC", callback_data="signal_btc"),
             InlineKeyboardButton(text="⟠ ETH", callback_data="signal_eth"),
+            InlineKeyboardButton(text="💎 TON", callback_data="signal_ton"),
         ],
         [
-            InlineKeyboardButton(text="💎 TON", callback_data="signal_ton"),
+            InlineKeyboardButton(text="🟣 SOL", callback_data="signal_sol"),
+            InlineKeyboardButton(text="💧 XRP", callback_data="signal_xrp"),
         ],
         [
             InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu"),
