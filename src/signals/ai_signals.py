@@ -2188,14 +2188,14 @@ class AISignalAnalyzer:
     
     def _calculate_trend_score(self, technical_data: Dict) -> float:
         """
-        Calculate trend score (-10 to +10).
+        Calculate trend score (-20 to +20, extended for divergence).
         Combines RSI, MACD, MA Crossover, RSI Divergence, ADX.
         
         Args:
             technical_data: Technical indicator data
             
         Returns:
-            Score from -10 to +10
+            Score from -20 to +20 (extended range to accommodate divergence signals)
         """
         score = 0.0
         
@@ -2350,7 +2350,7 @@ class AISignalAnalyzer:
     
     def _calculate_volume_score(self, technical_data: Dict, ohlcv_data: Optional[List] = None) -> float:
         """
-        Calculate volume score (-10 to +10).
+        Calculate volume score (-20 to +20, extended for volume spike).
         Combines OBV, VWAP, Volume SMA, Volume Spike.
         
         Args:
@@ -2358,7 +2358,7 @@ class AISignalAnalyzer:
             ohlcv_data: OHLCV candle data
             
         Returns:
-            Score from -10 to +10
+            Score from -20 to +20 (extended range to accommodate volume spike signals)
         """
         score = 0.0
         

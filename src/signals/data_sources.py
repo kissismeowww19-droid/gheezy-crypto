@@ -708,6 +708,9 @@ class DataSourceManager:
             blockchain_mapping = {
                 "BTC": "bitcoin",
                 "ETH": "ethereum",
+                "SOL": "solana",
+                "XRP": "ripple",
+                "TON": "ton",
             }
             
             blockchain = blockchain_mapping.get(symbol.upper())
