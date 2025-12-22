@@ -3,6 +3,9 @@ Simple test for weighted scoring logic without importing full modules.
 Tests the core calculation logic that was implemented.
 """
 
+# Section divider constant (matches ai_signals.py and bot.py)
+MESSAGE_SECTION_DIVIDER = "━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
 
 def calculate_weighted_score(factors):
     """
@@ -189,8 +192,8 @@ def test_message_length_estimation():
     """Test that message splitting logic works for long messages."""
     # Simulate a realistic long signal message (similar to actual format)
     # A typical full signal is around 5000-6000 chars
-    long_message = """🤖 AI СИГНАЛ: BTC (4ч прогноз)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    long_message = f"""🤖 AI СИГНАЛ: BTC (4ч прогноз)
+{MESSAGE_SECTION_DIVIDER}
 
 💰 ЦЕНА СЕЙЧАС: $95,000
 
@@ -200,9 +203,9 @@ def test_message_length_estimation():
 • Диапазон: $94,000 — $96,000
 • Уверенность: 65%
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{MESSAGE_SECTION_DIVIDER}
 📊 ВЗВЕШЕННЫЙ АНАЛИЗ (1/2)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{MESSAGE_SECTION_DIVIDER}
 
 🐋 КИТЫ (25% веса)
 • Score: 5/10
@@ -229,7 +232,7 @@ def test_message_length_estimation():
 • Details: Above average
 • Вердикт: Neutral
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{MESSAGE_SECTION_DIVIDER}
 """ * 3  # Repeat 3 times to simulate long content
     
     print(f"Long message length: {len(long_message)} chars")
@@ -239,14 +242,14 @@ def test_message_length_estimation():
         print(f"✓ Message is short enough ({len(long_message)} chars), no splitting needed")
         return
     
-    # Simulate splitting logic
+    # Simulate splitting logic (matches bot.py)
     parts = []
-    sections = long_message.split("━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    sections = long_message.split(MESSAGE_SECTION_DIVIDER)
     
     current_part = ""
     for i, section in enumerate(sections):
         if i > 0:
-            test_part = current_part + "━━━━━━━━━━━━━━━━━━━━━━━━━━━" + section
+            test_part = current_part + MESSAGE_SECTION_DIVIDER + section
         else:
             test_part = current_part + section
         

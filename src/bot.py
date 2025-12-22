@@ -1048,6 +1048,14 @@ async def callback_signals(callback: CallbackQuery):
     await callback. answer()
 
 
+# ============================================
+# Message formatting constants
+# ============================================
+
+# Section divider used in signal messages
+MESSAGE_SECTION_DIVIDER = "━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+
 async def send_signal_in_parts(message_or_callback, symbol: str, signal_text: str) -> None:
     """
     Send signal message in multiple parts to avoid MESSAGE_TOO_LONG error.
@@ -1106,13 +1114,13 @@ async def send_signal_in_parts(message_or_callback, symbol: str, signal_text: st
     parts = []
     
     # Try to split at section boundaries
-    sections = signal_text.split("━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    sections = signal_text.split(MESSAGE_SECTION_DIVIDER)
     
     current_part = ""
     for i, section in enumerate(sections):
         # Add section divider back except for first section
         if i > 0:
-            test_part = current_part + "━━━━━━━━━━━━━━━━━━━━━━━━━━━" + section
+            test_part = current_part + MESSAGE_SECTION_DIVIDER + section
         else:
             test_part = current_part + section
         
