@@ -400,6 +400,15 @@ class VolumeSMA:
 
 
 @dataclass
+class VolumeSpike:
+    """Volume Spike Detection."""
+    is_spike: bool
+    spike_percentage: float  # Percentage above average (e.g., 180 means +180%)
+    current_volume: float
+    average_volume: float
+
+
+@dataclass
 class PivotPoints:
     """Pivot Points."""
     pivot: float
@@ -891,6 +900,50 @@ def calculate_volume_sma(volume: List[float], period: int = 20) -> Optional[Volu
         status = "normal"
     
     return VolumeSMA(current_volume=current_volume, sma=sma, ratio=float(ratio), status=status)
+
+
+def detect_volume_spike(volumes: List[float], threshold: float = 2.0, lookback: int = 20) -> Optional[VolumeSpike]:
+    """
+    Detect abnormal volume spikes.
+    
+    Compare current volume to average of last 'lookback' candles.
+    Spike = current volume > average * threshold
+    
+    Args:
+        volumes: List of volumes
+        threshold: Multiplier for spike detection (default 2.0 = 200%)
+        lookback: Number of candles to average (default 20)
+        
+    Returns:
+        VolumeSpike: spike_percentage (e.g., 180 means +180% above average) or None if insufficient data
+    """
+    if len(volumes) < lookback + 1:
+        return None
+    
+    volume_array = np.array(volumes)
+    current_volume = float(volume_array[-1])
+    # Calculate average of previous candles (excluding current)
+    average_volume = float(np.mean(volume_array[-(lookback+1):-1]))
+    
+    if average_volume == 0:
+        return VolumeSpike(
+            is_spike=False,
+            spike_percentage=0.0,
+            current_volume=current_volume,
+            average_volume=average_volume
+        )
+    
+    ratio = current_volume / average_volume
+    is_spike = ratio > threshold
+    # Calculate percentage above average (e.g., ratio of 2.8 = 180% above = (2.8-1)*100)
+    spike_percentage = float((ratio - 1.0) * 100)
+    
+    return VolumeSpike(
+        is_spike=is_spike,
+        spike_percentage=spike_percentage,
+        current_volume=current_volume,
+        average_volume=average_volume
+    )
 
 
 def calculate_pivot_points(high: float, low: float, close: float, current_price: float) -> PivotPoints:

@@ -48,6 +48,9 @@ class DataSourceManager:
     BYBIT_MAPPING = {
         "BTC": "BTCUSDT",
         "ETH": "ETHUSDT",
+        "TON": "TONUSDT",
+        "SOL": "SOLUSDT",
+        "XRP": "XRPUSDT",
     }
     
     # Threshold for "large" trade in USD
@@ -705,6 +708,9 @@ class DataSourceManager:
             blockchain_mapping = {
                 "BTC": "bitcoin",
                 "ETH": "ethereum",
+                "SOL": "solana",
+                "XRP": "ripple",
+                "TON": "ton",
             }
             
             blockchain = blockchain_mapping.get(symbol.upper())

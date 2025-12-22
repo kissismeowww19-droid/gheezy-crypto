@@ -18,7 +18,7 @@ class OptionsAnalyzer:
     async def get_options_data(self, symbol: str = "BTC") -> Optional[Dict]:
         """Получить данные по опционам"""
         currency = symbol.upper()
-        if currency not in ['BTC', 'ETH']:
+        if currency not in ['BTC', 'ETH', 'SOL']:
             logger.debug(f"Options not available for {currency}")
             return None
         
