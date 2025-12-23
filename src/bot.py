@@ -1103,13 +1103,20 @@ async def send_signal_in_parts(message_or_callback, symbol: str, signal_text: st
                 # Fallback: send as new message
                 bot = message_or_callback.bot if isinstance(message_or_callback, CallbackQuery) else message_or_callback.bot
                 chat_id = message_or_callback.message.chat.id if isinstance(message_or_callback, CallbackQuery) else message_or_callback.chat.id
-                await safe_send_message(
-                    bot.send_message,
-                    signal_text,
-                    chat_id=chat_id,
-                    reply_markup=keyboard,
-                    parse_mode=ParseMode.MARKDOWN
-                )
+                try:
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text=signal_text,
+                        reply_markup=keyboard,
+                        parse_mode=ParseMode.MARKDOWN
+                    )
+                except TelegramBadRequest as parse_error:
+                    if "can't parse entities" in str(parse_error).lower():
+                        await bot.send_message(
+                            chat_id=chat_id,
+                            text=signal_text,
+                            reply_markup=keyboard
+                        )
         return
     
     # Message is too long - split into parts
@@ -1153,12 +1160,18 @@ async def send_signal_in_parts(message_or_callback, symbol: str, signal_text: st
             )
         except TelegramBadRequest:
             # Fallback: send as new message
-            await safe_send_message(
-                bot.send_message,
-                parts[0],
-                chat_id=chat_id,
-                parse_mode=ParseMode.MARKDOWN
-            )
+            try:
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=parts[0],
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            except TelegramBadRequest as parse_error:
+                if "can't parse entities" in str(parse_error).lower():
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text=parts[0]
+                    )
         parts = parts[1:]  # Remove first part
     
     # Send remaining parts as separate messages
@@ -1177,20 +1190,33 @@ async def send_signal_in_parts(message_or_callback, symbol: str, signal_text: st
                     InlineKeyboardButton(text="🏠 Меню", callback_data="menu_back"),
                 ],
             ])
-            await safe_send_message(
-                bot.send_message,
-                part,
-                chat_id=chat_id,
-                reply_markup=keyboard,
-                parse_mode=ParseMode.MARKDOWN
-            )
+            try:
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=part,
+                    reply_markup=keyboard,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            except TelegramBadRequest as parse_error:
+                if "can't parse entities" in str(parse_error).lower():
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text=part,
+                        reply_markup=keyboard
+                    )
         else:
-            await safe_send_message(
-                bot.send_message,
-                part,
-                chat_id=chat_id,
-                parse_mode=ParseMode.MARKDOWN
-            )
+            try:
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=part,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            except TelegramBadRequest as parse_error:
+                if "can't parse entities" in str(parse_error).lower():
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text=part
+                    )
 
 
 @router.callback_query(lambda c: c. data. startswith("signal_"))

@@ -4952,6 +4952,19 @@ class AISignalAnalyzer:
                 return f"${volume / 1_000:.1f}K"
             return f"${volume:.0f}"
         
+        # Helper function to clamp scores to [-10, +10] range
+        def clamp_score(value: float, min_val: float = -10.0, max_val: float = 10.0) -> float:
+            """Clamp score to specified range."""
+            return max(min_val, min(max_val, value))
+        
+        # Helper function to format liquidation price
+        def format_liq_price(price: float) -> str:
+            """Format liquidation price with appropriate precision."""
+            if price < 10:
+                return f"${price:.2f}"
+            else:
+                return f"${price:,.0f}"
+        
         # Определяем направление из raw_direction (учитывает sideways)
         raw_direction = signal_data.get('raw_direction', 'sideways')
         probability_direction = signal_data.get('probability_direction', 'up')
@@ -5164,7 +5177,7 @@ class AISignalAnalyzer:
                     return "НЕЙТРАЛЬНЫЙ"
             
             # 1. КИТЫ (25% веса)
-            whale_score = factor_scores.get('whales', 0)
+            whale_score = clamp_score(factor_scores.get('whales', 0))
             text += f"🐋 *КИТЫ \\(25% веса\\)*\n"
             text += f"• Score: {whale_score:+.1f}/10\n"
             if whale_data:
@@ -5177,7 +5190,7 @@ class AISignalAnalyzer:
             text += f"• Вердикт: {verdict_emoji(whale_score)} {verdict_text(whale_score)}\n\n"
             
             # 2. ДЕРИВАТИВЫ (20% веса)
-            derivatives_score_val = factor_scores.get('derivatives', 0)
+            derivatives_score_val = clamp_score(factor_scores.get('derivatives', 0))
             text += f"📊 *ДЕРИВАТИВЫ \\(20% веса\\)*\n"
             text += f"• Score: {derivatives_score_val:+.1f}/10\n"
             if funding_rate:
@@ -5189,7 +5202,7 @@ class AISignalAnalyzer:
             text += f"• Вердикт: {verdict_emoji(derivatives_score_val)} {verdict_text(derivatives_score_val)}\n\n"
             
             # 3. ТРЕНД (15% веса)
-            trend_score_val = factor_scores.get('trend', 0)
+            trend_score_val = clamp_score(factor_scores.get('trend', 0))
             text += f"📈 *ТРЕНД \\(15% веса\\)*\n"
             text += f"• Score: {trend_score_val:+.1f}/10\n"
             if technical_data:
@@ -5200,7 +5213,7 @@ class AISignalAnalyzer:
             text += f"• Вердикт: {verdict_emoji(trend_score_val)} {verdict_text(trend_score_val)}\n\n"
             
             # 4. ИМПУЛЬС (12% веса)
-            momentum_score_val = factor_scores.get('momentum', 0)
+            momentum_score_val = clamp_score(factor_scores.get('momentum', 0))
             text += f"⚡ *ИМПУЛЬС \\(12% веса\\)*\n"
             text += f"• Score: {momentum_score_val:+.1f}/10\n"
             if technical_data and "rsi" in technical_data:
@@ -5210,7 +5223,7 @@ class AISignalAnalyzer:
             text += f"• Вердикт: {verdict_emoji(momentum_score_val)} {verdict_text(momentum_score_val)}\n\n"
             
             # 5. ОБЪЁМ (10% веса)
-            volume_score_val = factor_scores.get('volume', 0)
+            volume_score_val = clamp_score(factor_scores.get('volume', 0))
             text += f"📊 *ОБЪЁМ \\(10% веса\\)*\n"
             text += f"• Score: {volume_score_val:+.1f}/10\n"
             vol_24h = market_data.get('volume_24h', 0)
@@ -5218,7 +5231,7 @@ class AISignalAnalyzer:
             text += f"• Вердикт: {verdict_emoji(volume_score_val)} {verdict_text(volume_score_val)}\n\n"
             
             # 6. СИЛА ТРЕНДА / ADX (5% веса)
-            adx_score_val = factor_scores.get('adx', 0)
+            adx_score_val = clamp_score(factor_scores.get('adx', 0))
             text += f"💪 *СИЛА ТРЕНДА \\(5% веса\\)*\n"
             text += f"• Score: {adx_score_val:+.1f}/10\n"
             if technical_data and "adx" in technical_data:
@@ -5228,7 +5241,7 @@ class AISignalAnalyzer:
             text += f"• Вердикт: {verdict_emoji(adx_score_val)} {verdict_text(adx_score_val)}\n\n"
             
             # 7. ДИВЕРГЕНЦИЯ (5% веса)
-            divergence_score_val = factor_scores.get('divergence', 0)
+            divergence_score_val = clamp_score(factor_scores.get('divergence', 0))
             text += f"📈 *ДИВЕРГЕНЦИЯ \\(5% веса\\)*\n"
             text += f"• Score: {divergence_score_val:+.1f}/10\n"
             if technical_data and "rsi_divergence" in technical_data:
@@ -5242,7 +5255,7 @@ class AISignalAnalyzer:
             text += "\n"
             
             # 8. НАСТРОЕНИЯ (4% веса)
-            sentiment_score_val = factor_scores.get('sentiment', 0)
+            sentiment_score_val = clamp_score(factor_scores.get('sentiment', 0))
             text += f"😱 *НАСТРОЕНИЯ \\(4% веса\\)*\n"
             text += f"• Score: {sentiment_score_val:+.1f}/10\n"
             if fear_greed:
@@ -5252,7 +5265,7 @@ class AISignalAnalyzer:
             text += f"• Вердикт: {verdict_emoji(sentiment_score_val)} {verdict_text(sentiment_score_val)}\n\n"
             
             # 9. МАКРО (3% веса)
-            macro_score_val = factor_scores.get('macro', 0)
+            macro_score_val = clamp_score(factor_scores.get('macro', 0))
             text += f"🌍 *МАКРО \\(3% веса\\)*\n"
             text += f"• Score: {macro_score_val:+.1f}/10\n"
             macro = signal_data.get('macro', {})
@@ -5262,7 +5275,7 @@ class AISignalAnalyzer:
             text += f"• Вердикт: {verdict_emoji(macro_score_val)} {verdict_text(macro_score_val)}\n\n"
             
             # 10. ОПЦИОНЫ (1% веса)
-            options_score_val = factor_scores.get('options', 0)
+            options_score_val = clamp_score(factor_scores.get('options', 0))
             text += f"📈 *ОПЦИОНЫ \\(1% веса\\)*\n"
             text += f"• Score: {options_score_val:+.1f}/10\n"
             options = signal_data.get('options', {})
@@ -5270,54 +5283,6 @@ class AISignalAnalyzer:
                 pc_ratio = options['put_call_ratio']
                 text += f"• Put/Call: {pc_ratio:.2f}\n"
             text += f"• Вердикт: {verdict_emoji(options_score_val)} {verdict_text(options_score_val)}\n\n"
-        
-        # ===== РАЗБИВКА ПО БЛОКАМ =====
-        block_trend = signal_data.get('block_trend_score', 0)
-        block_momentum = signal_data.get('block_momentum_score', 0)
-        block_whales = signal_data.get('block_whales_score', 0)
-        block_derivatives = signal_data.get('block_derivatives_score', 0)
-        block_sentiment = signal_data.get('block_sentiment_score', 0)
-        
-        # Calculate new factor scores
-        divergence_score = 0.0
-        volume_spike_score = 0.0
-        adx_score = 0.0
-        
-        if technical_data:
-            # Divergence score
-            if "rsi_divergence" in technical_data:
-                div_type = technical_data["rsi_divergence"]["type"]
-                if div_type == "bullish":
-                    divergence_score = 10.0
-                elif div_type == "bearish":
-                    divergence_score = -10.0
-            
-            # Volume spike score
-            if "volume_spike" in technical_data:
-                vol_spike = technical_data["volume_spike"]
-                if vol_spike["is_spike"] and vol_spike["spike_percentage"] > 50:
-                    spike_pct = vol_spike["spike_percentage"]
-                    volume_spike_score = min(10.0, 5.0 + (spike_pct / 40))  # 5-10 based on size
-            
-            # ADX trend strength score
-            if "adx" in technical_data:
-                adx_value = technical_data["adx"]["value"]
-                if adx_value > 40:
-                    adx_score = 7.0  # Strong trend
-                elif adx_value > 25:
-                    adx_score = 4.0  # Moderate trend
-                elif adx_value < 20:
-                    adx_score = -3.0  # Weak trend (negative)
-        
-        text += f"📈 *РАЗБИВКА ПО БЛОКАМ*\n"
-        text += f"• Тренд: {'+' if block_trend > 0 else ''}{block_trend:.1f}/10\n"
-        text += f"• Импульс: {'+' if block_momentum > 0 else ''}{block_momentum:.1f}/10\n"
-        text += f"• Киты: {'+' if block_whales > 0 else ''}{block_whales:.1f}/10\n"
-        text += f"• Деривативы: {'+' if block_derivatives > 0 else ''}{block_derivatives:.1f}/10\n"
-        text += f"• Настроения: {'+' if block_sentiment > 0 else ''}{block_sentiment:.1f}/10\n"
-        text += f"• Дивергенция: {'+' if divergence_score > 0 else ''}{divergence_score:.1f}/10\n"
-        text += f"• Объём: {'+' if volume_spike_score > 0 else ''}{volume_spike_score:.1f}/10\n"
-        text += f"• Сила тренда: {'+' if adx_score > 0 else ''}{adx_score:.1f}/10\n\n"
         
         # ===== KEY LEVELS (NEW - Pivot Points) =====
         # Calculate pivot points from technical_data or market_data
@@ -5402,10 +5367,11 @@ class AISignalAnalyzer:
                 nearest_long = liq_levels.get('nearest_long_liq', 0)
                 if nearest_short > 0 or nearest_long > 0:
                     text += "🎯 *ЛИКВИДАЦИИ:*\n"
+                    # Format with 2 decimals for low-priced coins, 0 decimals for high-priced
                     if nearest_short > 0:
-                        text += f"• Шорты: ${nearest_short:,.0f} \\(магнит вверх\\)\n"
+                        text += f"• Шорты: {format_liq_price(nearest_short)} \\(магнит вверх\\)\n"
                     if nearest_long > 0:
-                        text += f"• Лонги: ${nearest_long:,.0f} \\(магнит вниз\\)\n"
+                        text += f"• Лонги: {format_liq_price(nearest_long)} \\(магнит вниз\\)\n"
                     text += "\n"
         
         # ===== NEW: СЦЕНАРИИ НА 4 ЧАСА =====
@@ -5417,20 +5383,19 @@ class AISignalAnalyzer:
             
             predicted_price = price_prediction.get('predicted_price', current_price)
             predicted_change = price_prediction.get('predicted_change_pct', 0)
-            direction_pred = price_prediction.get('direction', 'NEUTRAL')
-            confidence_pred = price_prediction.get('confidence', 50)
             
-            # Calculate scenario probabilities based on signal
-            if direction_pred == 'UP':
-                bull_prob = min(85, confidence_pred + 10)
+            # Calculate scenario probabilities based on main signal direction (raw_direction)
+            # This ensures consistency with the main direction shown at the top
+            if raw_direction == "long":
+                bull_prob = min(85, probability + 10)
                 bear_prob = max(5, 100 - bull_prob - 25)
                 side_prob = 100 - bull_prob - bear_prob
-            elif direction_pred == 'DOWN':
-                bear_prob = min(85, confidence_pred + 10)
+            elif raw_direction == "short":
+                bear_prob = min(85, probability + 10)
                 bull_prob = max(5, 100 - bear_prob - 25)
                 side_prob = 100 - bull_prob - bear_prob
-            else:  # NEUTRAL
-                side_prob = min(70, confidence_pred + 10)
+            else:  # sideways
+                side_prob = min(70, probability + 10)
                 bull_prob = (100 - side_prob) // 2
                 bear_prob = 100 - side_prob - bull_prob
             
@@ -5590,37 +5555,6 @@ class AISignalAnalyzer:
             text += f"• Вердикт: {v} {sentiment['verdict']}\n"
             text += "\n"
         
-        # ===== SCENARIOS (NEW) =====
-        # Generate scenarios based on signal data
-        text += "📈 *СЦЕНАРИИ*\n"
-        
-        # Calculate scenario probabilities
-        if is_long:
-            bull_prob = min(85, probability + 10)
-            bear_prob = max(5, 100 - bull_prob - 25)
-            side_prob = 100 - bull_prob - bear_prob
-            bull_target = tp1_price
-            bear_target = sl_price
-        elif raw_direction == "short":
-            bear_prob = min(85, probability + 10)
-            bull_prob = max(5, 100 - bear_prob - 25)
-            side_prob = 100 - bull_prob - bear_prob
-            bull_target = sl_price
-            bear_target = tp1_price
-        else:  # sideways
-            side_prob = min(70, probability + 10)
-            bull_prob = (100 - side_prob) // 2
-            bear_prob = 100 - side_prob - bull_prob
-            bull_target = range_high
-            bear_target = range_low
-        
-        text += f"🟢 Бычий: {bull_prob}% → {format_price(bull_target)}\n"
-        text += f"🟡 Боковик: {side_prob}% → {format_price(current_price * 0.99)}-{format_price(current_price * 1.01)}\n"
-        text += f"🔴 Медвежий: {bear_prob}% → {format_price(bear_target)}\n"
-        
-        text += "\n"
-        text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        text += "⏱️ Прогноз действителен: 4 часа\n"
         
         # ===== ТРЕНД ЦЕНЫ =====
         # (Moved below but kept for compatibility)

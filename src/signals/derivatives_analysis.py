@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 class DeepDerivativesAnalyzer:
     """Deep derivatives analysis with multi-exchange data and advanced metrics."""
     
+    # Price threshold for determining liquidation calculation strategy
+    LOW_PRICE_THRESHOLD = 10.0  # USD
+    
     def __init__(self):
         self._cache = {}
         self._cache_timestamps = {}
@@ -102,15 +105,26 @@ class DeepDerivativesAnalyzer:
                 return None
             
             # Estimate liquidation zones based on typical leverage levels
+            # Adjust percentages based on coin price for better differentiation
+            # For low-priced coins (< LOW_PRICE_THRESHOLD), use larger percentages for visibility
+            if current_price < self.LOW_PRICE_THRESHOLD:
+                # For altcoins, use larger percentage moves
+                long_liq_multipliers = [0.75, 0.85, 0.92]    # 25%, 15%, 8% drops
+                short_liq_multipliers = [1.25, 1.15, 1.08]   # 25%, 15%, 8% rises
+            else:
+                # For higher-priced coins, use standard percentages
+                long_liq_multipliers = [0.80, 0.90, 0.95]    # 20%, 10%, 5% drops
+                short_liq_multipliers = [1.20, 1.10, 1.05]   # 20%, 10%, 5% rises
+            
             # Long liquidations occur below current price (5x, 10x, 20x leverage)
-            long_liq_5x = current_price * 0.80   # 20% drop liquidates 5x longs
-            long_liq_10x = current_price * 0.90  # 10% drop liquidates 10x longs
-            long_liq_20x = current_price * 0.95  # 5% drop liquidates 20x longs
+            long_liq_5x = current_price * long_liq_multipliers[0]
+            long_liq_10x = current_price * long_liq_multipliers[1]
+            long_liq_20x = current_price * long_liq_multipliers[2]
             
             # Short liquidations occur above current price
-            short_liq_5x = current_price * 1.20   # 20% rise liquidates 5x shorts
-            short_liq_10x = current_price * 1.10  # 10% rise liquidates 10x shorts
-            short_liq_20x = current_price * 1.05  # 5% rise liquidates 20x shorts
+            short_liq_5x = current_price * short_liq_multipliers[0]
+            short_liq_10x = current_price * short_liq_multipliers[1]
+            short_liq_20x = current_price * short_liq_multipliers[2]
             
             # Estimate volumes (higher volume at safer leverage levels)
             long_liquidations = [
