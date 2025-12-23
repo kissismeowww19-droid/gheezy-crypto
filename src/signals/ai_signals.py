@@ -178,6 +178,9 @@ class AISignalAnalyzer:
     MAX_PREDICTED_MOVEMENT_PCT = 3.0  # Maximum predicted price change percentage
     MACRO_SCORE_NORMALIZER = 1.5  # Normalize macro score from wider range to -10/+10
     
+    # Weighted score scaling factor (converts -10/+10 to -100/+100 for compatibility)
+    WEIGHTED_SCORE_SCALE_FACTOR = 10
+    
     def __init__(self, whale_tracker):
         """
         Инициализация анализатора.
@@ -4509,7 +4512,9 @@ class AISignalAnalyzer:
         # Корректируем сигнал с учётом BTC (ведущий индикатор рынка)
         logger.info(f"Applying cross-asset correlation for {symbol}...")
         
-        # Определяем начальное направление по score (до корреляции)
+        # NOTE: Cross-asset correlation uses the OLD total_score system for backward compatibility
+        # but we'll override with weighted_score after correlation checks
+        # Определяем начальное направление по OLD score (для корреляции)
         initial_direction = self._determine_direction_from_score(total_score)
         
         # Initial probability for correlation check (not used, will be recalculated)
@@ -4535,14 +4540,14 @@ class AISignalAnalyzer:
         # ЛОГИРОВАНИЕ результата корреляции
         logger.info(f"Cross-asset result: direction {initial_direction} → {adjusted_direction}, score {total_score:.2f} → {adjusted_total_score:.2f}")
         
-        # Применяем корректировки
+        # Применяем корректировки к OLD score (for backward compatibility with correlation system)
         raw_direction = adjusted_direction
         total_score = adjusted_total_score
         
         # Final score limit (after all adjustments including Phase 3 and correlation)
         total_score = max(min(total_score, 100), -100)
         
-        # ====== CONSENSUS PROTECTION ======
+        # ====== CONSENSUS PROTECTION (applied to old score) ======
         # If consensus is strongly bullish but signal is short, adjust score to be less bearish
         # If consensus is strongly bearish but signal is long, adjust score to be less bullish
         # Применяется для ВСЕХ монет (BTC, ETH, TON)
@@ -4568,87 +4573,21 @@ class AISignalAnalyzer:
                 # Recalculate direction based on adjusted score
                 raw_direction = self._determine_direction_from_score(total_score)
         
-        # ====== ФИНАЛЬНОЕ НАПРАВЛЕНИЕ И ТЕКСТ ======
-        # Направление определяется ТОЛЬКО по score (уже учтена корреляция)
-        final_direction = raw_direction  # Уже определено через _determine_direction_from_score
-        
-        # Текст соответствует направлению
-        if final_direction == "long":
-            if abs(total_score) >= 25:
-                direction = "📈 ЛОНГ"
-                strength = "сильный"
-            else:
-                direction = "📈 Вероятно вверх"
-                strength = "средний"
-        elif final_direction == "short":
-            if abs(total_score) >= 25:
-                direction = "📉 ШОРТ"
-                strength = "сильный"
-            else:
-                direction = "📉 Вероятно вниз"
-                strength = "средний"
-        else:  # sideways
-            direction = "➡️ Боковик"
-            strength = "слабый"
-        
-        # Вероятность рассчитывается по реальным данным
-        final_probability = self._calculate_real_probability(
+        # ====== FINALIZE OLD SCORES FOR BACKWARD COMPATIBILITY ======
+        # OLD direction and probability (not used for final signal, kept for logging)
+        old_final_direction = raw_direction
+        old_final_probability = self._calculate_real_probability(
             total_score=total_score,
-            direction=final_direction,
+            direction=old_final_direction,
             bullish_count=consensus_data["bullish_count"],
             bearish_count=consensus_data["bearish_count"],
             neutral_count=consensus_data["neutral_count"]
         )
         
-        logger.info(f"FINAL signal for {symbol}: direction={direction}, raw={final_direction}, score={total_score:.2f}, probability={final_probability}%")
+        logger.info(f"OLD signal (30-factor) for {symbol}: direction={old_final_direction}, score={total_score:.2f}, probability={old_final_probability}%")
         
-        # Determine confidence based on probability
-        if final_probability >= 70:
-            confidence = "Высокая"
-            confidence_en = "high"
-        elif final_probability >= 60:
-            confidence = "Средняя"
-            confidence_en = "medium"
-        else:
-            confidence = "Низкая"
-            confidence_en = "low"
-        
-        # Create probability_data with final values
-        probability_data = {
-            "probability": final_probability,
-            "direction": "up" if final_direction == "long" else ("down" if final_direction == "short" else "sideways"),
-            "confidence": confidence_en,
-            "data_quality": round(data_sources_available / self.TOTAL_DATA_SOURCES, 2)
-        }
-        
-        # Save direction for next time (for hysteresis tracking, though not actively used in honest signals)
-        self.previous_direction[symbol] = final_direction
-        
-        # ====== СОХРАНЯЕМ СИГНАЛ ДЛЯ МЕЖМОНЕТНОЙ ПРОВЕРКИ ======
-        current_time = time.time()
-        
-        # Сохраняем в старое хранилище для обратной совместимости
-        self.last_symbol_signals[symbol] = {
-            "direction": final_direction,
-            "probability": final_probability,
-            "total_score": total_score,
-            "trend_score": block_trend_score,
-            "generated_at": current_time,
-        }
-        
-        # Сохраняем в отдельное хранилище корреляции с TTL
-        self._correlation_signals[symbol] = {
-            "direction": final_direction,
-            "probability": final_probability,
-            "total_score": total_score,
-            "trend_score": block_trend_score,
-            "generated_at": current_time,
-            "expires_at": current_time + self.CORRELATION_SIGNAL_TTL,  # TTL 10 минут
-        }
-        logger.info(f"Saved signal for {symbol}: direction={final_direction}, probability={final_probability}, total_score={total_score:.2f} (expires in {self.CORRELATION_SIGNAL_TTL}s)")
-        
-        # Calculate signal strength using the new method
-        strength_percent = self.calculate_signal_strength(total_score)
+        # Calculate signal strength using OLD method (for logging)
+        old_strength_percent = self.calculate_signal_strength(total_score)
         
         # ====== NEW: WEIGHTED FACTOR SYSTEM (10 factors, 100% total) ======
         # Calculate 10 factor scores for new weighted system
@@ -4721,6 +4660,89 @@ class AISignalAnalyzer:
         
         # Calculate weighted score using new system
         new_weighted_score = self.calculate_weighted_score(factor_scores)
+        
+        # ====== USE WEIGHTED SCORE FOR DIRECTION (NEW SYSTEM) ======
+        # Override direction based on weighted_score (scale -10 to +10)
+        # Thresholds: >2.0 = long, <-2.0 = short, else neutral
+        if new_weighted_score > 2.0:
+            weighted_direction = 'long'
+            weighted_probability = min(85, 50 + new_weighted_score * 3.5)
+        elif new_weighted_score < -2.0:
+            weighted_direction = 'short'
+            weighted_probability = min(85, 50 + abs(new_weighted_score) * 3.5)
+        else:
+            weighted_direction = 'neutral'
+            weighted_probability = 50
+        
+        # Use weighted direction as final direction
+        final_direction = weighted_direction
+        final_probability = weighted_probability
+        
+        # Update text based on weighted direction
+        if final_direction == "long":
+            if abs(new_weighted_score) >= 5:
+                direction = "📈 ЛОНГ"
+                strength = "сильный"
+            else:
+                direction = "📈 Вероятно вверх"
+                strength = "средний"
+        elif final_direction == "short":
+            if abs(new_weighted_score) >= 5:
+                direction = "📉 ШОРТ"
+                strength = "сильный"
+            else:
+                direction = "📉 Вероятно вниз"
+                strength = "средний"
+        else:  # neutral/sideways
+            direction = "➡️ Боковик"
+            strength = "слабый"
+        
+        # Determine confidence based on weighted probability
+        if final_probability >= 70:
+            confidence = "Высокая"
+            confidence_en = "high"
+        elif final_probability >= 60:
+            confidence = "Средняя"
+            confidence_en = "medium"
+        else:
+            confidence = "Низкая"
+            confidence_en = "low"
+        
+        logger.info(f"WEIGHTED signal for {symbol}: direction={direction}, raw={final_direction}, weighted_score={new_weighted_score:.2f}, probability={final_probability}%")
+        
+        # Create probability_data with weighted values
+        probability_data = {
+            "probability": final_probability,
+            "direction": "up" if final_direction == "long" else ("down" if final_direction == "short" else "sideways"),
+            "confidence": confidence_en,
+            "data_quality": round(data_sources_available / self.TOTAL_DATA_SOURCES, 2)
+        }
+        
+        # Save weighted direction for correlation checks
+        self.previous_direction[symbol] = final_direction
+        
+        # Save signal for cross-asset correlation
+        current_time = time.time()
+        self.last_symbol_signals[symbol] = {
+            "direction": final_direction,
+            "probability": final_probability,
+            "total_score": new_weighted_score * self.WEIGHTED_SCORE_SCALE_FACTOR,  # Scale to -100/+100 for compatibility
+            "trend_score": block_trend_score,
+            "generated_at": current_time,
+        }
+        
+        self._correlation_signals[symbol] = {
+            "direction": final_direction,
+            "probability": final_probability,
+            "total_score": new_weighted_score * self.WEIGHTED_SCORE_SCALE_FACTOR,  # Scale to -100/+100 for compatibility
+            "trend_score": block_trend_score,
+            "generated_at": current_time,
+            "expires_at": current_time + self.CORRELATION_SIGNAL_TTL,
+        }
+        logger.info(f"Saved weighted signal for {symbol}: direction={final_direction}, probability={final_probability}, weighted_score={new_weighted_score:.2f}")
+        
+        # Calculate signal strength from weighted score
+        strength_percent = self.calculate_signal_strength(new_weighted_score * self.WEIGHTED_SCORE_SCALE_FACTOR)  # Scale to -100/+100
         
         # ====== NEW: REAL S/R LEVELS ======
         sr_levels = {}
