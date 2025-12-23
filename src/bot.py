@@ -359,6 +359,21 @@ def get_price_keyboard(symbol: str) -> InlineKeyboardMarkup:
     ])
 
 
+def get_signals_menu_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура выбора типа сигналов."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📊 Обычные сигналы", callback_data="signals_normal"),
+        ],
+        [
+            InlineKeyboardButton(text="🧠 Умные сигналы (ТОП-3)", callback_data="signals_smart"),
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu"),
+        ],
+    ])
+
+
 def get_signals_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура для AI-сигналов по 5 монетам: BTC, ETH, TON, SOL, XRP."""
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -372,7 +387,7 @@ def get_signals_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="💧 XRP", callback_data="signal_xrp"),
         ],
         [
-            InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu"),
+            InlineKeyboardButton(text="🔙 Назад", callback_data="menu_signals"),
         ],
     ])
 
@@ -1028,6 +1043,27 @@ async def callback_price_coin(callback: CallbackQuery):
 @router.callback_query(lambda c: c.data == "menu_signals")
 async def callback_signals(callback: CallbackQuery):
     text = "🎯 *Торговые сигналы*\n\n"
+    text = text + "Выберите тип сигналов:\n\n"
+    text = text + "📊 *Обычные сигналы* — AI-анализ по конкретным монетам (BTC, ETH, TON, SOL, XRP)\n\n"
+    text = text + "🧠 *Умные сигналы* — автоматическое сканирование 500\\+ монет и выбор ТОП-3 лучших возможностей\n\n"
+    text = text + "👇 Выберите:"
+    try:
+        await safe_send_message(
+            callback.message.edit_text,
+            text,
+            reply_markup=get_signals_menu_keyboard(),
+            parse_mode=ParseMode.MARKDOWN
+        )
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            logger.error(f"Error editing message: {e}")
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "signals_normal")
+async def callback_signals_normal(callback: CallbackQuery):
+    """Handler for normal signals - show coin selection."""
+    text = "🎯 *Торговые сигналы*\n\n"
     text = text + "Анализ на основе:\n\n"
     text = text + "• Данные трекера китов\n"
     text = text + "• Депозиты vs выводы с бирж\n"
@@ -1045,7 +1081,76 @@ async def callback_signals(callback: CallbackQuery):
     except TelegramBadRequest as e:
         if "message is not modified" not in str(e):
             logger.error(f"Error editing message: {e}")
-    await callback. answer()
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "signals_smart")
+async def callback_signals_smart(callback: CallbackQuery):
+    """Handler for smart signals - scan and show TOP-3."""
+    # Show loading message
+    await callback.answer("⏳ Сканирую монеты...")
+    await callback.message.edit_text(
+        "⏳ *Сканирование умных сигналов...*\n\n"
+        "Анализирую 500\\+ монет\\.\\.\\.\\.\n"
+        "Это может занять 20\\-30 секунд",
+        parse_mode=ParseMode.MARKDOWN
+    )
+    
+    try:
+        # Import and initialize SmartSignalAnalyzer
+        from signals.smart_signals import SmartSignalAnalyzer
+        
+        analyzer = SmartSignalAnalyzer()
+        
+        # Get TOP-3 signals
+        top3, scanned_count, filtered_count = await analyzer.get_top3()
+        
+        # Format message
+        message_text = analyzer.format_message(top3, scanned_count, filtered_count)
+        
+        # Close analyzer
+        await analyzer.close()
+        
+        # Send result
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🔄 Обновить", callback_data="signals_smart"),
+            ],
+            [
+                InlineKeyboardButton(text="🔙 Назад", callback_data="menu_signals"),
+                InlineKeyboardButton(text="🏠 Меню", callback_data="menu_back"),
+            ],
+        ])
+        
+        await callback.message.edit_text(
+            message_text,
+            reply_markup=keyboard,
+            parse_mode=ParseMode.MARKDOWN
+        )
+    except Exception as e:
+        logger.error(f"Error in smart signals: {e}", exc_info=True)
+        
+        error_text = (
+            "❌ *Ошибка умных сигналов*\n\n"
+            "Произошла ошибка при сканировании монет\\.\n"
+            "Попробуйте позже или используйте обычные сигналы\\.\n\n"
+            f"_Ошибка: {str(e).replace('.', '\\.').replace('-', '\\-')}_"
+        )
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🔙 Назад", callback_data="menu_signals"),
+            ],
+        ])
+        
+        try:
+            await callback.message.edit_text(
+                error_text,
+                reply_markup=keyboard,
+                parse_mode=ParseMode.MARKDOWN
+            )
+        except Exception:
+            pass
 
 
 # ============================================
