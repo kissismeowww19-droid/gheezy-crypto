@@ -142,6 +142,32 @@ class Settings(BaseSettings):
         default=300,
         description="Интервал обновления сигналов (секунды)",
     )
+    
+    # Smart Signals Settings
+    smart_signals_scan_limit: int = Field(
+        default=500,
+        description="Сколько монет сканировать для Smart Signals",
+    )
+    smart_signals_min_volume: int = Field(
+        default=5_000_000,
+        description="Минимальный объём 24h в USD для Smart Signals",
+    )
+    smart_signals_min_mcap: int = Field(
+        default=10_000_000,
+        description="Минимальная капитализация для Smart Signals",
+    )
+    smart_signals_max_spread: float = Field(
+        default=0.005,
+        description="Максимальный спред (0.005 = 0.5%) для Smart Signals",
+    )
+    smart_signals_hysteresis_time: int = Field(
+        default=900,
+        description="Время гистерезиса в секундах (15 минут)",
+    )
+    smart_signals_hysteresis_threshold: float = Field(
+        default=0.10,
+        description="Порог замены в топе (0.10 = 10% разница)",
+    )
 
     @field_validator("telegram_admin_ids", mode="before")
     @classmethod
