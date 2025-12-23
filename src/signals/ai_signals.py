@@ -4952,6 +4952,11 @@ class AISignalAnalyzer:
                 return f"${volume / 1_000:.1f}K"
             return f"${volume:.0f}"
         
+        # Helper function to clamp scores to [-10, +10] range
+        def clamp_score(value: float, min_val: float = -10.0, max_val: float = 10.0) -> float:
+            """Clamp score to specified range."""
+            return max(min_val, min(max_val, value))
+        
         # Определяем направление из raw_direction (учитывает sideways)
         raw_direction = signal_data.get('raw_direction', 'sideways')
         probability_direction = signal_data.get('probability_direction', 'up')
@@ -5164,7 +5169,7 @@ class AISignalAnalyzer:
                     return "НЕЙТРАЛЬНЫЙ"
             
             # 1. КИТЫ (25% веса)
-            whale_score = factor_scores.get('whales', 0)
+            whale_score = clamp_score(factor_scores.get('whales', 0))
             text += f"🐋 *КИТЫ \\(25% веса\\)*\n"
             text += f"• Score: {whale_score:+.1f}/10\n"
             if whale_data:
@@ -5177,7 +5182,7 @@ class AISignalAnalyzer:
             text += f"• Вердикт: {verdict_emoji(whale_score)} {verdict_text(whale_score)}\n\n"
             
             # 2. ДЕРИВАТИВЫ (20% веса)
-            derivatives_score_val = factor_scores.get('derivatives', 0)
+            derivatives_score_val = clamp_score(factor_scores.get('derivatives', 0))
             text += f"📊 *ДЕРИВАТИВЫ \\(20% веса\\)*\n"
             text += f"• Score: {derivatives_score_val:+.1f}/10\n"
             if funding_rate:
@@ -5189,7 +5194,7 @@ class AISignalAnalyzer:
             text += f"• Вердикт: {verdict_emoji(derivatives_score_val)} {verdict_text(derivatives_score_val)}\n\n"
             
             # 3. ТРЕНД (15% веса)
-            trend_score_val = factor_scores.get('trend', 0)
+            trend_score_val = clamp_score(factor_scores.get('trend', 0))
             text += f"📈 *ТРЕНД \\(15% веса\\)*\n"
             text += f"• Score: {trend_score_val:+.1f}/10\n"
             if technical_data:
@@ -5200,7 +5205,7 @@ class AISignalAnalyzer:
             text += f"• Вердикт: {verdict_emoji(trend_score_val)} {verdict_text(trend_score_val)}\n\n"
             
             # 4. ИМПУЛЬС (12% веса)
-            momentum_score_val = factor_scores.get('momentum', 0)
+            momentum_score_val = clamp_score(factor_scores.get('momentum', 0))
             text += f"⚡ *ИМПУЛЬС \\(12% веса\\)*\n"
             text += f"• Score: {momentum_score_val:+.1f}/10\n"
             if technical_data and "rsi" in technical_data:
@@ -5210,7 +5215,7 @@ class AISignalAnalyzer:
             text += f"• Вердикт: {verdict_emoji(momentum_score_val)} {verdict_text(momentum_score_val)}\n\n"
             
             # 5. ОБЪЁМ (10% веса)
-            volume_score_val = factor_scores.get('volume', 0)
+            volume_score_val = clamp_score(factor_scores.get('volume', 0))
             text += f"📊 *ОБЪЁМ \\(10% веса\\)*\n"
             text += f"• Score: {volume_score_val:+.1f}/10\n"
             vol_24h = market_data.get('volume_24h', 0)
@@ -5218,7 +5223,7 @@ class AISignalAnalyzer:
             text += f"• Вердикт: {verdict_emoji(volume_score_val)} {verdict_text(volume_score_val)}\n\n"
             
             # 6. СИЛА ТРЕНДА / ADX (5% веса)
-            adx_score_val = factor_scores.get('adx', 0)
+            adx_score_val = clamp_score(factor_scores.get('adx', 0))
             text += f"💪 *СИЛА ТРЕНДА \\(5% веса\\)*\n"
             text += f"• Score: {adx_score_val:+.1f}/10\n"
             if technical_data and "adx" in technical_data:
@@ -5228,7 +5233,7 @@ class AISignalAnalyzer:
             text += f"• Вердикт: {verdict_emoji(adx_score_val)} {verdict_text(adx_score_val)}\n\n"
             
             # 7. ДИВЕРГЕНЦИЯ (5% веса)
-            divergence_score_val = factor_scores.get('divergence', 0)
+            divergence_score_val = clamp_score(factor_scores.get('divergence', 0))
             text += f"📈 *ДИВЕРГЕНЦИЯ \\(5% веса\\)*\n"
             text += f"• Score: {divergence_score_val:+.1f}/10\n"
             if technical_data and "rsi_divergence" in technical_data:
@@ -5242,7 +5247,7 @@ class AISignalAnalyzer:
             text += "\n"
             
             # 8. НАСТРОЕНИЯ (4% веса)
-            sentiment_score_val = factor_scores.get('sentiment', 0)
+            sentiment_score_val = clamp_score(factor_scores.get('sentiment', 0))
             text += f"😱 *НАСТРОЕНИЯ \\(4% веса\\)*\n"
             text += f"• Score: {sentiment_score_val:+.1f}/10\n"
             if fear_greed:
@@ -5252,7 +5257,7 @@ class AISignalAnalyzer:
             text += f"• Вердикт: {verdict_emoji(sentiment_score_val)} {verdict_text(sentiment_score_val)}\n\n"
             
             # 9. МАКРО (3% веса)
-            macro_score_val = factor_scores.get('macro', 0)
+            macro_score_val = clamp_score(factor_scores.get('macro', 0))
             text += f"🌍 *МАКРО \\(3% веса\\)*\n"
             text += f"• Score: {macro_score_val:+.1f}/10\n"
             macro = signal_data.get('macro', {})
@@ -5262,7 +5267,7 @@ class AISignalAnalyzer:
             text += f"• Вердикт: {verdict_emoji(macro_score_val)} {verdict_text(macro_score_val)}\n\n"
             
             # 10. ОПЦИОНЫ (1% веса)
-            options_score_val = factor_scores.get('options', 0)
+            options_score_val = clamp_score(factor_scores.get('options', 0))
             text += f"📈 *ОПЦИОНЫ \\(1% веса\\)*\n"
             text += f"• Score: {options_score_val:+.1f}/10\n"
             options = signal_data.get('options', {})
@@ -5272,11 +5277,11 @@ class AISignalAnalyzer:
             text += f"• Вердикт: {verdict_emoji(options_score_val)} {verdict_text(options_score_val)}\n\n"
         
         # ===== РАЗБИВКА ПО БЛОКАМ =====
-        block_trend = signal_data.get('block_trend_score', 0)
-        block_momentum = signal_data.get('block_momentum_score', 0)
-        block_whales = signal_data.get('block_whales_score', 0)
-        block_derivatives = signal_data.get('block_derivatives_score', 0)
-        block_sentiment = signal_data.get('block_sentiment_score', 0)
+        block_trend = clamp_score(signal_data.get('block_trend_score', 0))
+        block_momentum = clamp_score(signal_data.get('block_momentum_score', 0))
+        block_whales = clamp_score(signal_data.get('block_whales_score', 0))
+        block_derivatives = clamp_score(signal_data.get('block_derivatives_score', 0))
+        block_sentiment = clamp_score(signal_data.get('block_sentiment_score', 0))
         
         # Calculate new factor scores
         divergence_score = 0.0
@@ -5308,6 +5313,11 @@ class AISignalAnalyzer:
                     adx_score = 4.0  # Moderate trend
                 elif adx_value < 20:
                     adx_score = -3.0  # Weak trend (negative)
+        
+        # Clamp all scores to [-10, +10] range
+        divergence_score = clamp_score(divergence_score)
+        volume_spike_score = clamp_score(volume_spike_score)
+        adx_score = clamp_score(adx_score)
         
         text += f"📈 *РАЗБИВКА ПО БЛОКАМ*\n"
         text += f"• Тренд: {'+' if block_trend > 0 else ''}{block_trend:.1f}/10\n"
