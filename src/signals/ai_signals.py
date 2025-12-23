@@ -471,6 +471,133 @@ class AISignalAnalyzer:
             'nearest_support': nearest_support,
         }
     
+    def calculate_real_targets(
+        self,
+        direction: str,
+        current_price: float,
+        resistances: list,
+        supports: list,
+        atr: float
+    ) -> Dict:
+        """
+        Calculate real TP/SL based on S/R levels instead of fixed percentages.
+        
+        Logic:
+        - LONG: TP on resistances, SL below nearest support + ATR buffer
+        - SHORT: TP on supports, SL above nearest resistance + ATR buffer
+        - SIDEWAYS: No specific targets
+        
+        Args:
+            direction: Signal direction ("long", "short", "sideways")
+            current_price: Current price
+            resistances: List of resistance levels [{'price': float, 'strength': int, ...}, ...]
+            supports: List of support levels [{'price': float, 'strength': int, ...}, ...]
+            atr: Average True Range value for buffer calculation
+            
+        Returns:
+            Dict with tp1, tp2, stop_loss, rr_ratio, risk_percent, reward_percent
+        """
+        # Calculate adaptive ATR buffer based on volatility
+        atr_pct = (atr / current_price * 100) if current_price > 0 else 2.0
+        
+        if atr_pct > 3.0:
+            # High volatility - wider buffer
+            stop_buffer_multiplier = 0.75
+        elif atr_pct < 1.5:
+            # Low volatility - narrower buffer
+            stop_buffer_multiplier = 0.3
+        else:
+            # Normal volatility - standard buffer
+            stop_buffer_multiplier = 0.5
+        
+        if direction == "long":
+            # LONG: TP on resistances, SL below support
+            if resistances and len(resistances) > 0:
+                tp1 = resistances[0]['price']
+            else:
+                tp1 = current_price * 1.015  # Fallback to +1.5%
+            
+            if resistances and len(resistances) > 1:
+                tp2 = resistances[1]['price']
+            else:
+                tp2 = current_price * 1.025  # Fallback to +2.5%
+            
+            # Stop below nearest support with ATR buffer
+            if supports and len(supports) > 0:
+                nearest_support = supports[0]['price']
+            else:
+                nearest_support = current_price * 0.97  # Fallback to -3%
+            
+            stop_loss = nearest_support - (atr * stop_buffer_multiplier)
+            
+            # Ensure stop loss doesn't go below reasonable level (max -5%)
+            min_stop = current_price * 0.95
+            if stop_loss < min_stop:
+                stop_loss = min_stop
+            
+        elif direction == "short":
+            # SHORT: TP on supports, SL above resistance
+            if supports and len(supports) > 0:
+                tp1 = supports[0]['price']
+            else:
+                tp1 = current_price * 0.985  # Fallback to -1.5%
+            
+            if supports and len(supports) > 1:
+                tp2 = supports[1]['price']
+            else:
+                tp2 = current_price * 0.975  # Fallback to -2.5%
+            
+            # Stop above nearest resistance with ATR buffer
+            if resistances and len(resistances) > 0:
+                nearest_resistance = resistances[0]['price']
+            else:
+                nearest_resistance = current_price * 1.03  # Fallback to +3%
+            
+            stop_loss = nearest_resistance + (atr * stop_buffer_multiplier)
+            
+            # Ensure stop loss doesn't go above reasonable level (max +5%)
+            max_stop = current_price * 1.05
+            if stop_loss > max_stop:
+                stop_loss = max_stop
+            
+        else:  # sideways
+            tp1 = None
+            tp2 = None
+            stop_loss = None
+        
+        # Calculate real R:R ratio
+        if tp1 and stop_loss and direction in ["long", "short"]:
+            if direction == "long":
+                reward = tp1 - current_price
+                risk = current_price - stop_loss
+            else:  # short
+                reward = current_price - tp1
+                risk = stop_loss - current_price
+            
+            rr_ratio = reward / risk if risk > 0 else 0
+        else:
+            rr_ratio = 0
+        
+        # Calculate risk and reward percentages
+        if stop_loss and current_price > 0:
+            risk_percent = round((abs(current_price - stop_loss) / current_price * 100), 2)
+        else:
+            risk_percent = 0
+        
+        if tp1 and current_price > 0:
+            reward_percent = round((abs(tp1 - current_price) / current_price * 100), 2)
+        else:
+            reward_percent = 0
+        
+        return {
+            "tp1": tp1,
+            "tp2": tp2,
+            "stop_loss": stop_loss,
+            "rr_ratio": round(rr_ratio, 1),
+            "risk_percent": risk_percent,
+            "reward_percent": reward_percent,
+        }
+    
     def predict_price_4h(
         self, 
         current_price: float, 
@@ -4780,6 +4907,28 @@ class AISignalAnalyzer:
                     atr=atr_value
                 )
         
+        # ====== NEW: REAL TP/SL TARGETS BASED ON S/R LEVELS ======
+        real_targets = {}
+        if sr_levels and 'resistances' in sr_levels and 'supports' in sr_levels:
+            # Get ATR value
+            atr_value = 0.0
+            if technical_data and "atr" in technical_data:
+                atr_value = technical_data["atr"]["value"]
+            else:
+                # Fallback: estimate ATR as 1.5% of price
+                current_price = market_data.get("price_usd", 0)
+                atr_value = current_price * 0.015 if current_price > 0 else 0
+            
+            current_price = market_data.get("price_usd", 0)
+            if current_price > 0 and atr_value > 0:
+                real_targets = self.calculate_real_targets(
+                    direction=final_direction,  # "long", "short", or "sideways"
+                    current_price=current_price,
+                    resistances=sr_levels.get('resistances', []),
+                    supports=sr_levels.get('supports', []),
+                    atr=atr_value
+                )
+        
         return {
             "symbol": symbol,
             "direction": direction,
@@ -4844,6 +4993,8 @@ class AISignalAnalyzer:
             "sr_levels": sr_levels,
             # NEW: 4-hour price prediction
             "price_prediction": price_prediction,
+            # NEW: Real TP/SL targets based on S/R levels
+            "real_targets": real_targets,
         }
     
     @staticmethod
@@ -5895,52 +6046,169 @@ class AISignalAnalyzer:
             text += "🎯 *ВЕРДИКТ*\n"
             text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             
+            # Get real targets if available
+            real_targets = signal_data.get('real_targets', {})
+            
             # Determine signal type and recommendation
-            price_pred = signal_data.get('price_prediction', {})
-            if price_pred:
-                direction_pred = price_pred.get('direction', 'NEUTRAL')
-                confidence_pred = price_pred.get('confidence', 50)
-                predicted_price = price_pred.get('predicted_price', current_price)
-                predicted_change = price_pred.get('predicted_change_pct', 0)
+            if real_targets and real_targets.get('tp1') is not None:
+                # Use real targets based on S/R levels
+                tp1 = real_targets.get('tp1')
+                tp2 = real_targets.get('tp2')
+                stop_loss = real_targets.get('stop_loss')
+                rr_ratio = real_targets.get('rr_ratio', 0)
+                risk_percent = real_targets.get('risk_percent', 0)
+                reward_percent = real_targets.get('reward_percent', 0)
                 
-                direction_emoji = "📈" if direction_pred == 'UP' else "📉" if direction_pred == 'DOWN' else "➡️"
-                direction_ru = "ЛОНГ" if direction_pred == 'UP' else "ШОРТ" if direction_pred == 'DOWN' else "БОКОВИК"
+                # Determine direction based on tp1 vs current_price
+                if tp1 > current_price:
+                    direction_emoji = "📈"
+                    direction_ru = "ЛОНГ"
+                elif tp1 < current_price:
+                    direction_emoji = "📉"
+                    direction_ru = "ШОРТ"
+                else:
+                    direction_emoji = "➡️"
+                    direction_ru = "БОКОВИК"
+                
+                # Calculate confidence from weighted score and probability
+                confidence_pred = probability
                 
                 text += f"{direction_emoji} *{direction_ru}* \\({confidence_pred}% уверенность\\)\n\n"
                 text += f"💰 Цена сейчас: {format_price(current_price)}\n"
-                text += f"🎯 Цель 4ч: {format_price(predicted_price)} \\({predicted_change:+.1f}%\\)\n"
                 
-                # Calculate stop loss
-                if direction_pred == 'UP':
-                    stop_price = current_price * 0.992  # -0.8% stop
-                    stop_pct = -0.8
-                elif direction_pred == 'DOWN':
-                    stop_price = current_price * 1.008  # +0.8% stop
-                    stop_pct = +0.8
+                # Display TP1, TP2, SL with S/R level info
+                if tp1:
+                    tp1_change = ((tp1 - current_price) / current_price * 100) if current_price > 0 else 0
+                    text += f"🎯 TP1: {format_price(tp1)} \\({tp1_change:+.1f}%\\)"
+                    
+                    # Add S/R level info if available
+                    sr_levels = signal_data.get('sr_levels', {})
+                    if direction_ru == "ЛОНГ" and sr_levels.get('resistances'):
+                        r1_info = sr_levels['resistances'][0]
+                        source = r1_info.get('source', 'calculated')
+                        touches = r1_info.get('touches', 0)
+                        if touches > 0:
+                            text += f" — R1, {touches} касаний\n"
+                        else:
+                            text += f" — R1\n"
+                    elif direction_ru == "ШОРТ" and sr_levels.get('supports'):
+                        s1_info = sr_levels['supports'][0]
+                        source = s1_info.get('source', 'calculated')
+                        touches = s1_info.get('touches', 0)
+                        if touches > 0:
+                            text += f" — S1, {touches} касаний\n"
+                        else:
+                            text += f" — S1\n"
+                    else:
+                        text += "\n"
+                
+                if tp2:
+                    tp2_change = ((tp2 - current_price) / current_price * 100) if current_price > 0 else 0
+                    text += f"🎯 TP2: {format_price(tp2)} \\({tp2_change:+.1f}%\\)"
+                    
+                    # Add S/R level info if available
+                    sr_levels = signal_data.get('sr_levels', {})
+                    if direction_ru == "ЛОНГ" and sr_levels.get('resistances') and len(sr_levels['resistances']) > 1:
+                        r2_info = sr_levels['resistances'][1]
+                        touches = r2_info.get('touches', 0)
+                        if touches > 0:
+                            text += f" — R2, {touches} касаний\n"
+                        else:
+                            text += f" — R2\n"
+                    elif direction_ru == "ШОРТ" and sr_levels.get('supports') and len(sr_levels['supports']) > 1:
+                        s2_info = sr_levels['supports'][1]
+                        touches = s2_info.get('touches', 0)
+                        if touches > 0:
+                            text += f" — S2, {touches} касаний\n"
+                        else:
+                            text += f" — S2\n"
+                    else:
+                        text += "\n"
+                
+                if stop_loss:
+                    sl_change = ((stop_loss - current_price) / current_price * 100) if current_price > 0 else 0
+                    text += f"🛑 Стоп: {format_price(stop_loss)} \\({sl_change:+.1f}%\\)"
+                    
+                    # Add ATR buffer info
+                    technical_data = signal_data.get('technical_data') if hasattr(signal_data, 'get') else None
+                    if technical_data and isinstance(technical_data, dict) and "atr" in technical_data:
+                        atr_pct = technical_data["atr"]["percent"]
+                        if atr_pct > 3.0:
+                            text += f" — под S1 \\+ широкий ATR буфер\n"
+                        elif atr_pct < 1.5:
+                            text += f" — под S1 \\+ узкий ATR буфер\n"
+                        else:
+                            text += f" — под S1 \\+ ATR буфер\n"
+                    else:
+                        text += "\n"
+                
+                # Display R:R ratio with warnings
+                text += f"📊 R:R = {rr_ratio:.1f}\n"
+                text += f"📊 Риск: {risk_percent:.1f}% | Награда: {reward_percent:.1f}%\n\n"
+                
+                # Warnings based on R:R ratio
+                if rr_ratio < 1.0:
+                    text += "⚠️ *R:R < 1* — риск больше награды\\!\n"
+                    text += "🚫 *РЕКОМЕНДАЦИЯ:* ПРОПУСТИТЬ этот сетап\\.\n\n"
+                elif rr_ratio < 1.5:
+                    text += "⚠️ *R:R средний* — не самое выгодное соотношение\\.\n"
+                    text += "📉 *РЕКОМЕНДАЦИЯ:* Уменьшить размер позиции\\.\n\n"
                 else:
-                    stop_price = 0
-                    stop_pct = 0
-                
-                if stop_price > 0:
-                    text += f"🛑 Стоп: {format_price(stop_price)} \\({stop_pct:+.1f}%\\)\n"
-                    # Calculate R:R
-                    risk = abs(stop_pct)
-                    reward = abs(predicted_change)
-                    rr = reward / risk if risk > 0 else 0
-                    text += f"📊 R:R = {rr:.1f}\n\n"
-                
-                # Recommendation based on confidence
-                if confidence_pred >= 70:
-                    text += "⚠️ *РЕКОМЕНДАЦИЯ:*\n"
-                    text += "Сигнал СИЛЬНЫЙ\\. Можно входить с\n"
-                    text += "нормальным размером позиции\\.\n\n"
-                elif confidence_pred >= 60:
-                    text += "⚠️ *РЕКОМЕНДАЦИЯ:*\n"
-                    text += "Сигнал СРЕДНИЙ\\. Можно входить с\n"
-                    text += "уменьшенным размером позиции\\.\n\n"
-                else:
-                    text += "⚠️ *РЕКОМЕНДАЦИЯ:*\n"
-                    text += "Сигнал СЛАБЫЙ\\. Рекомендуется ПРОПУСТИТЬ\\.\n\n"
+                    text += "✅ *R:R хороший* — соотношение благоприятное\\.\n"
+                    if confidence_pred >= 70:
+                        text += "💪 *РЕКОМЕНДАЦИЯ:* Сигнал СИЛЬНЫЙ\\. Можно входить с нормальным размером позиции\\.\n\n"
+                    elif confidence_pred >= 60:
+                        text += "⚠️ *РЕКОМЕНДАЦИЯ:* Сигнал СРЕДНИЙ\\. Можно входить с уменьшенным размером позиции\\.\n\n"
+                    else:
+                        text += "⚠️ *РЕКОМЕНДАЦИЯ:* Сигнал СЛАБЫЙ\\. Рекомендуется ПРОПУСТИТЬ\\.\n\n"
+                        
+            else:
+                # Fallback to old price prediction display if real targets not available
+                price_pred = signal_data.get('price_prediction', {})
+                if price_pred:
+                    direction_pred = price_pred.get('direction', 'NEUTRAL')
+                    confidence_pred = price_pred.get('confidence', 50)
+                    predicted_price = price_pred.get('predicted_price', current_price)
+                    predicted_change = price_pred.get('predicted_change_pct', 0)
+                    
+                    direction_emoji = "📈" if direction_pred == 'UP' else "📉" if direction_pred == 'DOWN' else "➡️"
+                    direction_ru = "ЛОНГ" if direction_pred == 'UP' else "ШОРТ" if direction_pred == 'DOWN' else "БОКОВИК"
+                    
+                    text += f"{direction_emoji} *{direction_ru}* \\({confidence_pred}% уверенность\\)\n\n"
+                    text += f"💰 Цена сейчас: {format_price(current_price)}\n"
+                    text += f"🎯 Цель 4ч: {format_price(predicted_price)} \\({predicted_change:+.1f}%\\)\n"
+                    
+                    # Calculate stop loss
+                    if direction_pred == 'UP':
+                        stop_price = current_price * 0.992  # -0.8% stop
+                        stop_pct = -0.8
+                    elif direction_pred == 'DOWN':
+                        stop_price = current_price * 1.008  # +0.8% stop
+                        stop_pct = +0.8
+                    else:
+                        stop_price = 0
+                        stop_pct = 0
+                    
+                    if stop_price > 0:
+                        text += f"🛑 Стоп: {format_price(stop_price)} \\({stop_pct:+.1f}%\\)\n"
+                        # Calculate R:R
+                        risk = abs(stop_pct)
+                        reward = abs(predicted_change)
+                        rr = reward / risk if risk > 0 else 0
+                        text += f"📊 R:R = {rr:.1f}\n\n"
+                    
+                    # Recommendation based on confidence
+                    if confidence_pred >= 70:
+                        text += "⚠️ *РЕКОМЕНДАЦИЯ:*\n"
+                        text += "Сигнал СИЛЬНЫЙ\\. Можно входить с\n"
+                        text += "нормальным размером позиции\\.\n\n"
+                    elif confidence_pred >= 60:
+                        text += "⚠️ *РЕКОМЕНДАЦИЯ:*\n"
+                        text += "Сигнал СРЕДНИЙ\\. Можно входить с\n"
+                        text += "уменьшенным размером позиции\\.\n\n"
+                    else:
+                        text += "⚠️ *РЕКОМЕНДАЦИЯ:*\n"
+                        text += "Сигнал СЛАБЫЙ\\. Рекомендуется ПРОПУСТИТЬ\\.\n\n"
         
         # ===== FOOTER =====
         text += f"📡 Факторов: {data_sources_count}\n"
