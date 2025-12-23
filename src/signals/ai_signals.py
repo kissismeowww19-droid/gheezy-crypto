@@ -526,6 +526,133 @@ class AISignalAnalyzer:
             'nearest_support': nearest_support,
         }
     
+    def calculate_real_targets(
+        self,
+        direction: str,
+        current_price: float,
+        resistances: list,
+        supports: list,
+        atr: float
+    ) -> Dict:
+        """
+        Calculate real TP/SL based on S/R levels instead of fixed percentages.
+        
+        Logic:
+        - LONG: TP on resistances, SL below nearest support + ATR buffer
+        - SHORT: TP on supports, SL above nearest resistance + ATR buffer
+        - SIDEWAYS: No specific targets
+        
+        Args:
+            direction: Signal direction ("long", "short", "sideways")
+            current_price: Current price
+            resistances: List of resistance levels [{'price': float, 'strength': int, ...}, ...]
+            supports: List of support levels [{'price': float, 'strength': int, ...}, ...]
+            atr: Average True Range value for buffer calculation
+            
+        Returns:
+            Dict with tp1, tp2, stop_loss, rr_ratio, risk_percent, reward_percent
+        """
+        # Calculate adaptive ATR buffer based on volatility
+        atr_pct = (atr / current_price * 100) if current_price > 0 else 2.0
+        
+        if atr_pct > 3.0:
+            # High volatility - wider buffer
+            stop_buffer_multiplier = 0.75
+        elif atr_pct < 1.5:
+            # Low volatility - narrower buffer
+            stop_buffer_multiplier = 0.3
+        else:
+            # Normal volatility - standard buffer
+            stop_buffer_multiplier = 0.5
+        
+        if direction == "long":
+            # LONG: TP on resistances, SL below support
+            if len(resistances) > 0:
+                tp1 = resistances[0]['price']
+            else:
+                tp1 = current_price * 1.015  # Fallback to +1.5%
+            
+            if len(resistances) > 1:
+                tp2 = resistances[1]['price']
+            else:
+                tp2 = current_price * 1.025  # Fallback to +2.5%
+            
+            # Stop below nearest support with ATR buffer
+            if len(supports) > 0:
+                nearest_support = supports[0]['price']
+            else:
+                nearest_support = current_price * 0.97  # Fallback to -3%
+            
+            stop_loss = nearest_support - (atr * stop_buffer_multiplier)
+            
+            # Ensure stop loss doesn't go below reasonable level (max -5%)
+            min_stop = current_price * 0.95
+            if stop_loss < min_stop:
+                stop_loss = min_stop
+            
+        elif direction == "short":
+            # SHORT: TP on supports, SL above resistance
+            if len(supports) > 0:
+                tp1 = supports[0]['price']
+            else:
+                tp1 = current_price * 0.985  # Fallback to -1.5%
+            
+            if len(supports) > 1:
+                tp2 = supports[1]['price']
+            else:
+                tp2 = current_price * 0.975  # Fallback to -2.5%
+            
+            # Stop above nearest resistance with ATR buffer
+            if len(resistances) > 0:
+                nearest_resistance = resistances[0]['price']
+            else:
+                nearest_resistance = current_price * 1.03  # Fallback to +3%
+            
+            stop_loss = nearest_resistance + (atr * stop_buffer_multiplier)
+            
+            # Ensure stop loss doesn't go above reasonable level (max +5%)
+            max_stop = current_price * 1.05
+            if stop_loss > max_stop:
+                stop_loss = max_stop
+            
+        else:  # sideways
+            tp1 = None
+            tp2 = None
+            stop_loss = None
+        
+        # Calculate real R:R ratio
+        if tp1 and stop_loss and direction in ["long", "short"]:
+            if direction == "long":
+                reward = tp1 - current_price
+                risk = current_price - stop_loss
+            else:  # short
+                reward = current_price - tp1
+                risk = stop_loss - current_price
+            
+            rr_ratio = reward / risk if risk > 0 else 0
+        else:
+            rr_ratio = 0
+        
+        # Calculate risk and reward percentages
+        if stop_loss and current_price > 0:
+            risk_percent = round((abs(current_price - stop_loss) / current_price * 100), 2)
+        else:
+            risk_percent = 0
+        
+        if tp1 and current_price > 0:
+            reward_percent = round((abs(tp1 - current_price) / current_price * 100), 2)
+        else:
+            reward_percent = 0
+        
+        return {
+            "tp1": tp1,
+            "tp2": tp2,
+            "stop_loss": stop_loss,
+            "rr_ratio": round(rr_ratio, 1),
+            "risk_percent": risk_percent,
+            "reward_percent": reward_percent,
+        }
+    
     def predict_price_4h(
         self, 
         current_price: float, 
@@ -4867,6 +4994,30 @@ class AISignalAnalyzer:
                     atr=atr_value
                 )
         
+        # ====== NEW: REAL TP/SL TARGETS BASED ON S/R LEVELS ======
+        real_targets = {}
+        if sr_levels and 'resistances' in sr_levels and 'supports' in sr_levels:
+            # Get current price and ATR value
+            current_price = market_data.get("price_usd", 0)
+            atr_value = 0.0
+            if technical_data and "atr" in technical_data:
+                atr_value = technical_data["atr"]["value"]
+            else:
+                # Fallback: estimate ATR as 1.5% of price
+                atr_value = current_price * 0.015 if current_price > 0 else 0
+            
+            if current_price > 0 and atr_value > 0:
+                # Map direction: "neutral" -> "sideways" for calculate_real_targets
+                target_direction = "sideways" if final_direction == "neutral" else final_direction
+                
+                real_targets = self.calculate_real_targets(
+                    direction=target_direction,  # "long", "short", or "sideways"
+                    current_price=current_price,
+                    resistances=sr_levels.get('resistances', []),
+                    supports=sr_levels.get('supports', []),
+                    atr=atr_value
+                )
+        
         return {
             "symbol": symbol,
             "direction": direction,
@@ -4931,6 +5082,8 @@ class AISignalAnalyzer:
             "sr_levels": sr_levels,
             # NEW: 4-hour price prediction
             "price_prediction": price_prediction,
+            # NEW: Real TP/SL targets based on S/R levels
+            "real_targets": real_targets,
         }
     
     @staticmethod
@@ -5962,6 +6115,7 @@ class AISignalAnalyzer:
             text += f"• Опционы:    {options_s:+.1f} × 0%  = {options_contrib:+.2f}\n"
             text += "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             text += f"📊 *ИТОГО: {weighted_score:+.2f}*\n\n"
+
         
         # ===== FOOTER =====
         text += f"📡 Факторов: {data_sources_count}\n"
