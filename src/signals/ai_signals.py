@@ -5359,10 +5359,17 @@ class AISignalAnalyzer:
                 nearest_long = liq_levels.get('nearest_long_liq', 0)
                 if nearest_short > 0 or nearest_long > 0:
                     text += "🎯 *ЛИКВИДАЦИИ:*\n"
+                    # Format with 2 decimals for low-priced coins, 0 decimals for high-priced
                     if nearest_short > 0:
-                        text += f"• Шорты: ${nearest_short:,.0f} \\(магнит вверх\\)\n"
+                        if nearest_short < 10:
+                            text += f"• Шорты: ${nearest_short:.2f} \\(магнит вверх\\)\n"
+                        else:
+                            text += f"• Шорты: ${nearest_short:,.0f} \\(магнит вверх\\)\n"
                     if nearest_long > 0:
-                        text += f"• Лонги: ${nearest_long:,.0f} \\(магнит вниз\\)\n"
+                        if nearest_long < 10:
+                            text += f"• Лонги: ${nearest_long:.2f} \\(магнит вниз\\)\n"
+                        else:
+                            text += f"• Лонги: ${nearest_long:,.0f} \\(магнит вниз\\)\n"
                     text += "\n"
         
         # ===== NEW: СЦЕНАРИИ НА 4 ЧАСА =====
