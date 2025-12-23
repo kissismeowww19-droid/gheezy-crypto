@@ -512,18 +512,18 @@ class AISignalAnalyzer:
         
         if direction == "long":
             # LONG: TP on resistances, SL below support
-            if resistances and len(resistances) > 0:
+            if len(resistances) > 0:
                 tp1 = resistances[0]['price']
             else:
                 tp1 = current_price * 1.015  # Fallback to +1.5%
             
-            if resistances and len(resistances) > 1:
+            if len(resistances) > 1:
                 tp2 = resistances[1]['price']
             else:
                 tp2 = current_price * 1.025  # Fallback to +2.5%
             
             # Stop below nearest support with ATR buffer
-            if supports and len(supports) > 0:
+            if len(supports) > 0:
                 nearest_support = supports[0]['price']
             else:
                 nearest_support = current_price * 0.97  # Fallback to -3%
@@ -537,18 +537,18 @@ class AISignalAnalyzer:
             
         elif direction == "short":
             # SHORT: TP on supports, SL above resistance
-            if supports and len(supports) > 0:
+            if len(supports) > 0:
                 tp1 = supports[0]['price']
             else:
                 tp1 = current_price * 0.985  # Fallback to -1.5%
             
-            if supports and len(supports) > 1:
+            if len(supports) > 1:
                 tp2 = supports[1]['price']
             else:
                 tp2 = current_price * 0.975  # Fallback to -2.5%
             
             # Stop above nearest resistance with ATR buffer
-            if resistances and len(resistances) > 0:
+            if len(resistances) > 0:
                 nearest_resistance = resistances[0]['price']
             else:
                 nearest_resistance = current_price * 1.03  # Fallback to +3%
@@ -6048,8 +6048,9 @@ class AISignalAnalyzer:
             text += "🎯 *ВЕРДИКТ*\n"
             text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             
-            # Get real targets if available
+            # Get real targets and S/R levels if available
             real_targets = signal_data.get('real_targets', {})
+            sr_levels = signal_data.get('sr_levels', {})
             
             # Determine signal type and recommendation
             if real_targets and real_targets.get('tp1') is not None:
@@ -6084,7 +6085,6 @@ class AISignalAnalyzer:
                     text += f"🎯 TP1: {format_price(tp1)} \\({tp1_change:+.1f}%\\)"
                     
                     # Add S/R level info if available
-                    sr_levels = signal_data.get('sr_levels', {})
                     if direction_ru == "ЛОНГ" and sr_levels.get('resistances'):
                         r1_info = sr_levels['resistances'][0]
                         touches = r1_info.get('touches', 0)
@@ -6107,15 +6107,14 @@ class AISignalAnalyzer:
                     text += f"🎯 TP2: {format_price(tp2)} \\({tp2_change:+.1f}%\\)"
                     
                     # Add S/R level info if available
-                    sr_levels = signal_data.get('sr_levels', {})
-                    if direction_ru == "ЛОНГ" and sr_levels.get('resistances') and len(sr_levels['resistances']) > 1:
+                    if direction_ru == "ЛОНГ" and len(sr_levels.get('resistances', [])) > 1:
                         r2_info = sr_levels['resistances'][1]
                         touches = r2_info.get('touches', 0)
                         if touches > 0:
                             text += f" — R2, {touches} касаний\n"
                         else:
                             text += f" — R2\n"
-                    elif direction_ru == "ШОРТ" and sr_levels.get('supports') and len(sr_levels['supports']) > 1:
+                    elif direction_ru == "ШОРТ" and len(sr_levels.get('supports', [])) > 1:
                         s2_info = sr_levels['supports'][1]
                         touches = s2_info.get('touches', 0)
                         if touches > 0:
@@ -6129,8 +6128,7 @@ class AISignalAnalyzer:
                     sl_change = ((stop_loss - current_price) / current_price * 100) if current_price > 0 else 0
                     text += f"🛑 Стоп: {format_price(stop_loss)} \\({sl_change:+.1f}%\\)"
                     
-                    # Add ATR buffer info with correct direction
-                    technical_data = signal_data.get('technical_data')
+                    # Add ATR buffer info with correct direction (use technical_data from scope)
                     if technical_data and isinstance(technical_data, dict) and "atr" in technical_data:
                         atr_pct = technical_data["atr"]["percent"]
                         
