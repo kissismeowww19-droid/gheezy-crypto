@@ -5427,20 +5427,19 @@ class AISignalAnalyzer:
             
             predicted_price = price_prediction.get('predicted_price', current_price)
             predicted_change = price_prediction.get('predicted_change_pct', 0)
-            direction_pred = price_prediction.get('direction', 'NEUTRAL')
-            confidence_pred = price_prediction.get('confidence', 50)
             
-            # Calculate scenario probabilities based on signal
-            if direction_pred == 'UP':
-                bull_prob = min(85, confidence_pred + 10)
+            # Calculate scenario probabilities based on main signal direction (raw_direction)
+            # This ensures consistency with the main direction shown at the top
+            if raw_direction == "long":
+                bull_prob = min(85, probability + 10)
                 bear_prob = max(5, 100 - bull_prob - 25)
                 side_prob = 100 - bull_prob - bear_prob
-            elif direction_pred == 'DOWN':
-                bear_prob = min(85, confidence_pred + 10)
+            elif raw_direction == "short":
+                bear_prob = min(85, probability + 10)
                 bull_prob = max(5, 100 - bear_prob - 25)
                 side_prob = 100 - bull_prob - bear_prob
-            else:  # NEUTRAL
-                side_prob = min(70, confidence_pred + 10)
+            else:  # sideways
+                side_prob = min(70, probability + 10)
                 bull_prob = (100 - side_prob) // 2
                 bear_prob = 100 - side_prob - bull_prob
             
