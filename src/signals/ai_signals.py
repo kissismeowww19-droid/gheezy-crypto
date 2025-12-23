@@ -4910,19 +4910,21 @@ class AISignalAnalyzer:
         # ====== NEW: REAL TP/SL TARGETS BASED ON S/R LEVELS ======
         real_targets = {}
         if sr_levels and 'resistances' in sr_levels and 'supports' in sr_levels:
-            # Get ATR value
+            # Get current price and ATR value
+            current_price = market_data.get("price_usd", 0)
             atr_value = 0.0
             if technical_data and "atr" in technical_data:
                 atr_value = technical_data["atr"]["value"]
             else:
                 # Fallback: estimate ATR as 1.5% of price
-                current_price = market_data.get("price_usd", 0)
                 atr_value = current_price * 0.015 if current_price > 0 else 0
             
-            current_price = market_data.get("price_usd", 0)
             if current_price > 0 and atr_value > 0:
+                # Map direction: "neutral" -> "sideways" for calculate_real_targets
+                target_direction = "sideways" if final_direction == "neutral" else final_direction
+                
                 real_targets = self.calculate_real_targets(
-                    direction=final_direction,  # "long", "short", or "sideways"
+                    direction=target_direction,  # "long", "short", or "sideways"
                     current_price=current_price,
                     resistances=sr_levels.get('resistances', []),
                     supports=sr_levels.get('supports', []),
@@ -6085,7 +6087,6 @@ class AISignalAnalyzer:
                     sr_levels = signal_data.get('sr_levels', {})
                     if direction_ru == "ЛОНГ" and sr_levels.get('resistances'):
                         r1_info = sr_levels['resistances'][0]
-                        source = r1_info.get('source', 'calculated')
                         touches = r1_info.get('touches', 0)
                         if touches > 0:
                             text += f" — R1, {touches} касаний\n"
@@ -6093,7 +6094,6 @@ class AISignalAnalyzer:
                             text += f" — R1\n"
                     elif direction_ru == "ШОРТ" and sr_levels.get('supports'):
                         s1_info = sr_levels['supports'][0]
-                        source = s1_info.get('source', 'calculated')
                         touches = s1_info.get('touches', 0)
                         if touches > 0:
                             text += f" — S1, {touches} касаний\n"
@@ -6129,16 +6129,26 @@ class AISignalAnalyzer:
                     sl_change = ((stop_loss - current_price) / current_price * 100) if current_price > 0 else 0
                     text += f"🛑 Стоп: {format_price(stop_loss)} \\({sl_change:+.1f}%\\)"
                     
-                    # Add ATR buffer info
-                    technical_data = signal_data.get('technical_data') if hasattr(signal_data, 'get') else None
+                    # Add ATR buffer info with correct direction
+                    technical_data = signal_data.get('technical_data')
                     if technical_data and isinstance(technical_data, dict) and "atr" in technical_data:
                         atr_pct = technical_data["atr"]["percent"]
+                        
+                        # Determine buffer description based on ATR percentage
                         if atr_pct > 3.0:
-                            text += f" — под S1 \\+ широкий ATR буфер\n"
+                            buffer_desc = "широкий ATR буфер"
                         elif atr_pct < 1.5:
-                            text += f" — под S1 \\+ узкий ATR буфер\n"
+                            buffer_desc = "узкий ATR буфер"
                         else:
-                            text += f" — под S1 \\+ ATR буфер\n"
+                            buffer_desc = "ATR буфер"
+                        
+                        # Set correct direction description
+                        if direction_ru == "ЛОНГ":
+                            text += f" — под S1 \\+ {buffer_desc}\n"
+                        elif direction_ru == "ШОРТ":
+                            text += f" — над R1 \\+ {buffer_desc}\n"
+                        else:
+                            text += f" — {buffer_desc}\n"
                     else:
                         text += "\n"
                 
