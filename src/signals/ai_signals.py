@@ -44,6 +44,57 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def clamp(value: float, min_val: float = -10.0, max_val: float = 10.0) -> float:
+    """Ограничивает значение в диапазоне [-10, 10]"""
+    return max(min_val, min(max_val, value))
+
+
+class SignalStabilizer:
+    """Стабилизатор сигналов - предотвращает частые изменения"""
+    
+    def __init__(self):
+        self._last_signals = {}  # {symbol: {direction, score, timestamp, price}}
+        self.MIN_TIME_BETWEEN_CHANGES = 3600  # 1 час минимум
+        self.MIN_SCORE_CHANGE = 2.0  # Минимальное изменение score для смены направления
+        self.MIN_PRICE_CHANGE = 0.02  # 2% изменение цены для пересмотра
+    
+    def should_update_signal(self, symbol: str, new_direction: str, new_score: float, current_price: float) -> bool:
+        """Проверяет, нужно ли обновлять сигнал"""
+        if symbol not in self._last_signals:
+            return True
+        
+        last = self._last_signals[symbol]
+        time_diff = time.time() - last['timestamp']
+        score_diff = abs(new_score - last['score'])
+        price_diff = abs(current_price - last['price']) / last['price']
+        
+        # Обновляем если:
+        # 1. Прошло больше 1 часа И score изменился значительно
+        # 2. Цена изменилась больше чем на 2%
+        # 3. Направление изменилось И score изменился значительно
+        
+        if time_diff < self.MIN_TIME_BETWEEN_CHANGES:
+            if price_diff < self.MIN_PRICE_CHANGE and score_diff < self.MIN_SCORE_CHANGE:
+                return False  # Слишком рано для изменения
+        
+        return True
+    
+    def get_stable_signal(self, symbol: str, new_direction: str, new_score: float, current_price: float) -> tuple:
+        """Возвращает стабильный сигнал с учётом гистерезиса"""
+        if not self.should_update_signal(symbol, new_direction, new_score, current_price):
+            last = self._last_signals[symbol]
+            return last['direction'], last['score'], False  # Возвращаем старый сигнал
+        
+        # Сохраняем новый сигнал
+        self._last_signals[symbol] = {
+            'direction': new_direction,
+            'score': new_score,
+            'timestamp': time.time(),
+            'price': current_price
+        }
+        return new_direction, new_score, True  # Новый сигнал
+
+
 class AISignalAnalyzer:
     """
     Анализатор AI сигналов для криптовалют.
@@ -161,17 +212,18 @@ class AISignalAnalyzer:
     MAX_PROBABILITY = 78  # Максимальная вероятность (реалистичная)
     
     # NEW: Weighted Factor System (100% total)
+    # Оптимизированные веса для 4-часового прогноза
     FACTOR_WEIGHTS = {
         'whales': 0.25,        # 25% - Smart money, leads market
-        'derivatives': 0.20,   # 20% - Trader positions (OI, Funding, L/S)
-        'trend': 0.15,         # 15% - EMA, Ichimoku, Market Structure
+        'derivatives': 0.22,   # 22% - Trader positions (OI, Funding, L/S) - УВЕЛИЧЕНО для 4ч
+        'trend': 0.18,         # 18% - EMA, Ichimoku, Market Structure - УВЕЛИЧЕНО
         'momentum': 0.12,      # 12% - RSI, MACD, Stoch
         'volume': 0.10,        # 10% - Volume, CVD, Volume Spike
         'adx': 0.05,           # 5%  - Trend strength filter
         'divergence': 0.05,    # 5%  - Reversal signals
-        'sentiment': 0.04,     # 4%  - Fear & Greed
-        'macro': 0.03,         # 3%  - DXY, S&P500, Gold
-        'options': 0.01,       # 1%  - Put/Call ratio
+        'sentiment': 0.02,     # 2%  - Fear & Greed - УМЕНЬШЕНО (слишком общий для 4ч)
+        'macro': 0.01,         # 1%  - DXY, S&P500, Gold - УМЕНЬШЕНО (не влияет на 4ч)
+        'options': 0.00,       # 0%  - Put/Call ratio - УБРАНО (мало данных для альтов)
     }
     
     # Price prediction constants
@@ -197,6 +249,9 @@ class AISignalAnalyzer:
         self.macro_analyzer = MacroAnalyzer() if PHASE3_MACRO else None
         self.options_analyzer = OptionsAnalyzer() if PHASE3_OPTIONS else None
         self.sentiment_analyzer = SocialSentimentAnalyzer() if PHASE3_AVAILABLE else None
+        
+        # Signal stabilizer для предотвращения частых изменений
+        self.signal_stabilizer = SignalStabilizer()
         
         # Маппинг символов для whale tracker
         self.blockchain_mapping = {
@@ -2188,7 +2243,7 @@ class AISignalAnalyzer:
             else:
                 score += price_change_pct * 4  # Gradient
         
-        return max(min(score, 10), -10)
+        return clamp(score, -10, 10)
     
     def _calculate_trades_flow_score(self, trades_flow: Optional[Dict]) -> float:
         """
@@ -2244,7 +2299,7 @@ class AISignalAnalyzer:
             else:
                 score = ((flow_ratio - 1.0) / self.TRADES_FLOW_NEUTRAL_DIVISOR) * 10
         
-        return max(min(score, 10), -10)
+        return clamp(score, -10, 10)
     
     def _calculate_liquidations_score(self, liquidations: Optional[Dict]) -> float:
         """
@@ -2274,7 +2329,7 @@ class AISignalAnalyzer:
             # Нейтрально
             score = 0
         
-        return max(min(score, 10), -10)
+        return clamp(score, -10, 10)
     
     def _calculate_orderbook_delta_score(self, orderbook_delta: Optional[Dict]) -> float:
         """
@@ -2303,7 +2358,7 @@ class AISignalAnalyzer:
             # Gradient
             score = delta
         
-        return max(min(score, 10), -10)
+        return clamp(score, -10, 10)
     
     def _calculate_price_momentum_score(self, current_price: float, price_10min_ago: float) -> float:
         """
@@ -2333,7 +2388,7 @@ class AISignalAnalyzer:
             # Gradient
             score = price_change_pct * 20
         
-        return max(min(score, 10), -10)
+        return clamp(score, -10, 10)
     
     def _calculate_oi_change_score(self, oi_change: float, price_change: float) -> float:
         """
@@ -2533,7 +2588,7 @@ class AISignalAnalyzer:
         else:
             # Комбинированный градиент
             score = ((galaxy_score - 50) / 10) + (sentiment * 5)
-            return max(min(score, 10), -10)
+            return clamp(score, -10, 10)
     
     
     def _calculate_whale_score(self, whale_data: Dict, exchange_flows: Optional[Dict] = None) -> float:
@@ -2572,18 +2627,18 @@ class AISignalAnalyzer:
                 flow_ratio = net_flow / total_flow
                 score += flow_ratio * 4
         
-        return max(min(score, 10), -10)
+        return clamp(score, -10, 10)
     
     def _calculate_trend_score(self, technical_data: Dict) -> float:
         """
-        Calculate trend score (-20 to +20, extended for divergence).
+        Calculate trend score (-10 to +10).
         Combines RSI, MACD, MA Crossover, RSI Divergence, ADX.
         
         Args:
             technical_data: Technical indicator data
             
         Returns:
-            Score from -20 to +20 (extended range to accommodate divergence signals)
+            Score from -10 to +10 (clamped)
         """
         score = 0.0
         
@@ -2615,15 +2670,14 @@ class AISignalAnalyzer:
             elif technical_data["ma_crossover"]["trend"] == "bearish":
                 score -= 1
         
-        # RSI Divergence (NEW - affects by +10 for bullish, -10 for bearish as per requirement)
-        # Note: To keep the score in -10 to +10 range, we'll scale the divergence contribution
+        # RSI Divergence (NEW - scaled to fit within -10/+10)
         divergence_adjustment = 0.0
         if "rsi_divergence" in technical_data:
             div_type = technical_data["rsi_divergence"]["type"]
             if div_type == "bullish":
-                divergence_adjustment = 10  # Full +10 for bullish divergence
+                divergence_adjustment = 5  # +5 for bullish divergence
             elif div_type == "bearish":
-                divergence_adjustment = -10  # Full -10 for bearish divergence
+                divergence_adjustment = -5  # -5 for bearish divergence
         
         # ADX Trend Strength (NEW - modifies confidence)
         # ADX < 20: reduce score by 20%, ADX > 40: increase score by 20%
@@ -2638,7 +2692,7 @@ class AISignalAnalyzer:
         # Apply ADX multiplier to base score, then add divergence
         score = (score * adx_multiplier) + divergence_adjustment
         
-        return max(min(score, 20), -20)  # Extended range to accommodate divergence
+        return clamp(score, -10, 10)  # Clamp to proper range
     
     def _calculate_momentum_score(self, technical_data: Dict) -> float:
         """
@@ -2693,7 +2747,7 @@ class AISignalAnalyzer:
             elif signal == "overbought":
                 score -= 2
         
-        return max(min(score, 10), -10)
+        return clamp(score, -10, 10)
     
     def _calculate_volatility_score(self, technical_data: Dict) -> float:
         """
@@ -2734,11 +2788,11 @@ class AISignalAnalyzer:
             elif position == "above":
                 score -= 3
         
-        return max(min(score, 10), -10)
+        return clamp(score, -10, 10)
     
     def _calculate_volume_score(self, technical_data: Dict, ohlcv_data: Optional[List] = None) -> float:
         """
-        Calculate volume score (-20 to +20, extended for volume spike).
+        Calculate volume score (-10 to +10).
         Combines OBV, VWAP, Volume SMA, Volume Spike.
         
         Args:
@@ -2746,7 +2800,7 @@ class AISignalAnalyzer:
             ohlcv_data: OHLCV candle data
             
         Returns:
-            Score from -20 to +20 (extended range to accommodate volume spike signals)
+            Score from -10 to +10 (clamped)
         """
         score = 0.0
         
@@ -2775,17 +2829,17 @@ class AISignalAnalyzer:
             elif status == "low":
                 score -= 2
         
-        # Volume Spike (NEW - adds +5 to +10 based on spike size as per requirement)
+        # Volume Spike (NEW - scaled to fit within -10/+10)
         if "volume_spike" in technical_data:
             is_spike = technical_data["volume_spike"]["is_spike"]
             spike_pct = technical_data["volume_spike"]["spike_percentage"]
             if is_spike and spike_pct > 50:  # Only if spike > 50%
-                # Scale from +5 to +10 based on spike size
-                # spike_pct of 50-100% = +5, 100-200% = +7.5, 200%+ = +10
-                spike_score = min(10, 5 + (spike_pct / 40))  # Scaling formula
+                # Scale from +3 to +5 based on spike size (reduced from original)
+                # spike_pct of 50-100% = +3, 100-200% = +4, 200%+ = +5
+                spike_score = min(5, 3 + (spike_pct / 80))  # Scaling formula
                 score += spike_score
         
-        return max(min(score, 20), -20)  # Extended range to accommodate volume spike
+        return clamp(score, -10, 10)  # Clamp to proper range
     
     def _calculate_market_score(self, market_data: Dict) -> float:
         """
@@ -2811,7 +2865,7 @@ class AISignalAnalyzer:
         elif volume_24h < self.HIGH_VOLUME_THRESHOLD * 0.3:
             score -= 2
         
-        return max(min(score, 10), -10)
+        return clamp(score, -10, 10)
     
     def _calculate_orderbook_score(self, order_book: Optional[Dict]) -> float:
         """
@@ -2840,7 +2894,7 @@ class AISignalAnalyzer:
         elif spread > 0.05:  # Wide spread
             score -= 3
         
-        return max(min(score, 10), -10)
+        return clamp(score, -10, 10)
     
     def _calculate_derivatives_score(self, futures_data: Optional[Dict], funding_rate: Optional[Dict]) -> float:
         """
@@ -2882,7 +2936,7 @@ class AISignalAnalyzer:
                 else:
                     score -= (rate_percent - 0.02) / 0.03 * 3
         
-        return max(min(score, 10), -10)
+        return clamp(score, -10, 10)
     
     def _calculate_onchain_score(self, onchain_data: Optional[Dict]) -> float:
         """
@@ -2911,7 +2965,7 @@ class AISignalAnalyzer:
         # Increasing hashrate is bullish for BTC
         # This would require historical data, so we'll skip for now
         
-        return max(min(score, 10), -10)
+        return clamp(score, -10, 10)
     
     def _calculate_sentiment_score(self, fear_greed: Optional[Dict]) -> float:
         """
@@ -4788,6 +4842,39 @@ class AISignalAnalyzer:
         # Calculate weighted score using new system
         new_weighted_score = self.calculate_weighted_score(factor_scores)
         
+        # ====== APPLY SIGNAL STABILIZER ======
+        # Получаем текущую цену
+        current_price = market_data.get('price_usd', 0)
+        
+        # Определяем предварительное направление на основе weighted_score
+        if new_weighted_score > 2.0:
+            preliminary_direction = 'long'
+        elif new_weighted_score < -2.0:
+            preliminary_direction = 'short'
+        else:
+            preliminary_direction = 'neutral'
+        
+        # Применяем стабилизатор
+        stable_direction, stable_score, is_updated = self.signal_stabilizer.get_stable_signal(
+            symbol, preliminary_direction, new_weighted_score, current_price
+        )
+        
+        # Логируем изменения/стабильность сигнала
+        if is_updated:
+            old_direction = self.previous_direction.get(symbol, 'unknown')
+            old_score = self.previous_scores.get(symbol, 0)
+            if old_direction != 'unknown' and old_direction != stable_direction:
+                logger.info(f"Signal CHANGED for {symbol}: {old_direction} → {stable_direction}")
+                logger.info(f"  Reason: score {old_score:.2f} → {stable_score:.2f} (diff: {abs(stable_score - old_score):.2f})")
+                logger.info(f"  Price: ${current_price:.2f}")
+            else:
+                logger.info(f"Signal updated for {symbol}: {stable_direction} (score: {stable_score:.2f})")
+        else:
+            logger.info(f"Signal STABLE for {symbol}: {stable_direction} (score: {stable_score:.2f}) - no changes due to stabilizer")
+        
+        # Используем стабильный score вместо нового
+        new_weighted_score = stable_score
+        
         # ====== USE WEIGHTED SCORE FOR DIRECTION (NEW SYSTEM) ======
         # Override direction based on weighted_score (scale -10 to +10)
         # Thresholds: >2.0 = long, <-2.0 = short, else neutral
@@ -5622,20 +5709,6 @@ class AISignalAnalyzer:
                 interpretation = oi_corr.get("interpretation", "")
                 text += f"• OI 24ч: {oi_change:+.1f}% ({interpretation})\n"
             
-            # Liquidation levels
-            liq_levels = deep_derivatives_data.get("liquidation_levels", {})
-            if liq_levels:
-                long_liq = liq_levels.get("long_liquidations", [])
-                short_liq = liq_levels.get("short_liquidations", [])
-                
-                if short_liq:
-                    nearest_short = liq_levels.get("nearest_short_liq", 0)
-                    text += f"• Ликв. шортов: ${nearest_short:,.0f}\n"
-                
-                if long_liq:
-                    nearest_long = liq_levels.get("nearest_long_liq", 0)
-                    text += f"• Ликв. лонгов: ${nearest_long:,.0f}\n"
-            
             # L/S Ratio
             ls_ratio = deep_derivatives_data.get("ls_ratio_by_exchange", {})
             if ls_ratio:
@@ -6031,192 +6104,18 @@ class AISignalAnalyzer:
             options_contrib = options_s * 0.01
             
             text += f"• Киты:       {whale_s:+.1f} × 25% = {whale_contrib:+.2f}\n"
-            text += f"• Деривативы: {derivatives_s:+.1f} × 20% = {derivatives_contrib:+.2f}\n"
-            text += f"• Тренд:      {trend_s:+.1f} × 15% = {trend_contrib:+.2f}\n"
+            text += f"• Деривативы: {derivatives_s:+.1f} × 22% = {derivatives_contrib:+.2f}\n"
+            text += f"• Тренд:      {trend_s:+.1f} × 18% = {trend_contrib:+.2f}\n"
             text += f"• Импульс:    {momentum_s:+.1f} × 12% = {momentum_contrib:+.2f}\n"
             text += f"• Объём:      {volume_s:+.1f} × 10% = {volume_contrib:+.2f}\n"
             text += f"• ADX:        {adx_s:+.1f} × 5%  = {adx_contrib:+.2f}\n"
             text += f"• Дивергенция:{divergence_s:+.1f} × 5%  = {divergence_contrib:+.2f}\n"
-            text += f"• Настроения: {sentiment_s:+.1f} × 4%  = {sentiment_contrib:+.2f}\n"
-            text += f"• Макро:      {macro_s:+.1f} × 3%  = {macro_contrib:+.2f}\n"
-            text += f"• Опционы:    {options_s:+.1f} × 1%  = {options_contrib:+.2f}\n"
+            text += f"• Настроения: {sentiment_s:+.1f} × 2%  = {sentiment_contrib:+.2f}\n"
+            text += f"• Макро:      {macro_s:+.1f} × 1%  = {macro_contrib:+.2f}\n"
+            text += f"• Опционы:    {options_s:+.1f} × 0%  = {options_contrib:+.2f}\n"
             text += "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             text += f"📊 *ИТОГО: {weighted_score:+.2f}*\n\n"
-            
-            # Add verdict based on weighted score
-            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            text += "🎯 *ВЕРДИКТ*\n"
-            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            
-            # Get real targets and S/R levels if available
-            real_targets = signal_data.get('real_targets', {})
-            sr_levels = signal_data.get('sr_levels', {})
-            
-            # Determine signal type and recommendation
-            if real_targets and real_targets.get('tp1') is not None:
-                # Use real targets based on S/R levels
-                tp1 = real_targets.get('tp1')
-                tp2 = real_targets.get('tp2')
-                stop_loss = real_targets.get('stop_loss')
-                rr_ratio = real_targets.get('rr_ratio', 0)
-                risk_percent = real_targets.get('risk_percent', 0)
-                reward_percent = real_targets.get('reward_percent', 0)
-                
-                # Determine direction based on tp1 vs current_price
-                if tp1 > current_price:
-                    direction_emoji = "📈"
-                    direction_ru = "ЛОНГ"
-                elif tp1 < current_price:
-                    direction_emoji = "📉"
-                    direction_ru = "ШОРТ"
-                else:
-                    direction_emoji = "➡️"
-                    direction_ru = "БОКОВИК"
-                
-                # Calculate confidence from weighted score and probability
-                confidence_pred = probability
-                
-                text += f"{direction_emoji} *{direction_ru}* \\({confidence_pred}% уверенность\\)\n\n"
-                text += f"💰 Цена сейчас: {format_price(current_price)}\n"
-                
-                # Display TP1, TP2, SL with S/R level info
-                if tp1:
-                    tp1_change = ((tp1 - current_price) / current_price * 100) if current_price > 0 else 0
-                    text += f"🎯 TP1: {format_price(tp1)} \\({tp1_change:+.1f}%\\)"
-                    
-                    # Add S/R level info if available
-                    if direction_ru == "ЛОНГ" and sr_levels.get('resistances'):
-                        r1_info = sr_levels['resistances'][0]
-                        touches = r1_info.get('touches', 0)
-                        if touches > 0:
-                            text += f" — R1, {touches} касаний\n"
-                        else:
-                            text += f" — R1\n"
-                    elif direction_ru == "ШОРТ" and sr_levels.get('supports'):
-                        s1_info = sr_levels['supports'][0]
-                        touches = s1_info.get('touches', 0)
-                        if touches > 0:
-                            text += f" — S1, {touches} касаний\n"
-                        else:
-                            text += f" — S1\n"
-                    else:
-                        text += "\n"
-                
-                if tp2:
-                    tp2_change = ((tp2 - current_price) / current_price * 100) if current_price > 0 else 0
-                    text += f"🎯 TP2: {format_price(tp2)} \\({tp2_change:+.1f}%\\)"
-                    
-                    # Add S/R level info if available
-                    if direction_ru == "ЛОНГ" and len(sr_levels.get('resistances', [])) > 1:
-                        r2_info = sr_levels['resistances'][1]
-                        touches = r2_info.get('touches', 0)
-                        if touches > 0:
-                            text += f" — R2, {touches} касаний\n"
-                        else:
-                            text += f" — R2\n"
-                    elif direction_ru == "ШОРТ" and len(sr_levels.get('supports', [])) > 1:
-                        s2_info = sr_levels['supports'][1]
-                        touches = s2_info.get('touches', 0)
-                        if touches > 0:
-                            text += f" — S2, {touches} касаний\n"
-                        else:
-                            text += f" — S2\n"
-                    else:
-                        text += "\n"
-                
-                if stop_loss:
-                    sl_change = ((stop_loss - current_price) / current_price * 100) if current_price > 0 else 0
-                    text += f"🛑 Стоп: {format_price(stop_loss)} \\({sl_change:+.1f}%\\)"
-                    
-                    # Add ATR buffer info with correct direction (use technical_data from scope)
-                    if technical_data and isinstance(technical_data, dict) and "atr" in technical_data:
-                        atr_pct = technical_data["atr"]["percent"]
-                        
-                        # Determine buffer description based on ATR percentage
-                        if atr_pct > 3.0:
-                            buffer_desc = "широкий ATR буфер"
-                        elif atr_pct < 1.5:
-                            buffer_desc = "узкий ATR буфер"
-                        else:
-                            buffer_desc = "ATR буфер"
-                        
-                        # Set correct direction description
-                        if direction_ru == "ЛОНГ":
-                            text += f" — под S1 \\+ {buffer_desc}\n"
-                        elif direction_ru == "ШОРТ":
-                            text += f" — над R1 \\+ {buffer_desc}\n"
-                        else:
-                            text += f" — {buffer_desc}\n"
-                    else:
-                        text += "\n"
-                
-                # Display R:R ratio with warnings
-                text += f"📊 R:R = {rr_ratio:.1f}\n"
-                text += f"📊 Риск: {risk_percent:.1f}% | Награда: {reward_percent:.1f}%\n\n"
-                
-                # Warnings based on R:R ratio
-                if rr_ratio < 1.0:
-                    text += "⚠️ *R:R < 1* — риск больше награды\\!\n"
-                    text += "🚫 *РЕКОМЕНДАЦИЯ:* ПРОПУСТИТЬ этот сетап\\.\n\n"
-                elif rr_ratio < 1.5:
-                    text += "⚠️ *R:R средний* — не самое выгодное соотношение\\.\n"
-                    text += "📉 *РЕКОМЕНДАЦИЯ:* Уменьшить размер позиции\\.\n\n"
-                else:
-                    text += "✅ *R:R хороший* — соотношение благоприятное\\.\n"
-                    if confidence_pred >= 70:
-                        text += "💪 *РЕКОМЕНДАЦИЯ:* Сигнал СИЛЬНЫЙ\\. Можно входить с нормальным размером позиции\\.\n\n"
-                    elif confidence_pred >= 60:
-                        text += "⚠️ *РЕКОМЕНДАЦИЯ:* Сигнал СРЕДНИЙ\\. Можно входить с уменьшенным размером позиции\\.\n\n"
-                    else:
-                        text += "⚠️ *РЕКОМЕНДАЦИЯ:* Сигнал СЛАБЫЙ\\. Рекомендуется ПРОПУСТИТЬ\\.\n\n"
-                        
-            else:
-                # Fallback to old price prediction display if real targets not available
-                price_pred = signal_data.get('price_prediction', {})
-                if price_pred:
-                    direction_pred = price_pred.get('direction', 'NEUTRAL')
-                    confidence_pred = price_pred.get('confidence', 50)
-                    predicted_price = price_pred.get('predicted_price', current_price)
-                    predicted_change = price_pred.get('predicted_change_pct', 0)
-                    
-                    direction_emoji = "📈" if direction_pred == 'UP' else "📉" if direction_pred == 'DOWN' else "➡️"
-                    direction_ru = "ЛОНГ" if direction_pred == 'UP' else "ШОРТ" if direction_pred == 'DOWN' else "БОКОВИК"
-                    
-                    text += f"{direction_emoji} *{direction_ru}* \\({confidence_pred}% уверенность\\)\n\n"
-                    text += f"💰 Цена сейчас: {format_price(current_price)}\n"
-                    text += f"🎯 Цель 4ч: {format_price(predicted_price)} \\({predicted_change:+.1f}%\\)\n"
-                    
-                    # Calculate stop loss
-                    if direction_pred == 'UP':
-                        stop_price = current_price * 0.992  # -0.8% stop
-                        stop_pct = -0.8
-                    elif direction_pred == 'DOWN':
-                        stop_price = current_price * 1.008  # +0.8% stop
-                        stop_pct = +0.8
-                    else:
-                        stop_price = 0
-                        stop_pct = 0
-                    
-                    if stop_price > 0:
-                        text += f"🛑 Стоп: {format_price(stop_price)} \\({stop_pct:+.1f}%\\)\n"
-                        # Calculate R:R
-                        risk = abs(stop_pct)
-                        reward = abs(predicted_change)
-                        rr = reward / risk if risk > 0 else 0
-                        text += f"📊 R:R = {rr:.1f}\n\n"
-                    
-                    # Recommendation based on confidence
-                    if confidence_pred >= 70:
-                        text += "⚠️ *РЕКОМЕНДАЦИЯ:*\n"
-                        text += "Сигнал СИЛЬНЫЙ\\. Можно входить с\n"
-                        text += "нормальным размером позиции\\.\n\n"
-                    elif confidence_pred >= 60:
-                        text += "⚠️ *РЕКОМЕНДАЦИЯ:*\n"
-                        text += "Сигнал СРЕДНИЙ\\. Можно входить с\n"
-                        text += "уменьшенным размером позиции\\.\n\n"
-                    else:
-                        text += "⚠️ *РЕКОМЕНДАЦИЯ:*\n"
-                        text += "Сигнал СЛАБЫЙ\\. Рекомендуется ПРОПУСТИТЬ\\.\n\n"
+
         
         # ===== FOOTER =====
         text += f"📡 Факторов: {data_sources_count}\n"
