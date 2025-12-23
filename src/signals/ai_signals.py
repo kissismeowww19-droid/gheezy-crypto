@@ -5556,20 +5556,6 @@ class AISignalAnalyzer:
                 interpretation = oi_corr.get("interpretation", "")
                 text += f"• OI 24ч: {oi_change:+.1f}% ({interpretation})\n"
             
-            # Liquidation levels
-            liq_levels = deep_derivatives_data.get("liquidation_levels", {})
-            if liq_levels:
-                long_liq = liq_levels.get("long_liquidations", [])
-                short_liq = liq_levels.get("short_liquidations", [])
-                
-                if short_liq:
-                    nearest_short = liq_levels.get("nearest_short_liq", 0)
-                    text += f"• Ликв. шортов: ${nearest_short:,.0f}\n"
-                
-                if long_liq:
-                    nearest_long = liq_levels.get("nearest_long_liq", 0)
-                    text += f"• Ликв. лонгов: ${nearest_long:,.0f}\n"
-            
             # L/S Ratio
             ls_ratio = deep_derivatives_data.get("ls_ratio_by_exchange", {})
             if ls_ratio:
