@@ -4957,6 +4957,14 @@ class AISignalAnalyzer:
             """Clamp score to specified range."""
             return max(min_val, min(max_val, value))
         
+        # Helper function to format liquidation price
+        def format_liq_price(price: float) -> str:
+            """Format liquidation price with appropriate precision."""
+            if price < 10:
+                return f"${price:.2f}"
+            else:
+                return f"${price:,.0f}"
+        
         # Определяем направление из raw_direction (учитывает sideways)
         raw_direction = signal_data.get('raw_direction', 'sideways')
         probability_direction = signal_data.get('probability_direction', 'up')
@@ -5361,15 +5369,9 @@ class AISignalAnalyzer:
                     text += "🎯 *ЛИКВИДАЦИИ:*\n"
                     # Format with 2 decimals for low-priced coins, 0 decimals for high-priced
                     if nearest_short > 0:
-                        if nearest_short < 10:
-                            text += f"• Шорты: ${nearest_short:.2f} \\(магнит вверх\\)\n"
-                        else:
-                            text += f"• Шорты: ${nearest_short:,.0f} \\(магнит вверх\\)\n"
+                        text += f"• Шорты: {format_liq_price(nearest_short)} \\(магнит вверх\\)\n"
                     if nearest_long > 0:
-                        if nearest_long < 10:
-                            text += f"• Лонги: ${nearest_long:.2f} \\(магнит вниз\\)\n"
-                        else:
-                            text += f"• Лонги: ${nearest_long:,.0f} \\(магнит вниз\\)\n"
+                        text += f"• Лонги: {format_liq_price(nearest_long)} \\(магнит вниз\\)\n"
                     text += "\n"
         
         # ===== NEW: СЦЕНАРИИ НА 4 ЧАСА =====

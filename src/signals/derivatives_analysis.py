@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 class DeepDerivativesAnalyzer:
     """Deep derivatives analysis with multi-exchange data and advanced metrics."""
     
+    # Price threshold for determining liquidation calculation strategy
+    LOW_PRICE_THRESHOLD = 10.0  # USD
+    
     def __init__(self):
         self._cache = {}
         self._cache_timestamps = {}
@@ -103,8 +106,8 @@ class DeepDerivativesAnalyzer:
             
             # Estimate liquidation zones based on typical leverage levels
             # Adjust percentages based on coin price for better differentiation
-            # For low-priced coins (< $10), use larger percentages for visibility
-            if current_price < 10:
+            # For low-priced coins (< LOW_PRICE_THRESHOLD), use larger percentages for visibility
+            if current_price < self.LOW_PRICE_THRESHOLD:
                 # For altcoins, use larger percentage moves
                 long_liq_multipliers = [0.75, 0.85, 0.92]    # 25%, 15%, 8% drops
                 short_liq_multipliers = [1.25, 1.15, 1.08]   # 25%, 15%, 8% rises
