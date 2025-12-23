@@ -32,12 +32,13 @@ class SmartSignalAnalyzer:
     """
     
     # Настройки из конфига
-    SCAN_LIMIT = 500
-    MIN_VOLUME_USD = 5_000_000
-    MIN_MCAP_USD = 10_000_000
-    MAX_SPREAD_PCT = 0.5
-    HYSTERESIS_TIME = 900  # 15 минут
-    HYSTERESIS_THRESHOLD = 0.10  # 10%
+    SCAN_LIMIT = getattr(settings, 'smart_signals_scan_limit', 500)
+    MIN_VOLUME_USD = getattr(settings, 'smart_signals_min_volume', 5_000_000)
+    MIN_MCAP_USD = getattr(settings, 'smart_signals_min_mcap', 10_000_000)
+    MAX_SPREAD_PCT = getattr(settings, 'smart_signals_max_spread', 0.005) * 100  # Convert to percentage
+    HYSTERESIS_TIME = getattr(settings, 'smart_signals_hysteresis_time', 900)
+    HYSTERESIS_THRESHOLD = getattr(settings, 'smart_signals_hysteresis_threshold', 0.10)
+    MAX_ANALYZE = getattr(settings, 'smart_signals_max_analyze', 100)
     
     # Веса для скоринга
     SCORING_WEIGHTS = {
@@ -112,11 +113,12 @@ class SmartSignalAnalyzer:
                 "sparkline": "false",
             }
             
-            # Добавляем API ключ если есть
+            headers = {}
+            # Add API key as header if available (CoinGecko Pro)
             if settings.coingecko_api_key:
-                params["x_cg_pro_api_key"] = settings.coingecko_api_key
+                headers["X-CG-Pro-API-Key"] = settings.coingecko_api_key
             
-            async with self.session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+            async with self.session.get(url, params=params, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                 if resp.status == 200:
                     coins = await resp.json()
                     logger.info(f"Scanned {len(coins)} coins from CoinGecko")
@@ -301,7 +303,8 @@ class SmartSignalAnalyzer:
             change_4h = ((current_price - price_4h_ago) / price_4h_ago) * 100 if price_4h_ago > 0 else 0
             
             # Momentum score
-            momentum_score = calculate_momentum_score({"1h": change_1h, "4h": change_4h})
+            momentum_score_4h = calculate_momentum_score({"1h": 0, "4h": change_4h})
+            momentum_score_1h = calculate_momentum_score({"1h": change_1h, "4h": 0})
             
             # Volume score
             avg_volume = sum(volumes[:-1]) / len(volumes[:-1]) if len(volumes) > 1 else volumes[-1]
@@ -340,8 +343,8 @@ class SmartSignalAnalyzer:
             
             # Итоговый score
             metrics = {
-                "momentum_4h": momentum_score,
-                "momentum_1h": momentum_score,  # Используем тот же для упрощения
+                "momentum_4h": momentum_score_4h,
+                "momentum_1h": momentum_score_1h,
                 "volume_ratio": volume_score,
                 "trend_score": trend_score,
                 "volatility_score": volatility_score,
@@ -352,10 +355,12 @@ class SmartSignalAnalyzer:
             # Применяем бонусы/штрафы
             funding_rate = exchange_data.get("funding_rate") or 0
             oi_data = exchange_data.get("open_interest")
-            oi_change_pct = 0  # Placeholder - нужна история OI для расчёта
+            # TODO: Calculate actual OI change - requires historical OI data
+            oi_change_pct = 0  # Placeholder until we implement OI history tracking
             
-            # Корреляция с BTC (placeholder - нужны данные BTC)
-            btc_correlation = 0.7  # Нейтральное значение
+            # TODO: Calculate actual BTC correlation - requires BTC price history
+            # For now, we skip BTC correlation in scoring to avoid inaccurate penalties
+            btc_correlation = 0.5  # Neutral value that won't trigger penalties
             
             final_score, factors = apply_score_bonuses(
                 base_score,
@@ -413,11 +418,15 @@ class SmartSignalAnalyzer:
         # Ограничиваем количество одновременных запросов
         semaphore = asyncio.Semaphore(5)
         
+        # For performance, we analyze top coins by market cap first
+        # Configurable via settings.smart_signals_max_analyze
+        max_coins_to_analyze = min(len(filtered_coins), self.MAX_ANALYZE)
+        
         async def score_coin_with_limit(coin):
             async with semaphore:
                 return await self.calculate_score(coin)
         
-        tasks = [score_coin_with_limit(coin) for coin in filtered_coins[:50]]  # Ограничиваем до 50 монет для скорости
+        tasks = [score_coin_with_limit(coin) for coin in filtered_coins[:max_coins_to_analyze]]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
         for result in results:

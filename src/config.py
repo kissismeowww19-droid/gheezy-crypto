@@ -168,6 +168,10 @@ class Settings(BaseSettings):
         default=0.10,
         description="Порог замены в топе (0.10 = 10% разница)",
     )
+    smart_signals_max_analyze: int = Field(
+        default=100,
+        description="Максимальное количество монет для детального анализа",
+    )
 
     @field_validator("telegram_admin_ids", mode="before")
     @classmethod

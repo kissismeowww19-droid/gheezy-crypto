@@ -184,7 +184,7 @@ class BybitClient:
             symbol: Trading pair (e.g., "BTCUSDT")
             
         Returns:
-            Dict with keys: oi (open interest in contracts), oi_usd
+            Dict with keys: oi (open interest in contracts), oi_usd (value in USD)
         """
         data = await self._request(
             "/market/open-interest",
@@ -200,9 +200,18 @@ class BybitClient:
         
         try:
             oi_data = data["list"][0]
+            oi_contracts = float(oi_data.get("openInterest", 0))
+            
+            # Get current price to convert contracts to USD
+            ticker = await self.get_ticker(symbol)
+            if ticker and ticker.get("last_price"):
+                oi_usd = oi_contracts * ticker["last_price"]
+            else:
+                oi_usd = oi_contracts  # Fallback if price not available
+            
             return {
-                "oi": float(oi_data.get("openInterest", 0)),
-                "oi_usd": float(oi_data.get("openInterest", 0)),  # Bybit gives contracts
+                "oi": oi_contracts,
+                "oi_usd": oi_usd,
             }
         except (ValueError, KeyError, IndexError) as e:
             logger.warning(f"Failed to parse Bybit open interest: {e}")

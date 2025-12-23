@@ -180,23 +180,10 @@ class GateClient:
         Returns:
             Dict with keys: oi (open interest in contracts), oi_usd
         """
-        data = await self._request(
-            "/futures/usdt/contracts/" + symbol
-        )
-        
-        if not data:
-            return None
-        
-        try:
-            # Gate doesn't provide direct OI in API response, need separate endpoint
-            # For now, return placeholder
-            return {
-                "oi": 0,
-                "oi_usd": 0,
-            }
-        except (ValueError, KeyError) as e:
-            logger.warning(f"Failed to parse Gate open interest: {e}")
-            return None
+        # Note: Gate.io doesn't provide direct OI endpoint in their public API
+        # Would need authenticated API or use contract endpoint which has limited data
+        logger.debug(f"Gate.io OI data not available for {symbol}")
+        return None
     
     async def get_orderbook(self, symbol: str, depth: int = 20) -> Optional[Dict]:
         """
