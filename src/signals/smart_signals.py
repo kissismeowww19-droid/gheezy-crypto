@@ -43,18 +43,61 @@ class SmartSignalAnalyzer:
     
     # Исключенные символы (стейблкоины, wrapped токены, проблемные монеты)
     EXCLUDED_SYMBOLS = {
-        # Стейблкоины
-        'USDT', 'USDC', 'BUSD', 'DAI', 'TUSD', 'FDUSD', 'PYUSD', 'USDD', 'USDP', 'GUSD', 'FRAX', 'LUSD', 'USDJ', 'USDS', 'CUSD', 'SUSD',
-        # Wrapped токены  
-        'WETH', 'WBTC', 'WBNB', 'WSTETH', 'WBETH', 'CBBTC', 'CBETH', 'STETH', 'RETH', 'SFRXETH', 'METH', 'EETH',
-        # Ethena & синтетики
-        'SUSDE', 'SUSDS', 'USDE', 'SENA',
-        # LP/Yield токены
-        'JLP', 'BFUSD', 'BNSOL', 'MSOL', 'JITOSOL', 'SYRUPUSDC', 'FIGR_HELOC',
-        # Биржевые токены (могут не быть на других биржах)
-        'BGB', 'WBT', 'GT', 'MX',
-        # Другие проблемные
-        'BSC-USD', 'USDT0', 'RAIN',
+        # === СТЕЙБЛКОИНЫ ===
+        'USDT', 'USDC', 'BUSD', 'DAI', 'TUSD', 'FDUSD', 'PYUSD', 'USDD', 
+        'USDP', 'GUSD', 'FRAX', 'LUSD', 'USDJ', 'USDS', 'CUSD', 'SUSD',
+        'USDN', 'USDX', 'USDK', 'MUSD', 'HUSD', 'OUSD', 'CEUR', 'EURS',
+        'EURT', 'USDQ', 'RSV', 'PAX', 'USDL', 'USDB',
+        
+        # === WRAPPED ТОКЕНЫ ===
+        'WETH', 'WBTC', 'WBNB', 'WSTETH', 'WBETH', 'CBBTC',
+        'METH', 'EETH', 'WTRX', 'WAVAX',
+        'WMATIC', 'WFTM', 'WONE', 'WCRO', 'WKCS', 'WROSE', 'WXDAI',
+        'WGLMR', 'WMOVR', 'WEVMOS', 'WCANTO',
+        
+        # === LIQUID STAKING DERIVATIVES ===
+        'STETH', 'RETH', 'CBETH', 'FRXETH', 'SFRXETH', 
+        'MSOL', 'JITOSOL', 'BNSOL',
+        'ANKRBNB', 'ANKRETH', 'MARINADE', 'LIDO',
+        'STMATIC', 'MATICX', 'STKBNB', 'SNBNB', 'STKSOL',
+        'STSOL', 'SCNSOL', 'LAINESOL', 'XSOL',
+        
+        # === ETHENA & СИНТЕТИКИ ===
+        'SUSDE', 'SUSDS', 'USDE', 'SENA', 'ENA', 'SDAI', 'SFRAX',
+        
+        # === LP/YIELD ТОКЕНЫ ===
+        'JLP', 'BFUSD', 'SYRUPUSDC', 
+        'FIGR_HELOC', 'GLP', 'SGLP', 'MLP', 'HLP', 'PLP',
+        
+        # === БИРЖЕВЫЕ ТОКЕНЫ ===
+        'BGB',   # Bitget
+        'WBT',   # WhiteBIT
+        'GT',    # Gate.io
+        'MX',    # MEXC
+        'KCS',   # KuCoin
+        'HT',    # Huobi (HTX)
+        'OKB',   # OKX - может не торговаться на конкурентах
+        'BNB',   # Может быть проблемы с форматом
+        'LEO',   # Bitfinex
+        'CRO',   # Crypto.com
+        
+        # === BRIDGED ТОКЕНЫ ===
+        'BTCB', 'ETHB', 'SOETH', 'SOLETH', 'ARBETH', 'OPETH',
+        'BSC-USD', 'BTCST',
+        
+        # === REBASE/ELASTIC ТОКЕНЫ ===
+        'OHM', 'OHMS', 'SOHM', 'GOHM', 'AMPL', 'FORTH', 
+        'KLIMA', 'TIME', 'MEMO', 'BTRFLY',
+        
+        # === GOVERNANCE/VOTE-ESCROWED ===
+        'VECRV', 'VEBAL', 'VELO', 'VEVELO', 'VEGNO', 'VETHE',
+        
+        # === ПРОБЛЕМНЫЕ ИЗ ЛОГОВ ===
+        'USDT0', 'RAIN',
+        
+        # === ДОПОЛНИТЕЛЬНЫЕ ОБЁРТКИ ===
+        'TBTC', 'HBTC', 'RENBTC', 'SBTC', 'OBTC', 'PBTC', 'IMBTC',
+        'XSUSHI', 'XRUNE', 'XVOTE',
     }
     
     # Веса для скоринга
@@ -88,6 +131,9 @@ class SmartSignalAnalyzer:
     MOMENTUM_4H_WEIGHT = 2  # Вес для 4-часового momentum
     MOMENTUM_1H_WEIGHT = 1  # Вес для 1-часового momentum
     
+    # Кэш невалидных символов
+    INVALID_SYMBOL_CACHE_TTL = 3600  # 1 час
+    
     def __init__(self):
         self.exchanges = {
             "okx": OKXClient(),
@@ -99,6 +145,7 @@ class SmartSignalAnalyzer:
         self.last_update: float = 0
         self.session: Optional[aiohttp.ClientSession] = None
         self.oi_history: Dict[str, List[Tuple[float, float]]] = {}  # {symbol: [(timestamp, oi), ...]}
+        self.invalid_symbols_cache: Dict[str, float] = {}  # {symbol: timestamp}
     
     async def _ensure_session(self):
         """Ensure aiohttp session exists."""
@@ -137,6 +184,32 @@ class SmartSignalAnalyzer:
             return True
         
         return False
+    
+    def _is_symbol_cached_invalid(self, symbol: str) -> bool:
+        """
+        Проверяет, кэширован ли символ как невалидный.
+        
+        Args:
+            symbol: Символ для проверки (может включать exchange)
+            
+        Returns:
+            True если символ кэширован как невалидный и кэш актуален
+        """
+        if symbol in self.invalid_symbols_cache:
+            if time.time() - self.invalid_symbols_cache[symbol] < self.INVALID_SYMBOL_CACHE_TTL:
+                return True
+            else:
+                del self.invalid_symbols_cache[symbol]
+        return False
+    
+    def _cache_invalid_symbol(self, symbol: str):
+        """
+        Кэширует символ как невалидный.
+        
+        Args:
+            symbol: Символ для кэширования (может включать exchange)
+        """
+        self.invalid_symbols_cache[symbol] = time.time()
     
     def _normalize_symbol_for_exchange(self, symbol: str, exchange: str) -> str:
         """
@@ -243,7 +316,8 @@ class SmartSignalAnalyzer:
     
     async def _get_exchange_data(self, symbol: str, exchange_name: str) -> Optional[Dict]:
         """
-        Получает данные с биржи (OHLCV, ticker, funding, OI).
+        Получает данные с биржи с оптимизацией запросов.
+        Сначала проверяет тикер (быстро), затем запрашивает OHLCV.
         
         Args:
             symbol: Символ монеты (напр., "BTC")
@@ -252,6 +326,11 @@ class SmartSignalAnalyzer:
         Returns:
             Dict с данными или None
         """
+        # Проверяем кэш невалидных символов
+        cache_key = f"{symbol}_{exchange_name}"
+        if self._is_symbol_cached_invalid(cache_key):
+            return None
+        
         exchange = self.exchanges.get(exchange_name)
         if not exchange:
             return None
@@ -259,11 +338,16 @@ class SmartSignalAnalyzer:
         normalized_symbol = self._normalize_symbol_for_exchange(symbol, exchange_name)
         
         try:
-            # Получаем данные параллельно
+            # ШАГ 1: Сначала проверяем тикер (быстро, 1 запрос)
+            ticker = await exchange.get_ticker(normalized_symbol)
+            if not ticker:
+                self._cache_invalid_symbol(cache_key)
+                return None
+            
+            # ШАГ 2: Только если тикер есть - запрашиваем остальное
             tasks = [
                 exchange.get_ohlcv(normalized_symbol, "1H", 100),
                 exchange.get_ohlcv(normalized_symbol, "4H", 30),
-                exchange.get_ticker(normalized_symbol),
             ]
             
             # Для фьючерсных данных нужен SWAP формат
@@ -289,11 +373,11 @@ class SmartSignalAnalyzer:
             
             ohlcv_1h = results[0] if not isinstance(results[0], Exception) else []
             ohlcv_4h = results[1] if not isinstance(results[1], Exception) else []
-            ticker = results[2] if not isinstance(results[2], Exception) else None
-            funding_rate = results[3] if len(results) > 3 and not isinstance(results[3], Exception) else None
-            open_interest = results[4] if len(results) > 4 and not isinstance(results[4], Exception) else None
+            funding_rate = results[2] if len(results) > 2 and not isinstance(results[2], Exception) else None
+            open_interest = results[3] if len(results) > 3 and not isinstance(results[3], Exception) else None
             
-            if not ohlcv_1h or not ticker:
+            if not ohlcv_1h:
+                self._cache_invalid_symbol(cache_key)
                 return None
             
             return {
@@ -306,6 +390,7 @@ class SmartSignalAnalyzer:
             }
         except Exception as e:
             logger.warning(f"Error getting data from {exchange_name} for {symbol}: {e}")
+            self._cache_invalid_symbol(cache_key)
             return None
     
     async def _get_data_with_fallback(self, symbol: str) -> Optional[Dict]:
@@ -702,7 +787,7 @@ class SmartSignalAnalyzer:
         scored_coins = []
         
         # Ограничиваем количество одновременных запросов
-        semaphore = asyncio.Semaphore(5)
+        semaphore = asyncio.Semaphore(10)
         
         # For performance, we analyze top coins by market cap first
         # Configurable via settings.smart_signals_max_analyze
