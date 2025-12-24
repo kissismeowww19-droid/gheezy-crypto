@@ -8,6 +8,7 @@ from typing import List, Dict, Optional, Tuple
 from datetime import datetime
 import asyncio
 import aiohttp
+import statistics
 
 from signals.exchanges.okx import OKXClient
 from signals.exchanges.bybit import BybitClient
@@ -40,6 +41,22 @@ class SmartSignalAnalyzer:
     HYSTERESIS_THRESHOLD = getattr(settings, 'smart_signals_hysteresis_threshold', 0.10)
     MAX_ANALYZE = getattr(settings, 'smart_signals_max_analyze', 100)
     
+    # Исключенные символы (стейблкоины, wrapped токены, проблемные монеты)
+    EXCLUDED_SYMBOLS = {
+        # Стейблкоины
+        'USDT', 'USDC', 'BUSD', 'DAI', 'TUSD', 'FDUSD', 'PYUSD', 'USDD', 'USDP', 'GUSD', 'FRAX', 'LUSD', 'USDJ', 'USDS', 'CUSD', 'SUSD',
+        # Wrapped токены  
+        'WETH', 'WBTC', 'WBNB', 'WSTETH', 'WBETH', 'CBBTC', 'CBETH', 'STETH', 'RETH', 'SFRXETH', 'METH', 'EETH',
+        # Ethena & синтетики
+        'SUSDE', 'SUSDS', 'USDE', 'SENA',
+        # LP/Yield токены
+        'JLP', 'BFUSD', 'BNSOL', 'MSOL', 'JITOSOL', 'SYRUPUSDC', 'FIGR_HELOC',
+        # Биржевые токены (могут не быть на других биржах)
+        'BGB', 'WBT', 'GT', 'MX',
+        # Другие проблемные
+        'BSC-USD', 'USDT0', 'RAIN',
+    }
+    
     # Веса для скоринга
     SCORING_WEIGHTS = {
         "momentum_4h": 0.30,
@@ -52,6 +69,25 @@ class SmartSignalAnalyzer:
     # Приоритет бирж для fallback
     EXCHANGE_PRIORITY = ["okx", "bybit", "gate"]
     
+    # Константы для расчётов
+    OI_HISTORY_WINDOW_SECONDS = 14400  # 4 часа
+    ONE_HOUR_SECONDS = 3600  # 1 час
+    MIN_CORRELATION_SAMPLES = 10  # Минимум точек для корреляции
+    MAX_CORRELATION_SAMPLES = 20  # Максимум точек для корреляции
+    MAX_ATR_MULTIPLIER = 0.05  # Максимум 5% для ATR
+    MIN_ATR_MULTIPLIER = 0.01  # Минимум 1% для ATR
+    
+    # Пороги для определения направления
+    MOMENTUM_4H_THRESHOLD = 0.5  # Порог для 4-часового momentum
+    MOMENTUM_1H_THRESHOLD = 0.2  # Порог для 1-часового momentum
+    TREND_BULLISH_THRESHOLD = 6  # Порог для бычьего тренда
+    TREND_BEARISH_THRESHOLD = 4  # Порог для медвежьего тренда
+    FUNDING_EXTREME_THRESHOLD = 0.0005  # Порог для экстремального funding
+    
+    # Веса сигналов для определения направления
+    MOMENTUM_4H_WEIGHT = 2  # Вес для 4-часового momentum
+    MOMENTUM_1H_WEIGHT = 1  # Вес для 1-часового momentum
+    
     def __init__(self):
         self.exchanges = {
             "okx": OKXClient(),
@@ -62,6 +98,7 @@ class SmartSignalAnalyzer:
         self.top3_history: List[Dict] = []
         self.last_update: float = 0
         self.session: Optional[aiohttp.ClientSession] = None
+        self.oi_history: Dict[str, List[Tuple[float, float]]] = {}  # {symbol: [(timestamp, oi), ...]}
     
     async def _ensure_session(self):
         """Ensure aiohttp session exists."""
@@ -74,6 +111,32 @@ class SmartSignalAnalyzer:
             await exchange.close()
         if self.session and not self.session.closed:
             await self.session.close()
+    
+    def _should_skip_symbol(self, symbol: str) -> bool:
+        """
+        Проверяет, нужно ли пропустить символ.
+        
+        Args:
+            symbol: Символ монеты (например, "BTC", "USDT")
+            
+        Returns:
+            True если символ нужно пропустить, False иначе
+        """
+        symbol_upper = symbol.upper()
+        
+        # Проверяем список исключений
+        if symbol_upper in self.EXCLUDED_SYMBOLS:
+            return True
+        
+        # Пропускаем символы с дефисами или подчёркиваниями (обычно проблемные)
+        if '_' in symbol or '-' in symbol:
+            return True
+        
+        # Пропускаем слишком длинные символы (обычно некорректные)
+        if len(symbol) > 10:
+            return True
+        
+        return False
     
     def _normalize_symbol_for_exchange(self, symbol: str, exchange: str) -> str:
         """
@@ -143,6 +206,13 @@ class SmartSignalAnalyzer:
         filtered = []
         
         for coin in coins:
+            symbol = coin.get("symbol", "").upper()
+            
+            # Пропускаем исключенные символы
+            if self._should_skip_symbol(symbol):
+                logger.debug(f"Skipping excluded symbol: {symbol}")
+                continue
+            
             # Проверка объёма 24h
             volume_24h = coin.get("total_volume", 0) or 0
             if volume_24h < self.MIN_VOLUME_USD:
@@ -160,7 +230,7 @@ class SmartSignalAnalyzer:
             # Добавляем в список
             filtered.append({
                 "id": coin["id"],
-                "symbol": coin["symbol"].upper(),
+                "symbol": symbol,
                 "name": coin["name"],
                 "price": coin["current_price"],
                 "volume_24h": volume_24h,
@@ -240,7 +310,7 @@ class SmartSignalAnalyzer:
     
     async def _get_data_with_fallback(self, symbol: str) -> Optional[Dict]:
         """
-        Получает данные с приоритетом и fallback между биржами.
+        Получает данные параллельно от всех бирж, берёт первый успешный по приоритету.
         
         Args:
             symbol: Символ монеты
@@ -248,15 +318,227 @@ class SmartSignalAnalyzer:
         Returns:
             Dict с данными от первой доступной биржи
         """
-        for exchange_name in self.EXCHANGE_PRIORITY:
-            data = await self._get_exchange_data(symbol, exchange_name)
-            if data:
-                logger.debug(f"Got data for {symbol} from {exchange_name}")
-                return data
-            await asyncio.sleep(0.1)  # Небольшая задержка перед fallback
+        async def try_exchange(name: str):
+            try:
+                return await self._get_exchange_data(symbol, name)
+            except Exception as e:
+                logger.debug(f"Error getting data from {name} for {symbol}: {e}")
+                return None
+        
+        # Запускаем все запросы параллельно
+        tasks = [try_exchange(name) for name in self.EXCHANGE_PRIORITY]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Берём первый успешный результат по приоритету
+        for result in results:
+            if result and not isinstance(result, Exception):
+                logger.debug(f"Got data for {symbol} from {result.get('exchange', 'unknown')}")
+                return result
         
         logger.warning(f"Failed to get data for {symbol} from all exchanges")
         return None
+    
+    async def _calculate_oi_change(self, symbol: str, current_oi: float) -> float:
+        """
+        Рассчитывает изменение OI за последний час.
+        
+        Args:
+            symbol: Символ монеты
+            current_oi: Текущее значение Open Interest
+            
+        Returns:
+            Процентное изменение OI за последний час
+        """
+        if current_oi <= 0:
+            return 0.0
+        
+        now = time.time()
+        history = self.oi_history.get(symbol, [])
+        
+        # Добавляем текущее значение
+        history.append((now, current_oi))
+        
+        # Удаляем старые записи (старше 4 часов)
+        history = [(t, oi) for t, oi in history if now - t < self.OI_HISTORY_WINDOW_SECONDS]
+        self.oi_history[symbol] = history
+        
+        # Ищем значение час назад
+        one_hour_ago = now - self.ONE_HOUR_SECONDS
+        old_entries = [(t, oi) for t, oi in history if t <= one_hour_ago]
+        
+        if old_entries:
+            old_oi = old_entries[-1][1]  # Берём ближайшее к часу назад
+            if old_oi > 0:
+                return ((current_oi - old_oi) / old_oi) * 100
+        
+        return 0.0
+    
+    async def _calculate_btc_correlation(self, prices: List[float]) -> float:
+        """
+        Рассчитывает корреляцию с BTC.
+        
+        Args:
+            prices: Список цен монеты для расчета корреляции
+            
+        Returns:
+            Коэффициент корреляции Пирсона (-1 до 1)
+        """
+        try:
+            # Используем приоритет бирж для получения данных BTC
+            btc_data = await self._get_data_with_fallback("BTC")
+            if not btc_data or not btc_data.get("ohlcv_1h"):
+                return 0.5  # Нейтральное значение при ошибке
+            
+            btc_prices = [c["close"] for c in btc_data["ohlcv_1h"]]
+            
+            # Выравниваем длину
+            min_len = min(len(prices), len(btc_prices), self.MAX_CORRELATION_SAMPLES)
+            if min_len < self.MIN_CORRELATION_SAMPLES:
+                return 0.5
+            
+            prices = prices[-min_len:]
+            btc_prices = btc_prices[-min_len:]
+            
+            # Рассчитываем корреляцию Пирсона
+            mean_p = sum(prices) / len(prices)
+            mean_b = sum(btc_prices) / len(btc_prices)
+            
+            numerator = sum((p - mean_p) * (b - mean_b) for p, b in zip(prices, btc_prices))
+            denom_p = sum((p - mean_p) ** 2 for p in prices) ** 0.5
+            denom_b = sum((b - mean_b) ** 2 for b in btc_prices) ** 0.5
+            
+            if denom_p * denom_b == 0:
+                return 0.5
+            
+            return numerator / (denom_p * denom_b)
+        except Exception as e:
+            logger.warning(f"Error calculating BTC correlation: {e}")
+            return 0.5
+    
+    def _determine_direction(self, change_1h: float, change_4h: float, 
+                             trend_score: float, funding_rate: float) -> Tuple[str, str]:
+        """
+        Определяет направление на основе нескольких факторов.
+        
+        Args:
+            change_1h: Изменение цены за 1 час (%)
+            change_4h: Изменение цены за 4 часа (%)
+            trend_score: Оценка тренда (0-10)
+            funding_rate: Ставка финансирования
+            
+        Returns:
+            Tuple (направление, эмодзи)
+        """
+        bullish_signals = 0
+        bearish_signals = 0
+        
+        # Momentum (вес 2)
+        if change_4h > self.MOMENTUM_4H_THRESHOLD:
+            bullish_signals += self.MOMENTUM_4H_WEIGHT
+        elif change_4h < -self.MOMENTUM_4H_THRESHOLD:
+            bearish_signals += self.MOMENTUM_4H_WEIGHT
+        
+        if change_1h > self.MOMENTUM_1H_THRESHOLD:
+            bullish_signals += self.MOMENTUM_1H_WEIGHT
+        elif change_1h < -self.MOMENTUM_1H_THRESHOLD:
+            bearish_signals += self.MOMENTUM_1H_WEIGHT
+        
+        # Trend (EMA crossover)
+        if trend_score > self.TREND_BULLISH_THRESHOLD:
+            bullish_signals += 1
+        elif trend_score < self.TREND_BEARISH_THRESHOLD:
+            bearish_signals += 1
+        
+        # Funding (контр-сигнал при экстремальных значениях)
+        if funding_rate and funding_rate > self.FUNDING_EXTREME_THRESHOLD:
+            bearish_signals += 1  # Много лонгов
+        elif funding_rate and funding_rate < -self.FUNDING_EXTREME_THRESHOLD:
+            bullish_signals += 1  # Много шортов
+        
+        if bullish_signals > bearish_signals:
+            return "ЛОНГ", "📈"
+        elif bearish_signals > bullish_signals:
+            return "ШОРТ", "📉"
+        return "НЕЙТРАЛЬНО", "➡️"
+    
+    def _calculate_levels(self, price: float, atr_pct: float, direction: str) -> Dict:
+        """
+        Рассчитывает уровни входа, SL и TP на основе ATR.
+        
+        Args:
+            price: Текущая цена
+            atr_pct: ATR в процентах
+            direction: Направление ("ЛОНГ", "ШОРТ", или "НЕЙТРАЛЬНО")
+            
+        Returns:
+            Dict с уровнями entry_low, entry_high, stop, tp1, tp2
+        """
+        # Ограничиваем ATR multiplier
+        atr_mult = max(min(atr_pct / 100, self.MAX_ATR_MULTIPLIER), self.MIN_ATR_MULTIPLIER)
+        
+        if direction == "ЛОНГ":
+            return {
+                "entry_low": price * (1 - atr_mult * 0.5),
+                "entry_high": price * (1 + atr_mult * 0.5),
+                "stop": price * (1 - atr_mult * 1.5),
+                "tp1": price * (1 + atr_mult * 2.0),
+                "tp2": price * (1 + atr_mult * 4.0),
+            }
+        else:  # ШОРТ или НЕЙТРАЛЬНО
+            return {
+                "entry_low": price * (1 - atr_mult * 0.5),
+                "entry_high": price * (1 + atr_mult * 0.5),
+                "stop": price * (1 + atr_mult * 1.5),
+                "tp1": price * (1 - atr_mult * 2.0),
+                "tp2": price * (1 - atr_mult * 4.0),
+            }
+    
+    async def _get_cached_data(self, key: str, fetch_func, ttl: int = 60):
+        """
+        Получает данные из кэша или выполняет запрос.
+        
+        Args:
+            key: Ключ кэша
+            fetch_func: Async функция для получения данных
+            ttl: Время жизни кэша в секундах
+            
+        Returns:
+            Данные из кэша или от fetch_func
+        """
+        # Check in-memory cache first
+        cache_entry = self.cache.get(key)
+        if cache_entry and time.time() - cache_entry.get("timestamp", 0) < ttl:
+            return cache_entry.get("data")
+        
+        # Fetch fresh data
+        data = await fetch_func()
+        
+        if data:
+            self.cache[key] = {"data": data, "timestamp": time.time()}
+        
+        return data
+    
+    def get_top3_changes(self, new_top3: List[Dict]) -> Dict:
+        """
+        Возвращает изменения в ТОП-3 для уведомлений.
+        
+        Args:
+            new_top3: Новый список ТОП-3 монет
+            
+        Returns:
+            Dict с ключами added, removed, has_changes
+        """
+        old_symbols = {c["symbol"] for c in self.top3_history}
+        new_symbols = {c["symbol"] for c in new_top3}
+        
+        added = new_symbols - old_symbols
+        removed = old_symbols - new_symbols
+        
+        return {
+            "added": [c for c in new_top3 if c["symbol"] in added],
+            "removed": [c for c in self.top3_history if c["symbol"] in removed],
+            "has_changes": bool(added or removed),
+        }
     
     async def calculate_score(self, coin: Dict) -> Optional[Dict]:
         """
@@ -326,7 +608,6 @@ class SmartSignalAnalyzer:
             atr_pct = sum(high_low_range) / len(high_low_range) if high_low_range else 2.0
             
             # BB width (упрощённо через std)
-            import statistics
             price_std = statistics.stdev(prices_1h[-20:]) if len(prices_1h) >= 20 else 0
             bb_width_pct = (price_std * 2 / current_price) * 100 if current_price > 0 else 5.0
             
@@ -355,12 +636,16 @@ class SmartSignalAnalyzer:
             # Применяем бонусы/штрафы
             funding_rate = exchange_data.get("funding_rate") or 0
             oi_data = exchange_data.get("open_interest")
-            # TODO: Calculate actual OI change - requires historical OI data
-            oi_change_pct = 0  # Placeholder until we implement OI history tracking
             
-            # TODO: Calculate actual BTC correlation - requires BTC price history
-            # For now, we skip BTC correlation in scoring to avoid inaccurate penalties
-            btc_correlation = 0.5  # Neutral value that won't trigger penalties
+            # Рассчитываем реальное изменение OI
+            if oi_data and isinstance(oi_data, dict):
+                current_oi = oi_data.get("openInterest", 0) or oi_data.get("open_interest", 0)
+                oi_change_pct = await self._calculate_oi_change(symbol, current_oi)
+            else:
+                oi_change_pct = 0
+            
+            # Рассчитываем реальную корреляцию с BTC
+            btc_correlation = await self._calculate_btc_correlation(prices_1h)
             
             final_score, factors = apply_score_bonuses(
                 base_score,
@@ -370,9 +655,10 @@ class SmartSignalAnalyzer:
                 btc_correlation
             )
             
-            # Определяем направление
-            direction = "ЛОНГ" if change_4h > 0 else "ШОРТ"
-            direction_emoji = "📈" if change_4h > 0 else "📉"
+            # Определяем направление с помощью улучшенной логики
+            direction, direction_emoji = self._determine_direction(
+                change_1h, change_4h, trend_score, funding_rate
+            )
             
             return {
                 "symbol": symbol,
@@ -556,19 +842,27 @@ class SmartSignalAnalyzer:
                     text += f"• {factor_escaped}\n"
                 text += "\n"
             
-            # Уровни (упрощённо)
+            # Уровни на основе ATR
             current_price = coin['price']
-            entry_low = current_price * 0.99
-            entry_high = current_price * 1.01
-            stop = current_price * 0.97 if coin['direction'] == "ЛОНГ" else current_price * 1.03
-            tp1 = current_price * 1.04 if coin['direction'] == "ЛОНГ" else current_price * 0.96
-            tp2 = current_price * 1.08 if coin['direction'] == "ЛОНГ" else current_price * 0.92
+            levels = self._calculate_levels(current_price, coin['atr_pct'], coin['direction'])
+            
+            entry_low = levels['entry_low']
+            entry_high = levels['entry_high']
+            stop = levels['stop']
+            tp1 = levels['tp1']
+            tp2 = levels['tp2']
+            
+            # Рассчитываем Risk/Reward ratio
+            risk = abs(stop - current_price)
+            reward = abs(tp1 - current_price)
+            rr_ratio = reward / risk if risk > 0 else 0
             
             text += "📍 *Уровни:*\n"
             text += f"• Вход: ${entry_low:,.2f}\\-{entry_high:,.2f}\n"
             text += f"• Стоп: ${stop:,.2f} \\({((stop - current_price) / current_price * 100):+.1f}%\\)\n"
             text += f"• TP1: ${tp1:,.2f} \\({((tp1 - current_price) / current_price * 100):+.1f}%\\)\n"
             text += f"• TP2: ${tp2:,.2f} \\({((tp2 - current_price) / current_price * 100):+.1f}%\\)\n"
+            text += f"📊 R:R = 1:{rr_ratio:.1f}\n"
             
             if idx < len(top3) - 1:
                 text += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
