@@ -10,6 +10,7 @@ MESSAGE_SECTION_DIVIDER = "━━━━━━━━━━━━━━━━━�
 def calculate_weighted_score(factors):
     """
     Calculate weighted score from factor scores (copied from ai_signals.py).
+    Updated to match FACTOR_WEIGHTS_WITH_WHALES.
     """
     FACTOR_WEIGHTS = {
         'whales': 0.25,
