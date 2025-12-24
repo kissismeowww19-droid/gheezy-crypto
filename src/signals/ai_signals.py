@@ -6243,6 +6243,10 @@ class AISignalAnalyzer:
             text += "🔥 *ИТОГОВЫЙ РАСЧЁТ*\n"
             text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             
+            # Determine weights based on symbol using existing method
+            symbol_upper = signal_data.get('symbol', '').upper()
+            w = self.get_weights_for_symbol(symbol_upper)
+            
             # Show calculation for each factor
             whale_s = factor_scores.get('whales', 0)
             derivatives_s = factor_scores.get('derivatives', 0)
@@ -6255,28 +6259,29 @@ class AISignalAnalyzer:
             macro_s = factor_scores.get('macro', 0)
             options_s = factor_scores.get('options', 0)
             
-            # Calculate weighted contributions
-            whale_contrib = whale_s * 0.25
-            derivatives_contrib = derivatives_s * 0.20
-            trend_contrib = trend_s * 0.15
-            momentum_contrib = momentum_s * 0.12
-            volume_contrib = volume_s * 0.10
-            adx_contrib = adx_s * 0.05
-            divergence_contrib = divergence_s * 0.05
-            sentiment_contrib = sentiment_s * 0.04
-            macro_contrib = macro_s * 0.03
-            options_contrib = options_s * 0.01
+            # Calculate weighted contributions with correct weights
+            whale_contrib = whale_s * w['whales']
+            derivatives_contrib = derivatives_s * w['derivatives']
+            trend_contrib = trend_s * w['trend']
+            momentum_contrib = momentum_s * w['momentum']
+            volume_contrib = volume_s * w['volume']
+            adx_contrib = adx_s * w['adx']
+            divergence_contrib = divergence_s * w['divergence']
+            sentiment_contrib = sentiment_s * w['sentiment']
+            macro_contrib = macro_s * w['macro']
+            options_contrib = options_s * w['options']
             
-            text += f"• Киты:       {whale_s:+.1f} × 25% = {whale_contrib:+.2f}\n"
-            text += f"• Деривативы: {derivatives_s:+.1f} × 22% = {derivatives_contrib:+.2f}\n"
-            text += f"• Тренд:      {trend_s:+.1f} × 18% = {trend_contrib:+.2f}\n"
-            text += f"• Импульс:    {momentum_s:+.1f} × 12% = {momentum_contrib:+.2f}\n"
-            text += f"• Объём:      {volume_s:+.1f} × 10% = {volume_contrib:+.2f}\n"
-            text += f"• ADX:        {adx_s:+.1f} × 5%  = {adx_contrib:+.2f}\n"
-            text += f"• Дивергенция:{divergence_s:+.1f} × 5%  = {divergence_contrib:+.2f}\n"
-            text += f"• Настроения: {sentiment_s:+.1f} × 2%  = {sentiment_contrib:+.2f}\n"
-            text += f"• Макро:      {macro_s:+.1f} × 1%  = {macro_contrib:+.2f}\n"
-            text += f"• Опционы:    {options_s:+.1f} × 0%  = {options_contrib:+.2f}\n"
+            # Display with correct percentages
+            text += f"• Киты:       {whale_s:+.1f} × {int(w['whales']*100)}% = {whale_contrib:+.2f}\n"
+            text += f"• Деривативы: {derivatives_s:+.1f} × {int(w['derivatives']*100)}% = {derivatives_contrib:+.2f}\n"
+            text += f"• Тренд:      {trend_s:+.1f} × {int(w['trend']*100)}% = {trend_contrib:+.2f}\n"
+            text += f"• Импульс:    {momentum_s:+.1f} × {int(w['momentum']*100)}% = {momentum_contrib:+.2f}\n"
+            text += f"• Объём:      {volume_s:+.1f} × {int(w['volume']*100)}% = {volume_contrib:+.2f}\n"
+            text += f"• ADX:        {adx_s:+.1f} × {int(w['adx']*100)}%  = {adx_contrib:+.2f}\n"
+            text += f"• Дивергенция:{divergence_s:+.1f} × {int(w['divergence']*100)}%  = {divergence_contrib:+.2f}\n"
+            text += f"• Настроения: {sentiment_s:+.1f} × {int(w['sentiment']*100)}%  = {sentiment_contrib:+.2f}\n"
+            text += f"• Макро:      {macro_s:+.1f} × {int(w['macro']*100)}%  = {macro_contrib:+.2f}\n"
+            text += f"• Опционы:    {options_s:+.1f} × {int(w['options']*100)}%  = {options_contrib:+.2f}\n"
             text += "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             text += f"📊 *ИТОГО: {weighted_score:+.2f}*\n\n"
 
