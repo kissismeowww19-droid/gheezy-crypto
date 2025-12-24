@@ -8,6 +8,7 @@ from typing import List, Dict, Optional, Tuple
 from datetime import datetime
 import asyncio
 import aiohttp
+import statistics
 
 from signals.exchanges.okx import OKXClient
 from signals.exchanges.bybit import BybitClient
@@ -67,6 +68,25 @@ class SmartSignalAnalyzer:
     
     # Приоритет бирж для fallback
     EXCHANGE_PRIORITY = ["okx", "bybit", "gate"]
+    
+    # Константы для расчётов
+    OI_HISTORY_WINDOW_SECONDS = 14400  # 4 часа
+    ONE_HOUR_SECONDS = 3600  # 1 час
+    MIN_CORRELATION_SAMPLES = 10  # Минимум точек для корреляции
+    MAX_CORRELATION_SAMPLES = 20  # Максимум точек для корреляции
+    MAX_ATR_MULTIPLIER = 0.05  # Максимум 5% для ATR
+    MIN_ATR_MULTIPLIER = 0.01  # Минимум 1% для ATR
+    
+    # Пороги для определения направления
+    MOMENTUM_4H_THRESHOLD = 0.5  # Порог для 4-часового momentum
+    MOMENTUM_1H_THRESHOLD = 0.2  # Порог для 1-часового momentum
+    TREND_BULLISH_THRESHOLD = 6  # Порог для бычьего тренда
+    TREND_BEARISH_THRESHOLD = 4  # Порог для медвежьего тренда
+    FUNDING_EXTREME_THRESHOLD = 0.0005  # Порог для экстремального funding
+    
+    # Веса сигналов для определения направления
+    MOMENTUM_4H_WEIGHT = 2  # Вес для 4-часового momentum
+    MOMENTUM_1H_WEIGHT = 1  # Вес для 1-часового momentum
     
     def __init__(self):
         self.exchanges = {
@@ -339,11 +359,11 @@ class SmartSignalAnalyzer:
         history.append((now, current_oi))
         
         # Удаляем старые записи (старше 4 часов)
-        history = [(t, oi) for t, oi in history if now - t < 14400]
+        history = [(t, oi) for t, oi in history if now - t < self.OI_HISTORY_WINDOW_SECONDS]
         self.oi_history[symbol] = history
         
         # Ищем значение час назад
-        one_hour_ago = now - 3600
+        one_hour_ago = now - self.ONE_HOUR_SECONDS
         old_entries = [(t, oi) for t, oi in history if t <= one_hour_ago]
         
         if old_entries:
@@ -364,15 +384,16 @@ class SmartSignalAnalyzer:
             Коэффициент корреляции Пирсона (-1 до 1)
         """
         try:
-            btc_data = await self._get_exchange_data("BTC", "okx")
+            # Используем приоритет бирж для получения данных BTC
+            btc_data = await self._get_data_with_fallback("BTC")
             if not btc_data or not btc_data.get("ohlcv_1h"):
                 return 0.5  # Нейтральное значение при ошибке
             
             btc_prices = [c["close"] for c in btc_data["ohlcv_1h"]]
             
             # Выравниваем длину
-            min_len = min(len(prices), len(btc_prices), 20)
-            if min_len < 10:
+            min_len = min(len(prices), len(btc_prices), self.MAX_CORRELATION_SAMPLES)
+            if min_len < self.MIN_CORRELATION_SAMPLES:
                 return 0.5
             
             prices = prices[-min_len:]
@@ -412,26 +433,26 @@ class SmartSignalAnalyzer:
         bearish_signals = 0
         
         # Momentum (вес 2)
-        if change_4h > 0.5:
-            bullish_signals += 2
-        elif change_4h < -0.5:
-            bearish_signals += 2
+        if change_4h > self.MOMENTUM_4H_THRESHOLD:
+            bullish_signals += self.MOMENTUM_4H_WEIGHT
+        elif change_4h < -self.MOMENTUM_4H_THRESHOLD:
+            bearish_signals += self.MOMENTUM_4H_WEIGHT
         
-        if change_1h > 0.2:
-            bullish_signals += 1
-        elif change_1h < -0.2:
-            bearish_signals += 1
+        if change_1h > self.MOMENTUM_1H_THRESHOLD:
+            bullish_signals += self.MOMENTUM_1H_WEIGHT
+        elif change_1h < -self.MOMENTUM_1H_THRESHOLD:
+            bearish_signals += self.MOMENTUM_1H_WEIGHT
         
         # Trend (EMA crossover)
-        if trend_score > 6:
+        if trend_score > self.TREND_BULLISH_THRESHOLD:
             bullish_signals += 1
-        elif trend_score < 4:
+        elif trend_score < self.TREND_BEARISH_THRESHOLD:
             bearish_signals += 1
         
         # Funding (контр-сигнал при экстремальных значениях)
-        if funding_rate and funding_rate > 0.0005:
+        if funding_rate and funding_rate > self.FUNDING_EXTREME_THRESHOLD:
             bearish_signals += 1  # Много лонгов
-        elif funding_rate and funding_rate < -0.0005:
+        elif funding_rate and funding_rate < -self.FUNDING_EXTREME_THRESHOLD:
             bullish_signals += 1  # Много шортов
         
         if bullish_signals > bearish_signals:
@@ -452,8 +473,8 @@ class SmartSignalAnalyzer:
         Returns:
             Dict с уровнями entry_low, entry_high, stop, tp1, tp2
         """
-        # Минимум 1%, максимум 5% для ATR multiplier
-        atr_mult = max(min(atr_pct / 100, 0.05), 0.01)
+        # Ограничиваем ATR multiplier
+        atr_mult = max(min(atr_pct / 100, self.MAX_ATR_MULTIPLIER), self.MIN_ATR_MULTIPLIER)
         
         if direction == "ЛОНГ":
             return {
@@ -587,7 +608,6 @@ class SmartSignalAnalyzer:
             atr_pct = sum(high_low_range) / len(high_low_range) if high_low_range else 2.0
             
             # BB width (упрощённо через std)
-            import statistics
             price_std = statistics.stdev(prices_1h[-20:]) if len(prices_1h) >= 20 else 0
             bb_width_pct = (price_std * 2 / current_price) * 100 if current_price > 0 else 5.0
             
