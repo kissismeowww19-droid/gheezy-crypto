@@ -16,6 +16,25 @@ RSI_OVERBOUGHT_THRESHOLD = 70
 RSI_OVERSOLD_THRESHOLD = 30
 
 
+def _calculate_ema(data: np.ndarray, period: int) -> np.ndarray:
+    """
+    Calculate Exponential Moving Average.
+    
+    Args:
+        data: Price data array
+        period: EMA period
+        
+    Returns:
+        EMA values as numpy array
+    """
+    alpha = 2 / (period + 1)
+    result = np.zeros_like(data)
+    result[0] = data[0]
+    for i in range(1, len(data)):
+        result[i] = alpha * data[i] + (1 - alpha) * result[i - 1]
+    return result
+
+
 @dataclass
 class RSI:
     """
@@ -266,19 +285,10 @@ def calculate_macd(
 
     prices_array = np.array(prices)
 
-    def ema(data: np.ndarray, period: int) -> np.ndarray:
-        """Расчёт экспоненциальной скользящей средней."""
-        alpha = 2 / (period + 1)
-        result = np.zeros_like(data)
-        result[0] = data[0]
-        for i in range(1, len(data)):
-            result[i] = alpha * data[i] + (1 - alpha) * result[i - 1]
-        return result
-
-    ema_fast = ema(prices_array, fast_period)
-    ema_slow = ema(prices_array, slow_period)
+    ema_fast = _calculate_ema(prices_array, fast_period)
+    ema_slow = _calculate_ema(prices_array, slow_period)
     macd_line = ema_fast - ema_slow
-    signal_line = ema(macd_line, signal_period)
+    signal_line = _calculate_ema(macd_line, signal_period)
     histogram = macd_line - signal_line
 
     return MACD(
@@ -1664,10 +1674,9 @@ def detect_candlestick_patterns(ohlcv: List[Dict]) -> List[CandlestickPattern]:
         }
     
     # We need at least last 3 candles for pattern detection
-    for i in range(len(ohlcv) - 3, len(ohlcv)):
-        if i < 0:
-            continue
-            
+    # Fix range to avoid negative indices
+    start_idx = max(0, len(ohlcv) - 3)
+    for i in range(start_idx, len(ohlcv)):
         candle = get_candle_properties(ohlcv[i])
         if not candle:
             continue
@@ -1702,10 +1711,8 @@ def detect_candlestick_patterns(ohlcv: List[Dict]) -> List[CandlestickPattern]:
     
     # Patterns requiring 2 candles
     if len(ohlcv) >= 2:
-        for i in range(len(ohlcv) - 2, len(ohlcv) - 1):
-            if i < 0:
-                continue
-                
+        start_idx = max(0, len(ohlcv) - 2)
+        for i in range(start_idx, len(ohlcv) - 1):
             prev = get_candle_properties(ohlcv[i])
             curr = get_candle_properties(ohlcv[i + 1])
             
@@ -1734,10 +1741,8 @@ def detect_candlestick_patterns(ohlcv: List[Dict]) -> List[CandlestickPattern]:
     
     # Patterns requiring 3 candles
     if len(ohlcv) >= 3:
-        for i in range(len(ohlcv) - 3, len(ohlcv) - 2):
-            if i < 0:
-                continue
-                
+        start_idx = max(0, len(ohlcv) - 3)
+        for i in range(start_idx, len(ohlcv) - 2):
             c1 = get_candle_properties(ohlcv[i])
             c2 = get_candle_properties(ohlcv[i + 1])
             c3 = get_candle_properties(ohlcv[i + 2])

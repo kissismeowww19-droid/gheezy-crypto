@@ -20,7 +20,7 @@ from signals.indicators import (
     calculate_obv, calculate_vwap, calculate_volume_sma,
     calculate_pivot_points, calculate_fibonacci_levels,
     calculate_rsi_divergence, calculate_adx, detect_volume_spike,
-    detect_candlestick_patterns, calculate_macd_divergence
+    detect_candlestick_patterns, calculate_macd_divergence, _calculate_ema
 )
 from signals.data_sources import DataSourceManager
 from signals.multi_timeframe import MultiTimeframeAnalyzer
@@ -1237,19 +1237,11 @@ class AISignalAnalyzer:
                         # Пересчитываем MACD для получения полной истории histogram
                         prices_array = np.array(close_prices)
                         
-                        # Экспоненциальная скользящая средняя
-                        def ema(data: np.ndarray, period: int) -> np.ndarray:
-                            alpha = 2 / (period + 1)
-                            result_arr = np.zeros_like(data)
-                            result_arr[0] = data[0]
-                            for i in range(1, len(data)):
-                                result_arr[i] = alpha * data[i] + (1 - alpha) * result_arr[i - 1]
-                            return result_arr
-                        
-                        ema_fast = ema(prices_array, 12)
-                        ema_slow = ema(prices_array, 26)
+                        # Use the extracted EMA function from indicators module
+                        ema_fast = _calculate_ema(prices_array, 12)
+                        ema_slow = _calculate_ema(prices_array, 26)
                         macd_line = ema_fast - ema_slow
-                        signal_line = ema(macd_line, 9)
+                        signal_line = _calculate_ema(macd_line, 9)
                         histogram = macd_line - signal_line
                         
                         # Вычисляем MACD Divergence

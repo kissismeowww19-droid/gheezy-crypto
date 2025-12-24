@@ -283,6 +283,3 @@ def test_macd_divergence_dataclass():
     assert div.strength == 75.0
     assert "lower lows" in div.explanation
 
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
