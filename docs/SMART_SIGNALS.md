@@ -109,16 +109,16 @@ redis_url = "redis://localhost:6379/0"   # Optional Redis caching
 
 The system automatically filters out ~100+ problematic symbols:
 - **Stablecoins**: USDT, USDC, BUSD, DAI, TUSD, FDUSD, PYUSD, USDD, USDP, GUSD, FRAX, LUSD, USDJ, USDS, CUSD, SUSD, USDN, USDX, USDK, MUSD, HUSD, OUSD, CEUR, EURS, EURT, USDQ, RSV, PAX, USDL, USDB
-- **Wrapped tokens**: WETH, WBTC, WBNB, WSTETH, WBETH, CBBTC, CBETH, STETH, RETH, SFRXETH, METH, EETH, WTRX, WAVAX, WMATIC, WFTM, WONE, WCRO, WKCS, WROSE, WXDAI, WGLMR, WMOVR, WEVMOS, WCANTO
-- **Liquid Staking Derivatives**: ANKRBNB, ANKRETH, MSOL, JITOSOL, BNSOL, MARINADE, LIDO, STMATIC, MATICX, STKBNB, SNBNB, STKSOL, STSOL, SCNSOL, LAINESOL, XSOL
+- **Wrapped tokens**: WETH, WBTC, WBNB, WSTETH, WBETH, CBBTC, METH, EETH, WTRX, WAVAX, WMATIC, WFTM, WONE, WCRO, WKCS, WROSE, WXDAI, WGLMR, WMOVR, WEVMOS, WCANTO
+- **Liquid Staking Derivatives**: STETH, RETH, CBETH, FRXETH, SFRXETH, MSOL, JITOSOL, BNSOL, ANKRBNB, ANKRETH, MARINADE, LIDO, STMATIC, MATICX, STKBNB, SNBNB, STKSOL, STSOL, SCNSOL, LAINESOL, XSOL
 - **Ethena & synthetic assets**: SUSDE, SUSDS, USDE, SENA, ENA, SDAI, SFRAX
-- **LP/Yield tokens**: JLP, BFUSD, BNSOL, MSOL, JITOSOL, SYRUPUSDC, FIGR_HELOC, GLP, SGLP, MLP, HLP, PLP
+- **LP/Yield tokens**: JLP, BFUSD, SYRUPUSDC, FIGR_HELOC, GLP, SGLP, MLP, HLP, PLP
 - **Exchange tokens**: BGB, WBT, GT, MX, KCS, HT, OKB, BNB, LEO, CRO (may not be available on all exchanges)
 - **Bridged tokens**: BTCB, ETHB, SOETH, SOLETH, ARBETH, OPETH, BSC-USD, BTCST
 - **Rebase/Elastic tokens**: OHM, OHMS, SOHM, GOHM, AMPL, FORTH, KLIMA, TIME, MEMO, BTRFLY
 - **Governance/Vote-Escrowed**: VECRV, VEBAL, VELO, VEVELO, VEGNO, VETHE
 - **Additional wrappers**: TBTC, HBTC, RENBTC, SBTC, OBTC, PBTC, IMBTC, XSUSHI, XRUNE, XVOTE
-- **Problematic symbols**: BSC-USD, USDT0, RAIN, FIGR_HELOC, and any symbol with special characters or >10 chars
+- **Problematic symbols**: USDT0, RAIN, and any symbol with special characters or >10 chars
 
 ## Architecture
 
