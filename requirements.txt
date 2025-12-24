@@ -14,7 +14,7 @@ asyncpg==0.30.0
 alembic==1.14.0
 
 # HTTP клиент
-aiohttp==3.11.10
+aiohttp<3.11,>=3.9.0
 httpx==0.28.1
 
 # Redis
@@ -28,7 +28,7 @@ ta-lib==0.5.1
 tradingview_ta>=3.3.0
 
 # Валидация
-pydantic==2.10.3
+pydantic<2.10,>=2.4.1
 pydantic-settings==2.6.1
 
 # Утилиты
