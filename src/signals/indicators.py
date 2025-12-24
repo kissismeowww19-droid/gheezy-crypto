@@ -5,7 +5,7 @@ Gheezy Crypto - Технические индикаторы
 """
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 
 import numpy as np
 
