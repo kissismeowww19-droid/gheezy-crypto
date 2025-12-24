@@ -6849,9 +6849,10 @@ class AISignalAnalyzer:
             
             # Рассчитываем цены TP и SL
             if raw_direction == "sideways":
-                tp1_price = current_price * (1 + self.SIDEWAYS_RANGE_PERCENT / 100)
-                tp2_price = current_price * (1 + self.SIDEWAYS_RANGE_PERCENT / 100)
-                sl_price = current_price * (1 - self.SIDEWAYS_RANGE_PERCENT / 100)
+                # For sideways, targets represent range bounds (not separate targets)
+                tp1_price = current_price * (1 + self.SIDEWAYS_RANGE_PERCENT / 100)  # Upper bound
+                tp2_price = current_price * (1 + self.SIDEWAYS_RANGE_PERCENT / 100)  # Same as tp1 for sideways
+                sl_price = current_price * (1 - self.SIDEWAYS_RANGE_PERCENT / 100)   # Lower bound
             elif raw_direction == "long":
                 tp1_price = current_price * (1 + 1.5 / 100)  # +1.5%
                 tp2_price = current_price * (1 + 2.0 / 100)  # +2.0%

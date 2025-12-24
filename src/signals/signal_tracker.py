@@ -71,6 +71,16 @@ class SignalTracker:
             conn.execute('CREATE INDEX IF NOT EXISTS idx_user_symbol ON signals(user_id, symbol)')
             conn.commit()
     
+    def _parse_datetime(self, datetime_str: Optional[str]) -> Optional[datetime]:
+        """Safely parse datetime string from database."""
+        if not datetime_str:
+            return None
+        try:
+            return datetime.fromisoformat(datetime_str)
+        except (ValueError, TypeError) as e:
+            logger.warning(f"Failed to parse datetime '{datetime_str}': {e}")
+            return None
+    
     def save_signal(
         self,
         user_id: int,
@@ -136,7 +146,7 @@ class SignalTracker:
                         timestamp=timestamp,
                         result=row[1],
                         exit_price=row[2],
-                        checked_at=datetime.fromisoformat(row[3]) if row[3] else None
+                        checked_at=self._parse_datetime(row[3])
                     )
                 else:
                     # Если по какой-то причине не нашли сигнал, пробрасываем исключение
@@ -318,6 +328,10 @@ class SignalTracker:
             
             total_pnl = 0.0
             for direction, entry_price, exit_price, result in cursor.fetchall():
+                # Skip if entry_price is 0 to avoid division by zero
+                if entry_price == 0:
+                    continue
+                    
                 if direction == "long":
                     pnl = ((exit_price - entry_price) / entry_price) * 100
                 elif direction == "short":
@@ -344,8 +358,18 @@ class SignalTracker:
             
             symbol_stats = cursor.fetchall()
             
-            best_symbol = symbol_stats[0][0] if symbol_stats else "N/A"
-            worst_symbol = symbol_stats[-1][0] if symbol_stats else "N/A"
+            # Handle best/worst symbols
+            if not symbol_stats:
+                best_symbol = "N/A"
+                worst_symbol = "N/A"
+            elif len(symbol_stats) == 1:
+                # If only one symbol, show it for best but N/A for worst
+                best_symbol = symbol_stats[0][0]
+                worst_symbol = "N/A"
+            else:
+                # Multiple symbols - show best and worst
+                best_symbol = symbol_stats[0][0]
+                worst_symbol = symbol_stats[-1][0]
             
             return {
                 "total_signals": total_signals,

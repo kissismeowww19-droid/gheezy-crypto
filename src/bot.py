@@ -1450,9 +1450,9 @@ async def send_signal_in_parts(message_or_callback, symbol: str, signal_text: st
                     )
 
 
-@router.callback_query(lambda c: c. data. startswith("signal_"))
+@router.callback_query(lambda c: c.data.startswith("signal_"))
 async def callback_signal_coin(callback: CallbackQuery):
-    symbol = callback.data.replace("signal_", ""). upper()
+    symbol = callback.data.replace("signal_", "").upper()
     user_id = callback.from_user.id
     
     # Показываем индикатор загрузки
