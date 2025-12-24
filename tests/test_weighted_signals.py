@@ -31,6 +31,13 @@ class TestWeightedSignalSystem:
     
     def test_factor_weights_sum_to_100_percent(self, analyzer):
         """Test that factor weights sum to 100% (1.0)."""
+        # Test both weight sets
+        total_weight_with_whales = sum(analyzer.FACTOR_WEIGHTS_WITH_WHALES.values())
+        total_weight_no_whales = sum(analyzer.FACTOR_WEIGHTS_NO_WHALES.values())
+        assert abs(total_weight_with_whales - 1.0) < 0.001, f"WITH_WHALES weights sum to {total_weight_with_whales}, expected 1.0"
+        assert abs(total_weight_no_whales - 1.0) < 0.001, f"NO_WHALES weights sum to {total_weight_no_whales}, expected 1.0"
+        
+        # Legacy FACTOR_WEIGHTS should equal WITH_WHALES
         total_weight = sum(analyzer.FACTOR_WEIGHTS.values())
         assert abs(total_weight - 1.0) < 0.001, f"Weights sum to {total_weight}, expected 1.0"
     
@@ -41,6 +48,28 @@ class TestWeightedSignalSystem:
             'adx', 'divergence', 'sentiment', 'macro', 'options'
         }
         assert set(analyzer.FACTOR_WEIGHTS.keys()) == expected_factors
+        assert set(analyzer.FACTOR_WEIGHTS_WITH_WHALES.keys()) == expected_factors
+        assert set(analyzer.FACTOR_WEIGHTS_NO_WHALES.keys()) == expected_factors
+    
+    def test_get_weights_for_symbol(self, analyzer):
+        """Test that correct weights are returned for different symbols."""
+        # BTC and ETH should get WITH_WHALES weights
+        btc_weights = analyzer.get_weights_for_symbol('BTC')
+        eth_weights = analyzer.get_weights_for_symbol('ETH')
+        assert btc_weights == analyzer.FACTOR_WEIGHTS_WITH_WHALES
+        assert eth_weights == analyzer.FACTOR_WEIGHTS_WITH_WHALES
+        assert btc_weights['whales'] == 0.25
+        assert btc_weights['derivatives'] == 0.20
+        
+        # TON, SOL, XRP should get NO_WHALES weights
+        ton_weights = analyzer.get_weights_for_symbol('TON')
+        sol_weights = analyzer.get_weights_for_symbol('SOL')
+        xrp_weights = analyzer.get_weights_for_symbol('XRP')
+        assert ton_weights == analyzer.FACTOR_WEIGHTS_NO_WHALES
+        assert sol_weights == analyzer.FACTOR_WEIGHTS_NO_WHALES
+        assert xrp_weights == analyzer.FACTOR_WEIGHTS_NO_WHALES
+        assert ton_weights['whales'] == 0.00
+        assert ton_weights['derivatives'] == 0.28
     
     def test_calculate_weighted_score_all_bullish(self, analyzer):
         """Test weighted score with all bullish factors."""
