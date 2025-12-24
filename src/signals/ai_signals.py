@@ -215,6 +215,7 @@ class AISignalAnalyzer:
     # Оптимизированные веса для 4-часового прогноза
     
     # Для BTC/ETH (есть whale данные)
+    # For BTC/ETH (coins with whale data available)
     FACTOR_WEIGHTS_WITH_WHALES = {
         'whales': 0.25,        # 25% - Smart money, leads market
         'derivatives': 0.20,   # 20% - Trader positions (OI, Funding, L/S)
@@ -229,20 +230,23 @@ class AISignalAnalyzer:
     }  # = 100%
     
     # Для TON/SOL/XRP (без whale данных - 25% whale веса перераспределены)
+    # For TON/SOL/XRP (coins without whale data - 25% whale weight redistributed)
     FACTOR_WEIGHTS_NO_WHALES = {
-        'whales': 0.00,        # 0%  - Нет данных
-        'derivatives': 0.28,   # 28% - +8% (основной индикатор без whale)
-        'trend': 0.22,         # 22% - +7% (второй по важности)
+        'whales': 0.00,        # 0%  - Нет данных / No data available
+        'derivatives': 0.28,   # 28% - +8% (основной индикатор без whale / main indicator without whale)
+        'trend': 0.22,         # 22% - +7% (второй по важности / second most important)
         'momentum': 0.16,      # 16% - +4%
         'volume': 0.14,        # 14% - +4%
         'adx': 0.06,           # 6%  - +1%
         'divergence': 0.06,    # 6%  - +1%
-        'sentiment': 0.04,     # 4%  - без изменений
-        'macro': 0.03,         # 3%  - без изменений
-        'options': 0.01,       # 1%  - без изменений
+        'sentiment': 0.04,     # 4%  - без изменений / unchanged
+        'macro': 0.03,         # 3%  - без изменений / unchanged
+        'options': 0.01,       # 1%  - без изменений / unchanged
     }  # = 100%
     
-    # Legacy weights for backward compatibility (deprecated, use get_weights_for_symbol)
+    # Legacy weights for backward compatibility
+    # DEPRECATED: Use get_weights_for_symbol() to get appropriate weights for a coin
+    # TODO: Remove in v2.0.0 after migrating all code to dynamic weights
     FACTOR_WEIGHTS = FACTOR_WEIGHTS_WITH_WHALES
     
     # Price prediction constants
