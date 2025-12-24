@@ -5,7 +5,7 @@ Gheezy Crypto - Технические индикаторы
 """
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, Dict
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -1824,6 +1824,7 @@ def calculate_macd_divergence(
         MACDDivergence or None if insufficient data
     """
     # Minimum 5 extra periods needed for reliable peak/trough detection
+    # (requires 2 periods on each side of the peak/trough + 1 center period)
     MIN_EXTRA_PERIODS = 5
     if len(prices) < lookback + MIN_EXTRA_PERIODS or len(prices) != len(macd_histogram):
         return None
