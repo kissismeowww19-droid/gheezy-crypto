@@ -242,16 +242,18 @@ class SmartSignalAnalyzer:
         all_coins = []
         # CoinGecko бесплатный API ограничивает per_page до 250
         max_per_page = 250
-        total_pages = (self.SCAN_LIMIT + max_per_page - 1) // max_per_page
         
         headers = {}
         if hasattr(settings, 'coingecko_api_key') and settings.coingecko_api_key:
             headers["X-CG-Pro-API-Key"] = settings.coingecko_api_key
             max_per_page = 500  # Pro API поддерживает больше
-            total_pages = 1
+        
+        total_pages = (self.SCAN_LIMIT + max_per_page - 1) // max_per_page
+        max_retries = 3  # Максимум попыток для каждой страницы при rate limit
         
         try:
-            for page in range(1, total_pages + 1):
+            page = 1
+            while page <= total_pages:
                 url = "https://api.coingecko.com/api/v3/coins/markets"
                 
                 # Рассчитываем сколько монет запросить на этой странице
@@ -269,32 +271,49 @@ class SmartSignalAnalyzer:
                     "sparkline": "false",
                 }
                 
-                async with self.session.get(
-                    url, 
-                    params=params, 
-                    headers=headers, 
-                    timeout=aiohttp.ClientTimeout(total=30)
-                ) as resp:
-                    if resp.status == 200:
-                        coins = await resp.json()
-                        all_coins.extend(coins)
-                        logger.info(f"Scanned page {page}: {len(coins)} coins (total: {len(all_coins)})")
-                        
-                        # Если получили меньше чем запросили - значит это последняя страница
-                        if len(coins) < per_page:
-                            break
+                retry_count = 0
+                success = False
+                
+                while retry_count < max_retries and not success:
+                    async with self.session.get(
+                        url, 
+                        params=params, 
+                        headers=headers, 
+                        timeout=aiohttp.ClientTimeout(total=30)
+                    ) as resp:
+                        if resp.status == 200:
+                            coins = await resp.json()
+                            all_coins.extend(coins)
+                            logger.info(f"Scanned page {page}: {len(coins)} coins (total: {len(all_coins)})")
                             
-                    elif resp.status == 429:
-                        # Rate limit - ждём и пробуем снова
-                        logger.warning("CoinGecko rate limit hit, waiting 10 seconds...")
-                        await asyncio.sleep(10)
-                        continue
-                    else:
-                        logger.warning(f"CoinGecko API error: {resp.status}")
-                        break
+                            # Если получили меньше чем запросили - значит это последняя страница
+                            if len(coins) < per_page:
+                                return all_coins
+                            
+                            success = True
+                            
+                        elif resp.status == 429:
+                            # Rate limit - ждём и пробуем снова
+                            retry_count += 1
+                            if retry_count < max_retries:
+                                logger.warning(f"CoinGecko rate limit hit, waiting 10 seconds... (attempt {retry_count}/{max_retries})")
+                                await asyncio.sleep(10)
+                            else:
+                                logger.error(f"Max retries reached for page {page}, stopping scan")
+                                return all_coins
+                        else:
+                            logger.warning(f"CoinGecko API error: {resp.status}")
+                            return all_coins
+                
+                if not success:
+                    # Не удалось получить данные после всех попыток
+                    break
+                
+                # Переходим к следующей странице
+                page += 1
                 
                 # Небольшая задержка между запросами чтобы не получить rate limit
-                if page < total_pages:
+                if page <= total_pages:
                     await asyncio.sleep(1)
             
             logger.info(f"Scanned {len(all_coins)} coins from CoinGecko")
