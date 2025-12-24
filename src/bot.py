@@ -19,6 +19,7 @@ from config import settings
 from api_manager import get_coin_price as get_price_multi_api, get_api_stats
 from whale.tracker import WhaleTracker as RealWhaleTracker
 from signals.ai_signals import AISignalAnalyzer
+from signals.signal_tracker import SignalTracker
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -42,6 +43,7 @@ signal_analyzer = SignalAnalyzer()
 defi_aggregator = DeFiAggregator()
 whale_tracker = RealWhaleTracker()
 ai_signal_analyzer = AISignalAnalyzer(whale_tracker)
+signal_tracker = SignalTracker()
 
 
 COINS = {
@@ -209,6 +211,62 @@ def format_number(num: float) -> str:
         return "$" + str(round(num / 1000000, 2)) + "M"
     else:
         return "$" + str(round(num, 2))
+
+
+def format_previous_result(result: dict) -> str:
+    """Форматирует результат предыдущего сигнала."""
+    direction_emoji = "📈" if result["direction"] == "long" else "📉" if result["direction"] == "short" else "➡️"
+    
+    # Форматирование цен
+    def format_price(price: float) -> str:
+        if price >= 1000:
+            return f"${price:,.0f}"
+        elif price >= 1:
+            return f"${price:,.2f}"
+        else:
+            return f"${price:.6f}"
+    
+    # Статусы целей
+    t1_status = "✅ Достигнута" if result["target1_reached"] else "❌ Не достигнута"
+    t2_status = "✅ Достигнута" if result["target2_reached"] else "⏳ Не достигнута"
+    sl_status = "❌ Задет" if result["stop_hit"] else "✅ Не задет"
+    
+    # Результат
+    if result["result"] == "win":
+        result_text = f"✅ УСПЕХ (+{result['pnl_percent']:.1f}%)"
+    elif result["result"] == "loss":
+        result_text = f"❌ УБЫТОК ({result['pnl_percent']:.1f}%)"
+    else:
+        result_text = "⏳ В процессе"
+    
+    # Для sideways другой формат
+    if result["direction"] == "sideways":
+        text = f"""
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📊 *ПРЕДЫДУЩИЙ СИГНАЛ* ({result['time_elapsed']} назад)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{direction_emoji} Направление: *БОКОВИК*
+💰 Вход: {format_price(result['entry_price'])}
+📊 Диапазон: ±1.0%
+
+📊 Результат: {result_text}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
+    else:
+        text = f"""
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📊 *ПРЕДЫДУЩИЙ СИГНАЛ* ({result['time_elapsed']} назад)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{direction_emoji} Направление: *{result['direction'].upper()}*
+💰 Вход: {format_price(result['entry_price'])}
+🎯 Цель 1: {format_price(result['target1_price'])} — {t1_status}
+🎯 Цель 2: {format_price(result['target2_price'])} — {t2_status}
+🛑 Стоп: {sl_status}
+
+📊 Результат: {result_text}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
+    return text
 
 
 def format_price_message(symbol: str, data: dict) -> str:
@@ -847,6 +905,74 @@ async def cmd_whales(message: Message):
         )
 
 
+@router.message(Command("stats"))
+async def cmd_stats(message: Message):
+    """Показать статистику сигналов пользователя."""
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    
+    try:
+        await message.delete()
+    except Exception:
+        pass
+    await delete_user_message(message.bot, chat_id)
+    
+    try:
+        stats = signal_tracker.get_user_stats(user_id)
+        
+        if stats["total_signals"] == 0:
+            text = """
+📊 *Ваша статистика*
+
+_У вас пока нет отслеживаемых сигналов._
+
+Нажмите на любую монету в разделе Сигналы, чтобы начать отслеживание!
+"""
+        else:
+            # Прогресс-бар для win rate
+            filled = int(stats["win_rate"] / 10)
+            bar = "█" * filled + "░" * (10 - filled)
+            
+            # Эмодзи для P&L
+            pnl_emoji = "📈" if stats["total_pnl"] >= 0 else "📉"
+            
+            text = f"""
+📊 *Ваша статистика сигналов*
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📈 Всего сигналов: *{stats['total_signals']}*
+
+✅ Успешных: *{stats['wins']}*
+❌ Убыточных: *{stats['losses']}*
+⏳ В ожидании: *{stats['pending']}*
+
+🎯 Win Rate: *{stats['win_rate']:.1f}%*
+{bar}
+
+{pnl_emoji} Общий P/L: *{stats['total_pnl']:+.1f}%*
+
+🏆 Лучшая монета: *{stats['best_symbol']}*
+💀 Худшая монета: *{stats['worst_symbol']}*
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🏠 Меню", callback_data="menu_back")],
+        ])
+        
+        new_msg = await message.answer(text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+        user_messages[chat_id] = new_msg.message_id
+        
+    except Exception as e:
+        logger.error(f"Stats error: {e}", exc_info=True)
+        text = "❌ *Ошибка*\n\nНе удалось загрузить статистику."
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🏠 Меню", callback_data="menu_back")],
+        ])
+        new_msg = await message.answer(text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+        user_messages[chat_id] = new_msg.message_id
+
+
 @router.callback_query(lambda c: c.data == "whale_all")
 async def callback_whale_all(callback: CallbackQuery):
     """Обновить все транзакции китов."""
@@ -1327,10 +1453,31 @@ async def send_signal_in_parts(message_or_callback, symbol: str, signal_text: st
 @router.callback_query(lambda c: c. data. startswith("signal_"))
 async def callback_signal_coin(callback: CallbackQuery):
     symbol = callback.data.replace("signal_", ""). upper()
+    user_id = callback.from_user.id
     
     # Показываем индикатор загрузки
     await callback.answer("⏳ Анализирую данные...")
     await callback.message.edit_text("⏳ *Анализирую данные...*\n\nПодождите несколько секунд", parse_mode=ParseMode.MARKDOWN)
+    
+    # Получаем текущую цену для проверки предыдущего сигнала
+    try:
+        price_data = await get_price_multi_api(symbol)
+        current_price = price_data.get('price_usd', 0) if price_data.get('success') else 0
+    except Exception as e:
+        logger.error(f"Error getting price for {symbol}: {e}")
+        current_price = 0
+    
+    # Проверяем результат предыдущего сигнала
+    previous_result = None
+    if current_price > 0:
+        try:
+            previous_result = signal_tracker.check_previous_signal(
+                user_id=user_id,
+                symbol=symbol,
+                current_price=current_price
+            )
+        except Exception as e:
+            logger.error(f"Error checking previous signal: {e}", exc_info=True)
     
     # Получаем AI сигнал
     try:
@@ -1356,6 +1503,29 @@ async def callback_signal_coin(callback: CallbackQuery):
         except Exception:
             pass
         return
+    
+    # Добавляем информацию о предыдущем сигнале если есть
+    if previous_result and previous_result.get("had_signal"):
+        previous_text = format_previous_result(previous_result)
+        signal_text = previous_text + "\n" + signal_text
+    
+    # Сохраняем новый сигнал
+    try:
+        signal_params = await ai_signal_analyzer.get_signal_params(symbol)
+        if signal_params:
+            signal_tracker.save_signal(
+                user_id=user_id,
+                symbol=symbol,
+                direction=signal_params['direction'],
+                entry_price=signal_params['entry_price'],
+                target1_price=signal_params['target1_price'],
+                target2_price=signal_params['target2_price'],
+                stop_loss_price=signal_params['stop_loss_price'],
+                probability=signal_params['probability']
+            )
+            logger.info(f"Saved signal for user {user_id}, {symbol}")
+    except Exception as e:
+        logger.error(f"Error saving signal: {e}", exc_info=True)
     
     # Send signal (possibly in multiple parts)
     try:

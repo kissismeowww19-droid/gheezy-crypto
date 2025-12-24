@@ -6772,3 +6772,104 @@ class AISignalAnalyzer:
                 f"Произошла ошибка при анализе {symbol}.\n"
                 "Попробуйте позже."
             )
+    
+    async def get_signal_params(self, symbol: str) -> dict:
+        """
+        Получить параметры сигнала для отслеживания.
+        
+        Returns:
+            {
+                "direction": "long",
+                "entry_price": 50000.0,
+                "target1_price": 50750.0,
+                "target2_price": 51000.0,
+                "stop_loss_price": 49700.0,
+                "probability": 65.0
+            }
+        """
+        symbol = symbol.upper()
+        
+        try:
+            # Получаем рыночные данные для цены
+            market_data = await self.get_market_data(symbol)
+            if market_data is None:
+                logger.error(f"Could not get market data for {symbol}")
+                return None
+            
+            current_price = market_data['price_usd']
+            
+            # Получаем сигнал (без whale данных для скорости)
+            # Используем минимальный набор данных
+            whale_data = {
+                "transaction_count": 0,
+                "total_volume_usd": 0,
+                "deposits": 0,
+                "withdrawals": 0,
+                "largest_transaction": 0,
+                "sentiment": "neutral"
+            }
+            
+            # Получаем OHLCV для технического анализа
+            ohlcv_data = await self.get_ohlcv_data(symbol, interval="1h", limit=100)
+            technical_data = await self.calculate_technical_indicators(symbol, ohlcv_data)
+            
+            # Рассчитываем сигнал (упрощенный)
+            signal_data = await self.calculate_signal(
+                symbol=symbol,
+                whale_data=whale_data,
+                market_data=market_data,
+                technical_data=technical_data,
+                fear_greed=None,
+                funding_rate=None,
+                order_book=None,
+                trades=None,
+                futures_data=None,
+                onchain_data=None,
+                exchange_flows=None,
+                ohlcv_data=ohlcv_data,
+                short_term_data=None,
+                trades_flow=None,
+                liquidations=None,
+                orderbook_delta=None,
+                coinglass_data=None,
+                news_sentiment=None,
+                tradingview_rating=None,
+                whale_alert=None,
+                social_data=None,
+                deep_whale_data=None,
+                deep_derivatives_data=None,
+                macro_data=None,
+                options_data=None,
+                sentiment_data=None
+            )
+            
+            # Извлекаем направление и вероятность
+            raw_direction = signal_data.get('raw_direction', 'sideways')
+            probability = signal_data.get('probability', 50.0)
+            
+            # Рассчитываем цены TP и SL
+            if raw_direction == "sideways":
+                tp1_price = current_price * (1 + self.SIDEWAYS_RANGE_PERCENT / 100)
+                tp2_price = current_price * (1 + self.SIDEWAYS_RANGE_PERCENT / 100)
+                sl_price = current_price * (1 - self.SIDEWAYS_RANGE_PERCENT / 100)
+            elif raw_direction == "long":
+                tp1_price = current_price * (1 + 1.5 / 100)  # +1.5%
+                tp2_price = current_price * (1 + 2.0 / 100)  # +2.0%
+                sl_price = current_price * (1 - 0.6 / 100)   # -0.6%
+            else:  # short
+                tp1_price = current_price * (1 - 1.5 / 100)  # -1.5%
+                tp2_price = current_price * (1 - 2.0 / 100)  # -2.0%
+                sl_price = current_price * (1 + 0.6 / 100)   # +0.6%
+            
+            return {
+                "direction": raw_direction,
+                "entry_price": current_price,
+                "target1_price": tp1_price,
+                "target2_price": tp2_price,
+                "stop_loss_price": sl_price,
+                "probability": probability
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting signal params for {symbol}: {e}", exc_info=True)
+            return None
