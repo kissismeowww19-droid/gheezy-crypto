@@ -252,6 +252,25 @@ class AISignalAnalyzer:
     # Weighted score scaling factor (converts -10/+10 to -100/+100 for compatibility)
     WEIGHTED_SCORE_SCALE_FACTOR = 10
     
+    # OLD + NEW score combination constants
+    OLD_SCORE_NORMALIZER = 100.0  # Normalize OLD score from -100/+100 to -1/+1
+    NEW_SCORE_NORMALIZER = 10.0   # Normalize NEW score from -10/+10 to -1/+1
+    NEW_SCORE_WEIGHT = 0.70        # Weight for NEW weighted system (70%)
+    OLD_SCORE_WEIGHT = 0.30        # Weight for OLD 30-factor system (30%)
+    COMBINED_SCORE_SCALE = 10.0    # Scale combined score back to -10/+10
+    
+    # Signal direction thresholds (combined score)
+    DIRECTION_LONG_THRESHOLD = 1.75    # Score > 1.75 = LONG
+    DIRECTION_SHORT_THRESHOLD = -1.75  # Score < -1.75 = SHORT
+    # Between -1.75 and +1.75 = NEUTRAL
+    
+    # Fibonacci retracement level constants
+    FIB_382_LEVEL = 0.382  # 38.2% Fibonacci retracement
+    FIB_50_LEVEL = 0.5     # 50% Fibonacci retracement
+    FIB_618_LEVEL = 0.618  # 61.8% Fibonacci retracement
+    FIB_RANGE_MIN_PCT = 0.02  # Minimum price range (2%) to apply Fibonacci levels
+    FIB_DISTANCE_MIN_PCT = 0.003  # Minimum distance from current price (0.3%) to include level
+    
     def __init__(self, whale_tracker):
         """
         Инициализация анализатора.
@@ -409,13 +428,24 @@ class AISignalAnalyzer:
         
         Args:
             factors: Dictionary of factor names to scores (-10 to +10)
-            weights: Optional custom weights dict. If None, uses FACTOR_WEIGHTS (legacy mode)
+            weights: Optional custom weights dict. If None, uses FACTOR_WEIGHTS (legacy mode).
+                     For dynamic weights based on symbol, use get_weights_for_symbol(symbol)
+                     and pass the result here. This allows BTC/ETH to use WITH_WHALES weights
+                     while TON/SOL/XRP use NO_WHALES weights.
             
         Returns:
             Weighted score (-10 to +10)
             
         Note:
             Factors outside the -10/+10 range are clamped to avoid outliers.
+            
+        Example:
+            >>> # For BTC (has whale data)
+            >>> btc_weights = analyzer.get_weights_for_symbol('BTC')
+            >>> score = analyzer.calculate_weighted_score(factors, weights=btc_weights)
+            >>> # For TON (no whale data)
+            >>> ton_weights = analyzer.get_weights_for_symbol('TON')
+            >>> score = analyzer.calculate_weighted_score(factors, weights=ton_weights)
         """
         # Use provided weights or fallback to legacy FACTOR_WEIGHTS
         weights_to_use = weights if weights is not None else self.FACTOR_WEIGHTS
@@ -553,14 +583,20 @@ class AISignalAnalyzer:
             if prev_high > 0 and prev_low < float('inf'):
                 price_range = prev_high - prev_low
                 # Only add Fibonacci levels if range is significant (> 2%)
-                if price_range / current_price > 0.02:
-                    fib_382 = prev_high - (0.382 * price_range)
-                    fib_50 = prev_high - (0.5 * price_range)
-                    fib_618 = prev_high - (0.618 * price_range)
+                if price_range / current_price > self.FIB_RANGE_MIN_PCT:
+                    fib_382 = prev_high - (self.FIB_382_LEVEL * price_range)
+                    fib_50 = prev_high - (self.FIB_50_LEVEL * price_range)
+                    fib_618 = prev_high - (self.FIB_618_LEVEL * price_range)
                     
-                    for fib_level, fib_name in [(fib_382, '38.2%'), (fib_50, '50%'), (fib_618, '61.8%')]:
+                    fib_levels_data = [
+                        (fib_382, '38.2%'),
+                        (fib_50, '50%'),
+                        (fib_618, '61.8%'),
+                    ]
+                    
+                    for fib_level, fib_name in fib_levels_data:
                         # Skip if too close to current price (< 0.3%)
-                        if abs(fib_level - current_price) / current_price > 0.003:
+                        if abs(fib_level - current_price) / current_price > self.FIB_DISTANCE_MIN_PCT:
                             level_type = 'resistance' if fib_level > current_price else 'support'
                             levels.append({
                                 'price': fib_level,
@@ -4913,15 +4949,15 @@ class AISignalAnalyzer:
         new_weighted_score = self.calculate_weighted_score(factor_scores, weights=symbol_weights)
         
         # ====== COMBINE OLD + NEW SYSTEMS (70% NEW + 30% OLD) ======
-        # Normalize both scores to -1 to +1 range
-        old_score_normalized = total_score / 100.0  # OLD system: -100 to +100 → -1 to +1
-        new_score_normalized = new_weighted_score / 10.0  # NEW system: -10 to +10 → -1 to +1
+        # Normalize both scores to -1 to +1 range using named constants
+        old_score_normalized = total_score / self.OLD_SCORE_NORMALIZER  # OLD: -100...+100 → -1...+1
+        new_score_normalized = new_weighted_score / self.NEW_SCORE_NORMALIZER  # NEW: -10...+10 → -1...+1
         
-        # Combine: 70% NEW + 30% OLD
-        combined_normalized = (new_score_normalized * 0.70) + (old_score_normalized * 0.30)
+        # Combine with configurable weights: 70% NEW + 30% OLD
+        combined_normalized = (new_score_normalized * self.NEW_SCORE_WEIGHT) + (old_score_normalized * self.OLD_SCORE_WEIGHT)
         
         # Scale back to -10 to +10 for compatibility with existing logic
-        combined_score = combined_normalized * 10.0
+        combined_score = combined_normalized * self.COMBINED_SCORE_SCALE
         
         logger.info(f"Score combination for {symbol}: OLD={total_score:.1f} ({old_score_normalized:+.2f}), "
                    f"NEW={new_weighted_score:.2f} ({new_score_normalized:+.2f}), "
@@ -4932,10 +4968,10 @@ class AISignalAnalyzer:
         current_price = market_data.get('price_usd', 0)
         
         # Определяем предварительное направление на основе combined_score
-        # NEW THRESHOLDS: ±1.75 (was ±2.0)
-        if combined_score > 1.75:
+        # Using named thresholds
+        if combined_score > self.DIRECTION_LONG_THRESHOLD:
             preliminary_direction = 'long'
-        elif combined_score < -1.75:
+        elif combined_score < self.DIRECTION_SHORT_THRESHOLD:
             preliminary_direction = 'short'
         else:
             preliminary_direction = 'neutral'
@@ -4963,11 +4999,11 @@ class AISignalAnalyzer:
         
         # ====== USE COMBINED SCORE FOR DIRECTION (NEW SYSTEM WITH OLD INTEGRATION) ======
         # Override direction based on combined_score (scale -10 to +10)
-        # NEW THRESHOLDS: >1.75 = long, <-1.75 = short, else neutral
-        if combined_score > 1.75:
+        # Using named thresholds for direction determination
+        if combined_score > self.DIRECTION_LONG_THRESHOLD:
             weighted_direction = 'long'
             weighted_probability = min(85, 50 + combined_score * 3.5)
-        elif combined_score < -1.75:
+        elif combined_score < self.DIRECTION_SHORT_THRESHOLD:
             weighted_direction = 'short'
             weighted_probability = min(85, 50 + abs(combined_score) * 3.5)
         else:
