@@ -6243,24 +6243,9 @@ class AISignalAnalyzer:
             text += "🔥 *ИТОГОВЫЙ РАСЧЁТ*\n"
             text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             
-            # Determine weights based on symbol
+            # Determine weights based on symbol using existing method
             symbol_upper = signal_data.get('symbol', '').upper()
-            has_whale_data = symbol_upper in {'BTC', 'ETH'}
-            
-            if has_whale_data:
-                # BTC/ETH weights
-                w = {
-                    'whales': 0.25, 'derivatives': 0.20, 'trend': 0.15,
-                    'momentum': 0.12, 'volume': 0.10, 'adx': 0.05,
-                    'divergence': 0.05, 'sentiment': 0.04, 'macro': 0.03, 'options': 0.01
-                }
-            else:
-                # TON/SOL/XRP weights
-                w = {
-                    'whales': 0.00, 'derivatives': 0.28, 'trend': 0.22,
-                    'momentum': 0.16, 'volume': 0.14, 'adx': 0.06,
-                    'divergence': 0.06, 'sentiment': 0.04, 'macro': 0.03, 'options': 0.01
-                }
+            w = self.get_weights_for_symbol(symbol_upper)
             
             # Show calculation for each factor
             whale_s = factor_scores.get('whales', 0)
