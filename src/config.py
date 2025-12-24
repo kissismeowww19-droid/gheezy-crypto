@@ -169,7 +169,7 @@ class Settings(BaseSettings):
         description="Порог замены в топе (0.10 = 10% разница)",
     )
     smart_signals_max_analyze: int = Field(
-        default=100,
+        default=200,
         description="Максимальное количество монет для детального анализа",
     )
 
