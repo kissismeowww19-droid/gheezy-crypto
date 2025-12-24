@@ -50,14 +50,15 @@ class SmartSignalAnalyzer:
         'EURT', 'USDQ', 'RSV', 'PAX', 'USDL', 'USDB',
         
         # === WRAPPED ТОКЕНЫ ===
-        'WETH', 'WBTC', 'WBNB', 'WSTETH', 'WBETH', 'CBBTC', 'CBETH', 
-        'STETH', 'RETH', 'SFRXETH', 'METH', 'EETH', 'WTRX', 'WAVAX',
+        'WETH', 'WBTC', 'WBNB', 'WSTETH', 'WBETH', 'CBBTC',
+        'METH', 'EETH', 'WTRX', 'WAVAX',
         'WMATIC', 'WFTM', 'WONE', 'WCRO', 'WKCS', 'WROSE', 'WXDAI',
         'WGLMR', 'WMOVR', 'WEVMOS', 'WCANTO',
         
         # === LIQUID STAKING DERIVATIVES ===
-        'STETH', 'RETH', 'CBETH', 'FRXETH', 'SFRXETH', 'ANKRBNB',
-        'ANKRETH', 'MSOL', 'JITOSOL', 'BNSOL', 'MARINADE', 'LIDO',
+        'STETH', 'RETH', 'CBETH', 'FRXETH', 'SFRXETH', 
+        'MSOL', 'JITOSOL', 'BNSOL',
+        'ANKRBNB', 'ANKRETH', 'MARINADE', 'LIDO',
         'STMATIC', 'MATICX', 'STKBNB', 'SNBNB', 'STKSOL',
         'STSOL', 'SCNSOL', 'LAINESOL', 'XSOL',
         
@@ -65,7 +66,7 @@ class SmartSignalAnalyzer:
         'SUSDE', 'SUSDS', 'USDE', 'SENA', 'ENA', 'SDAI', 'SFRAX',
         
         # === LP/YIELD ТОКЕНЫ ===
-        'JLP', 'BFUSD', 'BNSOL', 'MSOL', 'JITOSOL', 'SYRUPUSDC', 
+        'JLP', 'BFUSD', 'SYRUPUSDC', 
         'FIGR_HELOC', 'GLP', 'SGLP', 'MLP', 'HLP', 'PLP',
         
         # === БИРЖЕВЫЕ ТОКЕНЫ ===
@@ -82,7 +83,7 @@ class SmartSignalAnalyzer:
         
         # === BRIDGED ТОКЕНЫ ===
         'BTCB', 'ETHB', 'SOETH', 'SOLETH', 'ARBETH', 'OPETH',
-        'BSC-USD', 'BUSD', 'BTCST',
+        'BSC-USD', 'BTCST',
         
         # === REBASE/ELASTIC ТОКЕНЫ ===
         'OHM', 'OHMS', 'SOHM', 'GOHM', 'AMPL', 'FORTH', 
@@ -92,7 +93,7 @@ class SmartSignalAnalyzer:
         'VECRV', 'VEBAL', 'VELO', 'VEVELO', 'VEGNO', 'VETHE',
         
         # === ПРОБЛЕМНЫЕ ИЗ ЛОГОВ ===
-        'BSC-USD', 'USDT0', 'RAIN', 'FIGR_HELOC',
+        'USDT0', 'RAIN',
         
         # === ДОПОЛНИТЕЛЬНЫЕ ОБЁРТКИ ===
         'TBTC', 'HBTC', 'RENBTC', 'SBTC', 'OBTC', 'PBTC', 'IMBTC',
