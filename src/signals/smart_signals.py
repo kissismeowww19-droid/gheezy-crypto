@@ -232,39 +232,77 @@ class SmartSignalAnalyzer:
     
     async def scan_all_coins(self) -> List[Dict]:
         """
-        Сканирует все монеты из CoinGecko API.
+        Сканирует все монеты из CoinGecko API с пагинацией.
         
         Returns:
             Список монет с базовой информацией
         """
         await self._ensure_session()
         
+        all_coins = []
+        # CoinGecko бесплатный API ограничивает per_page до 250
+        max_per_page = 250
+        total_pages = (self.SCAN_LIMIT + max_per_page - 1) // max_per_page
+        
+        headers = {}
+        if hasattr(settings, 'coingecko_api_key') and settings.coingecko_api_key:
+            headers["X-CG-Pro-API-Key"] = settings.coingecko_api_key
+            max_per_page = 500  # Pro API поддерживает больше
+            total_pages = 1
+        
         try:
-            url = "https://api.coingecko.com/api/v3/coins/markets"
-            params = {
-                "vs_currency": "usd",
-                "order": "market_cap_desc",
-                "per_page": str(self.SCAN_LIMIT),
-                "page": "1",
-                "sparkline": "false",
-            }
+            for page in range(1, total_pages + 1):
+                url = "https://api.coingecko.com/api/v3/coins/markets"
+                
+                # Рассчитываем сколько монет запросить на этой странице
+                remaining = self.SCAN_LIMIT - len(all_coins)
+                per_page = min(max_per_page, remaining)
+                
+                if per_page <= 0:
+                    break
+                
+                params = {
+                    "vs_currency": "usd",
+                    "order": "market_cap_desc",
+                    "per_page": str(per_page),
+                    "page": str(page),
+                    "sparkline": "false",
+                }
+                
+                async with self.session.get(
+                    url, 
+                    params=params, 
+                    headers=headers, 
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as resp:
+                    if resp.status == 200:
+                        coins = await resp.json()
+                        all_coins.extend(coins)
+                        logger.info(f"Scanned page {page}: {len(coins)} coins (total: {len(all_coins)})")
+                        
+                        # Если получили меньше чем запросили - значит это последняя страница
+                        if len(coins) < per_page:
+                            break
+                            
+                    elif resp.status == 429:
+                        # Rate limit - ждём и пробуем снова
+                        logger.warning("CoinGecko rate limit hit, waiting 10 seconds...")
+                        await asyncio.sleep(10)
+                        continue
+                    else:
+                        logger.warning(f"CoinGecko API error: {resp.status}")
+                        break
+                
+                # Небольшая задержка между запросами чтобы не получить rate limit
+                if page < total_pages:
+                    await asyncio.sleep(1)
             
-            headers = {}
-            # Add API key as header if available (CoinGecko Pro)
-            if settings.coingecko_api_key:
-                headers["X-CG-Pro-API-Key"] = settings.coingecko_api_key
+            logger.info(f"Scanned {len(all_coins)} coins from CoinGecko")
+            return all_coins
             
-            async with self.session.get(url, params=params, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
-                if resp.status == 200:
-                    coins = await resp.json()
-                    logger.info(f"Scanned {len(coins)} coins from CoinGecko")
-                    return coins
-                else:
-                    logger.warning(f"CoinGecko API error: {resp.status}")
-                    return []
         except Exception as e:
             logger.error(f"Error scanning coins: {e}", exc_info=True)
-            return []
+            return all_coins  # Возвращаем то что успели собрать
     
     async def filter_coins(self, coins: List[Dict]) -> List[Dict]:
         """
