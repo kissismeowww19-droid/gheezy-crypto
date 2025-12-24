@@ -213,18 +213,41 @@ class AISignalAnalyzer:
     
     # NEW: Weighted Factor System (100% total)
     # Оптимизированные веса для 4-часового прогноза
-    FACTOR_WEIGHTS = {
+    
+    # Для BTC/ETH (есть whale данные)
+    # For BTC/ETH (coins with whale data available)
+    FACTOR_WEIGHTS_WITH_WHALES = {
         'whales': 0.25,        # 25% - Smart money, leads market
-        'derivatives': 0.22,   # 22% - Trader positions (OI, Funding, L/S) - УВЕЛИЧЕНО для 4ч
-        'trend': 0.18,         # 18% - EMA, Ichimoku, Market Structure - УВЕЛИЧЕНО
+        'derivatives': 0.20,   # 20% - Trader positions (OI, Funding, L/S)
+        'trend': 0.15,         # 15% - EMA, Ichimoku, Market Structure
         'momentum': 0.12,      # 12% - RSI, MACD, Stoch
         'volume': 0.10,        # 10% - Volume, CVD, Volume Spike
         'adx': 0.05,           # 5%  - Trend strength filter
         'divergence': 0.05,    # 5%  - Reversal signals
-        'sentiment': 0.02,     # 2%  - Fear & Greed - УМЕНЬШЕНО (слишком общий для 4ч)
-        'macro': 0.01,         # 1%  - DXY, S&P500, Gold - УМЕНЬШЕНО (не влияет на 4ч)
-        'options': 0.00,       # 0%  - Put/Call ratio - УБРАНО (мало данных для альтов)
-    }
+        'sentiment': 0.04,     # 4%  - Fear & Greed
+        'macro': 0.03,         # 3%  - DXY, S&P500, Gold
+        'options': 0.01,       # 1%  - Put/Call ratio
+    }  # = 100%
+    
+    # Для TON/SOL/XRP (без whale данных - 25% whale веса перераспределены)
+    # For TON/SOL/XRP (coins without whale data - 25% whale weight redistributed)
+    FACTOR_WEIGHTS_NO_WHALES = {
+        'whales': 0.00,        # 0%  - Нет данных / No data available
+        'derivatives': 0.28,   # 28% - +8% (основной индикатор без whale / main indicator without whale)
+        'trend': 0.22,         # 22% - +7% (второй по важности / second most important)
+        'momentum': 0.16,      # 16% - +4%
+        'volume': 0.14,        # 14% - +4%
+        'adx': 0.06,           # 6%  - +1%
+        'divergence': 0.06,    # 6%  - +1%
+        'sentiment': 0.04,     # 4%  - без изменений / unchanged
+        'macro': 0.03,         # 3%  - без изменений / unchanged
+        'options': 0.01,       # 1%  - без изменений / unchanged
+    }  # = 100%
+    
+    # Legacy weights for backward compatibility
+    # DEPRECATED: Use get_weights_for_symbol() to get appropriate weights for a coin
+    # TODO: Remove in v2.0.0 after migrating all code to dynamic weights
+    FACTOR_WEIGHTS = FACTOR_WEIGHTS_WITH_WHALES
     
     # Price prediction constants
     MAX_PREDICTED_MOVEMENT_PCT = 3.0  # Maximum predicted price change percentage
@@ -232,6 +255,25 @@ class AISignalAnalyzer:
     
     # Weighted score scaling factor (converts -10/+10 to -100/+100 for compatibility)
     WEIGHTED_SCORE_SCALE_FACTOR = 10
+    
+    # OLD + NEW score combination constants
+    OLD_SCORE_NORMALIZER = 100.0  # Normalize OLD score from -100/+100 to -1/+1
+    NEW_SCORE_NORMALIZER = 10.0   # Normalize NEW score from -10/+10 to -1/+1
+    NEW_SCORE_WEIGHT = 0.70        # Weight for NEW weighted system (70%)
+    OLD_SCORE_WEIGHT = 0.30        # Weight for OLD 30-factor system (30%)
+    COMBINED_SCORE_SCALE = 10.0    # Scale combined score back to -10/+10
+    
+    # Signal direction thresholds (combined score)
+    DIRECTION_LONG_THRESHOLD = 1.75    # Score > 1.75 = LONG
+    DIRECTION_SHORT_THRESHOLD = -1.75  # Score < -1.75 = SHORT
+    # Between -1.75 and +1.75 = NEUTRAL
+    
+    # Fibonacci retracement level constants
+    FIB_382_LEVEL = 0.382  # 38.2% Fibonacci retracement
+    FIB_50_LEVEL = 0.5     # 50% Fibonacci retracement
+    FIB_618_LEVEL = 0.618  # 61.8% Fibonacci retracement
+    FIB_RANGE_MIN_PCT = 0.02  # Minimum price range (2%) to apply Fibonacci levels
+    FIB_DISTANCE_MIN_PCT = 0.003  # Minimum distance from current price (0.3%) to include level
     
     def __init__(self, whale_tracker):
         """
@@ -360,7 +402,28 @@ class AISignalAnalyzer:
         if expired:
             logger.info(f"Cleaned up {len(expired)} expired correlation signals: {expired}")
     
-    def calculate_weighted_score(self, factors: Dict[str, float]) -> float:
+    def get_weights_for_symbol(self, symbol: str) -> Dict[str, float]:
+        """
+        Get appropriate factor weights for the given symbol.
+        
+        BTC and ETH have whale data available, so use FACTOR_WEIGHTS_WITH_WHALES.
+        TON, SOL, XRP don't have whale data, so use FACTOR_WEIGHTS_NO_WHALES.
+        
+        Args:
+            symbol: Symbol (BTC, ETH, TON, SOL, XRP, etc.)
+            
+        Returns:
+            Dict of factor weights (sums to 1.0)
+        """
+        # Coins with whale data available
+        COINS_WITH_WHALE_DATA = {"BTC", "ETH"}
+        
+        if symbol.upper() in COINS_WITH_WHALE_DATA:
+            return self.FACTOR_WEIGHTS_WITH_WHALES
+        else:
+            return self.FACTOR_WEIGHTS_NO_WHALES
+    
+    def calculate_weighted_score(self, factors: Dict[str, float], weights: Optional[Dict[str, float]] = None) -> float:
         """
         Calculate weighted score from factor scores.
         
@@ -369,16 +432,31 @@ class AISignalAnalyzer:
         
         Args:
             factors: Dictionary of factor names to scores (-10 to +10)
+            weights: Optional custom weights dict. If None, uses FACTOR_WEIGHTS (legacy mode).
+                     For dynamic weights based on symbol, use get_weights_for_symbol(symbol)
+                     and pass the result here. This allows BTC/ETH to use WITH_WHALES weights
+                     while TON/SOL/XRP use NO_WHALES weights.
             
         Returns:
             Weighted score (-10 to +10)
             
         Note:
             Factors outside the -10/+10 range are clamped to avoid outliers.
+            
+        Example:
+            >>> # For BTC (has whale data)
+            >>> btc_weights = analyzer.get_weights_for_symbol('BTC')
+            >>> score = analyzer.calculate_weighted_score(factors, weights=btc_weights)
+            >>> # For TON (no whale data)
+            >>> ton_weights = analyzer.get_weights_for_symbol('TON')
+            >>> score = analyzer.calculate_weighted_score(factors, weights=ton_weights)
         """
+        # Use provided weights or fallback to legacy FACTOR_WEIGHTS
+        weights_to_use = weights if weights is not None else self.FACTOR_WEIGHTS
+        
         total = 0.0
         for factor, score in factors.items():
-            weight = self.FACTOR_WEIGHTS.get(factor, 0)
+            weight = weights_to_use.get(factor, 0)
             # Clamp score to -10/+10 range for safety
             clamped_score = max(-10, min(10, score))
             total += clamped_score * weight
@@ -504,6 +582,33 @@ class AISignalAnalyzer:
                     'strength': 5,
                     'touches': 1
                 })
+            
+            # 4. Fibonacci retracement levels (38.2%, 50%, 61.8% of weekly range)
+            if prev_high > 0 and prev_low < float('inf'):
+                price_range = prev_high - prev_low
+                # Only add Fibonacci levels if range is significant (> 2%)
+                if price_range / current_price > self.FIB_RANGE_MIN_PCT:
+                    fib_382 = prev_high - (self.FIB_382_LEVEL * price_range)
+                    fib_50 = prev_high - (self.FIB_50_LEVEL * price_range)
+                    fib_618 = prev_high - (self.FIB_618_LEVEL * price_range)
+                    
+                    fib_levels_data = [
+                        (fib_382, '38.2%'),
+                        (fib_50, '50%'),
+                        (fib_618, '61.8%'),
+                    ]
+                    
+                    for fib_level, fib_name in fib_levels_data:
+                        # Skip if too close to current price (< 0.3%)
+                        if abs(fib_level - current_price) / current_price > self.FIB_DISTANCE_MIN_PCT:
+                            level_type = 'resistance' if fib_level > current_price else 'support'
+                            levels.append({
+                                'price': fib_level,
+                                'type': level_type,
+                                'source': f'fib_{fib_name}',
+                                'strength': 4,  # Fibonacci levels are strong
+                                'touches': 0
+                            })
         
         # Filter and sort
         resistances = [l for l in levels if l['type'] == 'resistance' and l['price'] > current_price]
@@ -4839,24 +4944,45 @@ class AISignalAnalyzer:
             options_factor_score = max(-10, min(10, options_data['score']))  # Already -10/+10
         factor_scores['options'] = options_factor_score
         
-        # Calculate weighted score using new system
-        new_weighted_score = self.calculate_weighted_score(factor_scores)
+        # ====== GET DYNAMIC WEIGHTS FOR SYMBOL ======
+        # BTC/ETH use FACTOR_WEIGHTS_WITH_WHALES, TON/SOL/XRP use FACTOR_WEIGHTS_NO_WHALES
+        symbol_weights = self.get_weights_for_symbol(symbol)
+        logger.info(f"Using {'WITH_WHALES' if symbol_weights == self.FACTOR_WEIGHTS_WITH_WHALES else 'NO_WHALES'} weights for {symbol}")
+        
+        # Calculate weighted score using new system with dynamic weights
+        new_weighted_score = self.calculate_weighted_score(factor_scores, weights=symbol_weights)
+        
+        # ====== COMBINE OLD + NEW SYSTEMS (70% NEW + 30% OLD) ======
+        # Normalize both scores to -1 to +1 range using named constants
+        old_score_normalized = total_score / self.OLD_SCORE_NORMALIZER  # OLD: -100...+100 → -1...+1
+        new_score_normalized = new_weighted_score / self.NEW_SCORE_NORMALIZER  # NEW: -10...+10 → -1...+1
+        
+        # Combine with configurable weights: 70% NEW + 30% OLD
+        combined_normalized = (new_score_normalized * self.NEW_SCORE_WEIGHT) + (old_score_normalized * self.OLD_SCORE_WEIGHT)
+        
+        # Scale back to -10 to +10 for compatibility with existing logic
+        combined_score = combined_normalized * self.COMBINED_SCORE_SCALE
+        
+        logger.info(f"Score combination for {symbol}: OLD={total_score:.1f} ({old_score_normalized:+.2f}), "
+                   f"NEW={new_weighted_score:.2f} ({new_score_normalized:+.2f}), "
+                   f"COMBINED={combined_score:.2f}")
         
         # ====== APPLY SIGNAL STABILIZER ======
         # Получаем текущую цену
         current_price = market_data.get('price_usd', 0)
         
-        # Определяем предварительное направление на основе weighted_score
-        if new_weighted_score > 2.0:
+        # Определяем предварительное направление на основе combined_score
+        # Using named thresholds
+        if combined_score > self.DIRECTION_LONG_THRESHOLD:
             preliminary_direction = 'long'
-        elif new_weighted_score < -2.0:
+        elif combined_score < self.DIRECTION_SHORT_THRESHOLD:
             preliminary_direction = 'short'
         else:
             preliminary_direction = 'neutral'
         
         # Применяем стабилизатор
         stable_direction, stable_score, is_updated = self.signal_stabilizer.get_stable_signal(
-            symbol, preliminary_direction, new_weighted_score, current_price
+            symbol, preliminary_direction, combined_score, current_price
         )
         
         # Логируем изменения/стабильность сигнала
@@ -4872,18 +4998,18 @@ class AISignalAnalyzer:
         else:
             logger.info(f"Signal STABLE for {symbol}: {stable_direction} (score: {stable_score:.2f}) - no changes due to stabilizer")
         
-        # Используем стабильный score вместо нового
-        new_weighted_score = stable_score
+        # Используем стабильный score вместо combined
+        combined_score = stable_score
         
-        # ====== USE WEIGHTED SCORE FOR DIRECTION (NEW SYSTEM) ======
-        # Override direction based on weighted_score (scale -10 to +10)
-        # Thresholds: >2.0 = long, <-2.0 = short, else neutral
-        if new_weighted_score > 2.0:
+        # ====== USE COMBINED SCORE FOR DIRECTION (NEW SYSTEM WITH OLD INTEGRATION) ======
+        # Override direction based on combined_score (scale -10 to +10)
+        # Using named thresholds for direction determination
+        if combined_score > self.DIRECTION_LONG_THRESHOLD:
             weighted_direction = 'long'
-            weighted_probability = min(85, 50 + new_weighted_score * 3.5)
-        elif new_weighted_score < -2.0:
+            weighted_probability = min(85, 50 + combined_score * 3.5)
+        elif combined_score < self.DIRECTION_SHORT_THRESHOLD:
             weighted_direction = 'short'
-            weighted_probability = min(85, 50 + abs(new_weighted_score) * 3.5)
+            weighted_probability = min(85, 50 + abs(combined_score) * 3.5)
         else:
             weighted_direction = 'neutral'
             weighted_probability = 50
@@ -4894,14 +5020,14 @@ class AISignalAnalyzer:
         
         # Update text based on weighted direction
         if final_direction == "long":
-            if abs(new_weighted_score) >= 5:
+            if abs(combined_score) >= 5:
                 direction = "📈 ЛОНГ"
                 strength = "сильный"
             else:
                 direction = "📈 Вероятно вверх"
                 strength = "средний"
         elif final_direction == "short":
-            if abs(new_weighted_score) >= 5:
+            if abs(combined_score) >= 5:
                 direction = "📉 ШОРТ"
                 strength = "сильный"
             else:
@@ -5077,7 +5203,9 @@ class AISignalAnalyzer:
             "sentiment": sentiment_data if sentiment_data else {'score': 0, 'verdict': 'neutral'},
             # NEW: Weighted factor system results
             "factor_scores": factor_scores,  # Individual factor scores (-10 to +10)
-            "weighted_score": round(new_weighted_score, 2),  # Final weighted score (-10 to +10)
+            "weighted_score": round(combined_score, 2),  # Combined score (70% NEW + 30% OLD) (-10 to +10)
+            "new_weighted_score": round(new_weighted_score, 2),  # Pure NEW weighted score for reference
+            "old_score": round(total_score, 2),  # OLD system score for reference
             # NEW: Real S/R levels
             "sr_levels": sr_levels,
             # NEW: 4-hour price prediction
@@ -5416,9 +5544,41 @@ class AISignalAnalyzer:
                 else:
                     return "НЕЙТРАЛЬНЫЙ"
             
-            # 1. КИТЫ (25% веса)
+            # Determine which weights are being used
+            # We can infer this from whether whale_score is 0 or not, or by checking the symbol
+            symbol_for_weights = signal_data.get('symbol', '').upper()
+            has_whale_data = symbol_for_weights in {'BTC', 'ETH'}
+            
+            if has_whale_data:
+                weights_display = {
+                    'whales': '25%',
+                    'derivatives': '20%',
+                    'trend': '15%',
+                    'momentum': '12%',
+                    'volume': '10%',
+                    'adx': '5%',
+                    'divergence': '5%',
+                    'sentiment': '4%',
+                    'macro': '3%',
+                    'options': '1%',
+                }
+            else:
+                weights_display = {
+                    'whales': '0%',
+                    'derivatives': '28%',
+                    'trend': '22%',
+                    'momentum': '16%',
+                    'volume': '14%',
+                    'adx': '6%',
+                    'divergence': '6%',
+                    'sentiment': '4%',
+                    'macro': '3%',
+                    'options': '1%',
+                }
+            
+            # 1. КИТЫ
             whale_score = clamp_score(factor_scores.get('whales', 0))
-            text += f"🐋 *КИТЫ \\(25% веса\\)*\n"
+            text += f"🐋 *КИТЫ \\({weights_display['whales']} веса\\)*\n"
             text += f"• Score: {whale_score:+.1f}/10\n"
             if whale_data:
                 tx_count = whale_data.get('transaction_count', 0)
@@ -5429,9 +5589,9 @@ class AISignalAnalyzer:
                 text += f"• На биржи: {deposits} tx \\| С бирж: {withdrawals} tx\n"
             text += f"• Вердикт: {verdict_emoji(whale_score)} {verdict_text(whale_score)}\n\n"
             
-            # 2. ДЕРИВАТИВЫ (20% веса)
+            # 2. ДЕРИВАТИВЫ
             derivatives_score_val = clamp_score(factor_scores.get('derivatives', 0))
-            text += f"📊 *ДЕРИВАТИВЫ \\(20% веса\\)*\n"
+            text += f"📊 *ДЕРИВАТИВЫ \\({weights_display['derivatives']} веса\\)*\n"
             text += f"• Score: {derivatives_score_val:+.1f}/10\n"
             if funding_rate:
                 rate = funding_rate.get('rate_percent', 0)
@@ -5441,9 +5601,9 @@ class AISignalAnalyzer:
                 text += f"• L/S Ratio: {ls_ratio:.2f}\n"
             text += f"• Вердикт: {verdict_emoji(derivatives_score_val)} {verdict_text(derivatives_score_val)}\n\n"
             
-            # 3. ТРЕНД (15% веса)
+            # 3. ТРЕНД
             trend_score_val = clamp_score(factor_scores.get('trend', 0))
-            text += f"📈 *ТРЕНД \\(15% веса\\)*\n"
+            text += f"📈 *ТРЕНД \\({weights_display['trend']} веса\\)*\n"
             text += f"• Score: {trend_score_val:+.1f}/10\n"
             if technical_data:
                 if "macd" in technical_data:
@@ -5452,9 +5612,9 @@ class AISignalAnalyzer:
                     text += f"• MACD: {macd_signal} {macd_emoji}\n"
             text += f"• Вердикт: {verdict_emoji(trend_score_val)} {verdict_text(trend_score_val)}\n\n"
             
-            # 4. ИМПУЛЬС (12% веса)
+            # 4. ИМПУЛЬС
             momentum_score_val = clamp_score(factor_scores.get('momentum', 0))
-            text += f"⚡ *ИМПУЛЬС \\(12% веса\\)*\n"
+            text += f"⚡ *ИМПУЛЬС \\({weights_display['momentum']} веса\\)*\n"
             text += f"• Score: {momentum_score_val:+.1f}/10\n"
             if technical_data and "rsi" in technical_data:
                 rsi_val = technical_data["rsi"]["value"]
@@ -5462,17 +5622,17 @@ class AISignalAnalyzer:
                 text += f"• RSI\\(14\\): {rsi_val:.0f} \\({rsi_status}\\)\n"
             text += f"• Вердикт: {verdict_emoji(momentum_score_val)} {verdict_text(momentum_score_val)}\n\n"
             
-            # 5. ОБЪЁМ (10% веса)
+            # 5. ОБЪЁМ
             volume_score_val = clamp_score(factor_scores.get('volume', 0))
-            text += f"📊 *ОБЪЁМ \\(10% веса\\)*\n"
+            text += f"📊 *ОБЪЁМ \\({weights_display['volume']} веса\\)*\n"
             text += f"• Score: {volume_score_val:+.1f}/10\n"
             vol_24h = market_data.get('volume_24h', 0)
             text += f"• Volume 24h: ${vol_24h/1_000_000_000:.1f}B\n"
             text += f"• Вердикт: {verdict_emoji(volume_score_val)} {verdict_text(volume_score_val)}\n\n"
             
-            # 6. СИЛА ТРЕНДА / ADX (5% веса)
+            # 6. СИЛА ТРЕНДА / ADX
             adx_score_val = clamp_score(factor_scores.get('adx', 0))
-            text += f"💪 *СИЛА ТРЕНДА \\(5% веса\\)*\n"
+            text += f"💪 *СИЛА ТРЕНДА \\({weights_display['adx']} веса\\)*\n"
             text += f"• Score: {adx_score_val:+.1f}/10\n"
             if technical_data and "adx" in technical_data:
                 adx_value = technical_data["adx"]["value"]
@@ -5480,9 +5640,9 @@ class AISignalAnalyzer:
                 text += f"• ADX: {adx_value:.0f} \\({trend_strength}\\)\n"
             text += f"• Вердикт: {verdict_emoji(adx_score_val)} {verdict_text(adx_score_val)}\n\n"
             
-            # 7. ДИВЕРГЕНЦИЯ (5% веса)
+            # 7. ДИВЕРГЕНЦИЯ
             divergence_score_val = clamp_score(factor_scores.get('divergence', 0))
-            text += f"📈 *ДИВЕРГЕНЦИЯ \\(5% веса\\)*\n"
+            text += f"📈 *ДИВЕРГЕНЦИЯ \\({weights_display['divergence']} веса\\)*\n"
             text += f"• Score: {divergence_score_val:+.1f}/10\n"
             if technical_data and "rsi_divergence" in technical_data:
                 div_type = technical_data["rsi_divergence"]["type"]
@@ -5494,9 +5654,9 @@ class AISignalAnalyzer:
                 text += "• Вердикт: 🟡 НЕТ СИГНАЛА\n"
             text += "\n"
             
-            # 8. НАСТРОЕНИЯ (4% веса)
+            # 8. НАСТРОЕНИЯ
             sentiment_score_val = clamp_score(factor_scores.get('sentiment', 0))
-            text += f"😱 *НАСТРОЕНИЯ \\(4% веса\\)*\n"
+            text += f"😱 *НАСТРОЕНИЯ \\({weights_display['sentiment']} веса\\)*\n"
             text += f"• Score: {sentiment_score_val:+.1f}/10\n"
             if fear_greed:
                 fg_value = fear_greed.get('value', 50)
@@ -5504,9 +5664,9 @@ class AISignalAnalyzer:
                 text += f"• Fear & Greed: {fg_value} \\({fg_class}\\)\n"
             text += f"• Вердикт: {verdict_emoji(sentiment_score_val)} {verdict_text(sentiment_score_val)}\n\n"
             
-            # 9. МАКРО (3% веса)
+            # 9. МАКРО
             macro_score_val = clamp_score(factor_scores.get('macro', 0))
-            text += f"🌍 *МАКРО \\(3% веса\\)*\n"
+            text += f"🌍 *МАКРО \\({weights_display['macro']} веса\\)*\n"
             text += f"• Score: {macro_score_val:+.1f}/10\n"
             macro = signal_data.get('macro', {})
             if macro and macro.get('dxy'):
@@ -5514,9 +5674,9 @@ class AISignalAnalyzer:
                 text += f"• DXY: {dxy.get('value', 0):.1f} \\({dxy.get('change_24h', 0):+.2f}%\\)\n"
             text += f"• Вердикт: {verdict_emoji(macro_score_val)} {verdict_text(macro_score_val)}\n\n"
             
-            # 10. ОПЦИОНЫ (1% веса)
+            # 10. ОПЦИОНЫ
             options_score_val = clamp_score(factor_scores.get('options', 0))
-            text += f"📈 *ОПЦИОНЫ \\(1% веса\\)*\n"
+            text += f"📈 *ОПЦИОНЫ \\({weights_display['options']} веса\\)*\n"
             text += f"• Score: {options_score_val:+.1f}/10\n"
             options = signal_data.get('options', {})
             if options and options.get('put_call_ratio'):
@@ -5565,7 +5725,9 @@ class AISignalAnalyzer:
                         'swing_high': 'swing high',
                         'round_number': 'круглый уровень',
                         'prev_high': 'недельный high',
-                        'fib_level': 'Fibonacci',
+                        'fib_38.2%': 'Fib 38.2%',
+                        'fib_50%': 'Fib 50%',
+                        'fib_61.8%': 'Fib 61.8%',
                     }.get(source, source)
                     
                     if touches > 0:
@@ -5590,7 +5752,9 @@ class AISignalAnalyzer:
                         'swing_low': 'swing low',
                         'round_number': 'круглый уровень',
                         'prev_low': 'недельный low',
-                        'fib_level': 'Fibonacci',
+                        'fib_38.2%': 'Fib 38.2%',
+                        'fib_50%': 'Fib 50%',
+                        'fib_61.8%': 'Fib 61.8%',
                     }.get(source, source)
                     
                     if touches > 0:

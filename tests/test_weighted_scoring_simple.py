@@ -10,6 +10,7 @@ MESSAGE_SECTION_DIVIDER = "━━━━━━━━━━━━━━━━━�
 def calculate_weighted_score(factors):
     """
     Calculate weighted score from factor scores (copied from ai_signals.py).
+    Updated to match FACTOR_WEIGHTS_WITH_WHALES.
     """
     FACTOR_WEIGHTS = {
         'whales': 0.25,
@@ -106,25 +107,28 @@ def test_weighted_score_calculation():
 
 def test_direction_from_weighted_score():
     """Test that direction is determined correctly from weighted score."""
+    # NEW THRESHOLDS: ±1.75 (was ±2.0)
     test_cases = [
         (5.0, 'long', 'Strong bullish weighted score should give long direction'),
         (2.5, 'long', 'Moderate bullish weighted score should give long direction'),
-        (2.1, 'long', 'Just above threshold should give long direction'),
-        (2.0, 'neutral', 'Threshold value 2.0 should give neutral (boundary case)'),
+        (2.0, 'long', 'Above new threshold should give long direction'),
+        (1.76, 'long', 'Just above new threshold should give long direction'),
+        (1.75, 'neutral', 'New threshold value 1.75 should give neutral (boundary case)'),
         (1.5, 'neutral', 'Weak bullish weighted score should give neutral direction'),
         (0.0, 'neutral', 'Zero weighted score should give neutral direction'),
         (-1.5, 'neutral', 'Weak bearish weighted score should give neutral direction'),
-        (-2.0, 'neutral', 'Threshold value -2.0 should give neutral (boundary case)'),
-        (-2.1, 'short', 'Just below threshold should give short direction'),
+        (-1.75, 'neutral', 'New threshold value -1.75 should give neutral (boundary case)'),
+        (-1.76, 'short', 'Just below new threshold should give short direction'),
+        (-2.0, 'short', 'Below new threshold should give short direction'),
         (-2.5, 'short', 'Moderate bearish weighted score should give short direction'),
         (-5.0, 'short', 'Strong bearish weighted score should give short direction'),
     ]
     
     for weighted_score, expected_direction, description in test_cases:
-        # Apply the same logic from ai_signals.py
-        if weighted_score > 2.0:
+        # Apply the NEW logic from ai_signals.py (threshold ±1.75)
+        if weighted_score > 1.75:
             direction = 'long'
-        elif weighted_score < -2.0:
+        elif weighted_score < -1.75:
             direction = 'short'
         else:
             direction = 'neutral'
@@ -135,25 +139,28 @@ def test_direction_from_weighted_score():
 
 def test_probability_from_weighted_score():
     """Test that probability is calculated correctly from weighted score."""
+    # NEW THRESHOLDS: ±1.75 (was ±2.0)
     test_cases = [
         (10.0, 85, 'Max weighted score should give capped probability'),
         (5.0, 67.5, 'Moderate bullish should give moderate probability'),
         (2.5, 58.75, 'Mild bullish should give ~59%'),
-        (2.1, 57.35, 'Just above threshold should give ~57%'),
-        (2.0, 50, 'Threshold 2.0 should give neutral 50%'),
+        (2.0, 57.0, 'Above threshold should give ~57%'),
+        (1.76, 56.16, 'Just above new threshold should give ~56%'),
+        (1.75, 50, 'New threshold 1.75 should give neutral 50%'),
         (0.0, 50, 'Zero should give neutral 50%'),
-        (-2.0, 50, 'Threshold -2.0 should give neutral 50%'),
-        (-2.1, 57.35, 'Just below threshold should give ~57%'),
+        (-1.75, 50, 'New threshold -1.75 should give neutral 50%'),
+        (-1.76, 56.16, 'Just below new threshold should give ~56%'),
+        (-2.0, 57.0, 'Below threshold should give ~57%'),
         (-2.5, 58.75, 'Mild bearish should give ~59%'),
         (-5.0, 67.5, 'Moderate bearish should give moderate probability'),
         (-10.0, 85, 'Max negative should give capped probability'),
     ]
     
     for weighted_score, expected_prob, description in test_cases:
-        # Apply the same logic from ai_signals.py
-        if weighted_score > 2.0:
+        # Apply the NEW logic from ai_signals.py (threshold ±1.75)
+        if weighted_score > 1.75:
             probability = min(85, 50 + weighted_score * 3.5)
-        elif weighted_score < -2.0:
+        elif weighted_score < -1.75:
             probability = min(85, 50 + abs(weighted_score) * 3.5)
         else:
             probability = 50
