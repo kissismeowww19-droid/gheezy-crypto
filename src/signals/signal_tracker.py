@@ -138,7 +138,9 @@ class SignalTracker:
                         exit_price=row[2],
                         checked_at=datetime.fromisoformat(row[3]) if row[3] else None
                     )
-                raise
+                else:
+                    # Если по какой-то причине не нашли сигнал, пробрасываем исключение
+                    raise
     
     def check_previous_signal(
         self,

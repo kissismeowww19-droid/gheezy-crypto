@@ -6814,7 +6814,7 @@ class AISignalAnalyzer:
             technical_data = await self.calculate_technical_indicators(symbol, ohlcv_data)
             
             # Рассчитываем сигнал (упрощенный)
-            signal_data = await self.calculate_signal(
+            signal_data = self.calculate_signal(
                 symbol=symbol,
                 whale_data=whale_data,
                 market_data=market_data,
