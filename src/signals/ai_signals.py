@@ -19,7 +19,8 @@ from signals.indicators import (
     calculate_roc, calculate_williams_r, calculate_atr, calculate_keltner_channels,
     calculate_obv, calculate_vwap, calculate_volume_sma,
     calculate_pivot_points, calculate_fibonacci_levels,
-    calculate_rsi_divergence, calculate_adx, detect_volume_spike
+    calculate_rsi_divergence, calculate_adx, detect_volume_spike,
+    detect_candlestick_patterns, calculate_macd_divergence, _calculate_ema
 )
 from signals.data_sources import DataSourceManager
 from signals.multi_timeframe import MultiTimeframeAnalyzer
@@ -1228,6 +1229,33 @@ class AISignalAnalyzer:
                                 "type": rsi_div.type,
                                 "strength": rsi_div.strength,
                                 "explanation": rsi_div.explanation
+                            }
+                    
+                    # MACD Divergence (NEW - calculate from histogram)
+                    # Требует полную историю MACD histogram для детекции дивергенции
+                    if len(close_prices) >= 50:
+                        # Пересчитываем MACD для получения полной истории histogram
+                        prices_array = np.array(close_prices)
+                        
+                        # Use the extracted EMA function from indicators module
+                        ema_fast = _calculate_ema(prices_array, 12)
+                        ema_slow = _calculate_ema(prices_array, 26)
+                        macd_line = ema_fast - ema_slow
+                        signal_line = _calculate_ema(macd_line, 9)
+                        histogram = macd_line - signal_line
+                        
+                        # Вычисляем MACD Divergence
+                        macd_div = calculate_macd_divergence(
+                            close_prices,
+                            histogram.tolist(),
+                            lookback=14
+                        )
+                        
+                        if macd_div:
+                            result["macd_divergence"] = {
+                                "type": macd_div.type,
+                                "strength": macd_div.strength,
+                                "explanation": macd_div.explanation
                             }
 
                 
@@ -4917,6 +4945,85 @@ class AISignalAnalyzer:
                 divergence_factor_score = -10.0
         factor_scores['divergence'] = divergence_factor_score
         
+        # ====== CANDLESTICK PATTERNS BONUS (4h timeframe) ======
+        # Паттерны работают как подтверждение, не как отдельный сигнал
+        # Добавляют ±1.5 к weighted_score ТОЛЬКО если совпадают с направлением
+        candlestick_bonus = 0.0
+        candlestick_patterns_found = []
+        
+        if ohlcv_data and len(ohlcv_data) >= 3:
+            patterns = detect_candlestick_patterns(ohlcv_data)
+            if patterns:
+                # Определяем предварительное направление для проверки совпадения
+                # Используем divergence_factor_score как основу направления
+                preliminary_direction = "bullish" if divergence_factor_score > 0 else "bearish" if divergence_factor_score < 0 else "neutral"
+                
+                # Также учитываем общий trend_factor_score если divergence нейтральный
+                if preliminary_direction == "neutral":
+                    trend_score = factor_scores.get('trend', 0)
+                    preliminary_direction = "bullish" if trend_score > 0 else "bearish" if trend_score < 0 else "neutral"
+                
+                # Применяем бонус ТОЛЬКО если паттерн совпадает с направлением сигнала
+                for pattern in patterns:
+                    candlestick_patterns_found.append(pattern.name)
+                    
+                    # Бонус применяется только если направления совпадают
+                    if pattern.type == preliminary_direction:
+                        if pattern.type == "bullish":
+                            candlestick_bonus += pattern.strength
+                        elif pattern.type == "bearish":
+                            candlestick_bonus -= pattern.strength
+                        
+                        logger.info(f"Candlestick pattern for {symbol}: {pattern.name} ({pattern.type}) "
+                                  f"+{pattern.strength if pattern.type == 'bullish' else -pattern.strength:.1f} bonus applied")
+                    else:
+                        logger.info(f"Candlestick pattern for {symbol}: {pattern.name} ({pattern.type}) "
+                                  f"ignored (doesn't match signal direction)")
+                
+                # Ограничиваем общий бонус от паттернов до ±1.5
+                candlestick_bonus = max(-1.5, min(1.5, candlestick_bonus))
+                
+                if candlestick_bonus != 0:
+                    logger.info(f"Total candlestick bonus for {symbol}: {candlestick_bonus:+.1f}")
+        
+        # ====== MACD DIVERGENCE BONUS ======
+        # Бонус +3 ТОЛЬКО если RSI Divergence уже есть И MACD Divergence подтверждает
+        macd_divergence_bonus = 0.0
+        macd_div_detected = None
+        
+        # Проверяем, есть ли RSI Divergence
+        rsi_div_exists = divergence_factor_score != 0.0
+        rsi_div_type = None
+        if rsi_div_exists and technical_data and "rsi_divergence" in technical_data:
+            rsi_div_type = technical_data["rsi_divergence"]["type"]
+        
+        # Если RSI Divergence есть, проверяем MACD Divergence из technical_data
+        if rsi_div_exists and rsi_div_type and technical_data and "macd_divergence" in technical_data:
+            macd_div = technical_data["macd_divergence"]
+            macd_div_type = macd_div.get("type", "none")
+            
+            if macd_div_type != "none":
+                macd_div_detected = macd_div
+                
+                # Проверяем, совпадает ли MACD Divergence с RSI Divergence
+                if macd_div_type == rsi_div_type:
+                    # Оба дивергенции в одном направлении - добавляем бонус +3
+                    if macd_div_type == "bullish":
+                        macd_divergence_bonus = 3.0
+                    elif macd_div_type == "bearish":
+                        macd_divergence_bonus = -3.0
+                    
+                    logger.info(f"MACD Divergence for {symbol}: {macd_div_type} "
+                              f"(RSI Div exists, {macd_divergence_bonus:+.1f} bonus applied)")
+                    explanation = macd_div.get("explanation", "")
+                    if explanation:
+                        logger.info(f"  {explanation}")
+                else:
+                    logger.info(f"MACD Divergence for {symbol}: {macd_div_type} "
+                              f"(conflicts with RSI Div {rsi_div_type}, no bonus)")
+            else:
+                logger.info(f"MACD Divergence for {symbol}: none detected")
+        
         # 8. Sentiment (4%) - Fear & Greed
         sentiment_factor_score = 0.0
         if fear_greed:
@@ -4951,6 +5058,20 @@ class AISignalAnalyzer:
         
         # Calculate weighted score using new system with dynamic weights
         new_weighted_score = self.calculate_weighted_score(factor_scores, weights=symbol_weights)
+        
+        # ====== APPLY CONFIRMATION BONUSES ======
+        # Candlestick patterns and MACD Divergence act as confirmations, not separate signals
+        # They strengthen existing signals when they align with the direction
+        
+        # Apply candlestick pattern bonus (±1.5 max)
+        if candlestick_bonus != 0:
+            new_weighted_score += candlestick_bonus
+            logger.info(f"Applied candlestick bonus to {symbol}: {candlestick_bonus:+.1f} (new score: {new_weighted_score:+.2f})")
+        
+        # Apply MACD divergence bonus (±3 when RSI div exists and MACD confirms)
+        if macd_divergence_bonus != 0:
+            new_weighted_score += macd_divergence_bonus
+            logger.info(f"Applied MACD divergence bonus to {symbol}: {macd_divergence_bonus:+.1f} (new score: {new_weighted_score:+.2f})")
         
         # ====== COMBINE OLD + NEW SYSTEMS (70% NEW + 30% OLD) ======
         # Normalize both scores to -1 to +1 range using named constants

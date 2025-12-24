@@ -5,7 +5,7 @@ Gheezy Crypto - Технические индикаторы
 """
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -14,6 +14,25 @@ import numpy as np
 RSI_MAX_VALUE = 100.0
 RSI_OVERBOUGHT_THRESHOLD = 70
 RSI_OVERSOLD_THRESHOLD = 30
+
+
+def _calculate_ema(data: np.ndarray, period: int) -> np.ndarray:
+    """
+    Calculate Exponential Moving Average.
+    
+    Args:
+        data: Price data array
+        period: EMA period
+        
+    Returns:
+        EMA values as numpy array
+    """
+    alpha = 2 / (period + 1)
+    result = np.zeros_like(data)
+    result[0] = data[0]
+    for i in range(1, len(data)):
+        result[i] = alpha * data[i] + (1 - alpha) * result[i - 1]
+    return result
 
 
 @dataclass
@@ -266,19 +285,10 @@ def calculate_macd(
 
     prices_array = np.array(prices)
 
-    def ema(data: np.ndarray, period: int) -> np.ndarray:
-        """Расчёт экспоненциальной скользящей средней."""
-        alpha = 2 / (period + 1)
-        result = np.zeros_like(data)
-        result[0] = data[0]
-        for i in range(1, len(data)):
-            result[i] = alpha * data[i] + (1 - alpha) * result[i - 1]
-        return result
-
-    ema_fast = ema(prices_array, fast_period)
-    ema_slow = ema(prices_array, slow_period)
+    ema_fast = _calculate_ema(prices_array, fast_period)
+    ema_slow = _calculate_ema(prices_array, slow_period)
     macd_line = ema_fast - ema_slow
-    signal_line = ema(macd_line, signal_period)
+    signal_line = _calculate_ema(macd_line, signal_period)
     histogram = macd_line - signal_line
 
     return MACD(
@@ -1418,6 +1428,36 @@ def calculate_all_indicators(
 
 
 @dataclass
+class CandlestickPattern:
+    """
+    Candlestick Pattern detection result.
+    
+    Attributes:
+        name: Pattern name (e.g., "hammer", "engulfing_bullish", "doji")
+        type: Pattern type ("bullish", "bearish", "neutral")
+        strength: Pattern strength (0.5 - 1.5)
+    """
+    name: str
+    type: str
+    strength: float
+
+
+@dataclass
+class MACDDivergence:
+    """
+    MACD Divergence detection.
+    
+    Attributes:
+        type: Type of divergence ('bullish', 'bearish', 'hidden_bullish', 'hidden_bearish', 'none')
+        strength: Strength of divergence (0-100)
+        explanation: Human-readable explanation
+    """
+    type: str
+    strength: float
+    explanation: str
+
+
+@dataclass
 class SwingPoint:
     """
     Swing high/low point.
@@ -1581,3 +1621,265 @@ def calculate_level_strength(
     
     # Ensure within range 1-5
     return max(1, min(5, strength))
+
+
+def detect_candlestick_patterns(ohlcv: List[Dict]) -> List[CandlestickPattern]:
+    """
+    Детектирует 5 основных свечных паттернов на 4ч данных.
+    
+    Паттерны:
+    1. Hammer / Hanging Man - разворот на дне/вершине
+    2. Bullish/Bearish Engulfing - сильный разворот
+    3. Doji - неопределённость, возможный разворот
+    4. Morning Star / Evening Star - 3-свечной разворот
+    5. Three White Soldiers / Three Black Crows - сильный тренд
+    
+    Args:
+        ohlcv: List of OHLCV candles with 'open', 'high', 'low', 'close' keys
+        
+    Returns:
+        List of detected CandlestickPattern objects
+    """
+    if not ohlcv or len(ohlcv) < 3:
+        return []
+    
+    patterns = []
+    
+    # Helper function to calculate candle body and shadow sizes
+    def get_candle_properties(candle):
+        o = candle.get('open', 0)
+        h = candle.get('high', 0)
+        l = candle.get('low', 0)
+        c = candle.get('close', 0)
+        
+        if o == 0 or h == 0 or l == 0 or c == 0:
+            return None
+        
+        body_size = abs(c - o)
+        total_range = h - l
+        upper_shadow = h - max(o, c)
+        lower_shadow = min(o, c) - l
+        is_bullish = c > o
+        
+        return {
+            'open': o,
+            'high': h,
+            'low': l,
+            'close': c,
+            'body_size': body_size,
+            'total_range': total_range,
+            'upper_shadow': upper_shadow,
+            'lower_shadow': lower_shadow,
+            'is_bullish': is_bullish
+        }
+    
+    # We need at least last 3 candles for pattern detection
+    # Fix range to avoid negative indices
+    start_idx = max(0, len(ohlcv) - 3)
+    for i in range(start_idx, len(ohlcv)):
+        candle = get_candle_properties(ohlcv[i])
+        if not candle:
+            continue
+        
+        # 1. HAMMER / HANGING MAN
+        # Small body, long lower shadow (2x+ body), small upper shadow
+        if candle['body_size'] > 0:
+            body_to_range = candle['body_size'] / candle['total_range'] if candle['total_range'] > 0 else 0
+            lower_to_body = candle['lower_shadow'] / candle['body_size'] if candle['body_size'] > 0 else 0
+            upper_to_body = candle['upper_shadow'] / candle['body_size'] if candle['body_size'] > 0 else 0
+            
+            if body_to_range < 0.3 and lower_to_body >= 2.0 and upper_to_body < 0.5:
+                # Hammer (bullish at bottom) or Hanging Man (bearish at top)
+                # We'll assume it's a reversal pattern based on context
+                pattern_type = "bullish" if candle['is_bullish'] else "bearish"
+                patterns.append(CandlestickPattern(
+                    name="hammer" if pattern_type == "bullish" else "hanging_man",
+                    type=pattern_type,
+                    strength=1.2
+                ))
+        
+        # 2. DOJI
+        # Very small body (< 0.1% of range), indicates indecision
+        if candle['total_range'] > 0:
+            body_to_range = candle['body_size'] / candle['total_range']
+            if body_to_range < 0.1:
+                patterns.append(CandlestickPattern(
+                    name="doji",
+                    type="neutral",
+                    strength=1.0
+                ))
+    
+    # Patterns requiring 2 candles
+    if len(ohlcv) >= 2:
+        start_idx = max(0, len(ohlcv) - 2)
+        for i in range(start_idx, len(ohlcv) - 1):
+            prev = get_candle_properties(ohlcv[i])
+            curr = get_candle_properties(ohlcv[i + 1])
+            
+            if not prev or not curr:
+                continue
+            
+            # 3. BULLISH / BEARISH ENGULFING
+            # Current candle engulfs previous candle's body
+            if not prev['is_bullish'] and curr['is_bullish']:
+                # Bullish engulfing: previous red, current green, current engulfs previous
+                if curr['open'] < prev['close'] and curr['close'] > prev['open']:
+                    patterns.append(CandlestickPattern(
+                        name="engulfing_bullish",
+                        type="bullish",
+                        strength=1.5
+                    ))
+            
+            if prev['is_bullish'] and not curr['is_bullish']:
+                # Bearish engulfing: previous green, current red, current engulfs previous
+                if curr['open'] > prev['close'] and curr['close'] < prev['open']:
+                    patterns.append(CandlestickPattern(
+                        name="engulfing_bearish",
+                        type="bearish",
+                        strength=1.5
+                    ))
+    
+    # Patterns requiring 3 candles
+    if len(ohlcv) >= 3:
+        start_idx = max(0, len(ohlcv) - 3)
+        for i in range(start_idx, len(ohlcv) - 2):
+            c1 = get_candle_properties(ohlcv[i])
+            c2 = get_candle_properties(ohlcv[i + 1])
+            c3 = get_candle_properties(ohlcv[i + 2])
+            
+            if not c1 or not c2 or not c3:
+                continue
+            
+            # 4. MORNING STAR (bullish) / EVENING STAR (bearish)
+            # Morning Star: long red, small body (star), long green
+            # Evening Star: long green, small body (star), long red
+            
+            # Check for Morning Star
+            if (not c1['is_bullish'] and c3['is_bullish'] and
+                c1['body_size'] > c2['body_size'] * 2 and
+                c3['body_size'] > c2['body_size'] * 2 and
+                c2['close'] < c1['close'] and c3['close'] > c1['open']):
+                patterns.append(CandlestickPattern(
+                    name="morning_star",
+                    type="bullish",
+                    strength=1.5
+                ))
+            
+            # Check for Evening Star
+            if (c1['is_bullish'] and not c3['is_bullish'] and
+                c1['body_size'] > c2['body_size'] * 2 and
+                c3['body_size'] > c2['body_size'] * 2 and
+                c2['close'] > c1['close'] and c3['close'] < c1['open']):
+                patterns.append(CandlestickPattern(
+                    name="evening_star",
+                    type="bearish",
+                    strength=1.5
+                ))
+            
+            # 5. THREE WHITE SOLDIERS (bullish) / THREE BLACK CROWS (bearish)
+            # Three consecutive candles in the same direction with increasing closes
+            
+            # Three White Soldiers
+            if (c1['is_bullish'] and c2['is_bullish'] and c3['is_bullish'] and
+                c2['close'] > c1['close'] and c3['close'] > c2['close'] and
+                c2['open'] > c1['open'] and c2['open'] < c1['close'] and
+                c3['open'] > c2['open'] and c3['open'] < c2['close']):
+                patterns.append(CandlestickPattern(
+                    name="three_white_soldiers",
+                    type="bullish",
+                    strength=1.5
+                ))
+            
+            # Three Black Crows
+            if (not c1['is_bullish'] and not c2['is_bullish'] and not c3['is_bullish'] and
+                c2['close'] < c1['close'] and c3['close'] < c2['close'] and
+                c2['open'] < c1['open'] and c2['open'] > c1['close'] and
+                c3['open'] < c2['open'] and c3['open'] > c2['close']):
+                patterns.append(CandlestickPattern(
+                    name="three_black_crows",
+                    type="bearish",
+                    strength=1.5
+                ))
+    
+    return patterns
+
+
+def calculate_macd_divergence(
+    prices: List[float],
+    macd_histogram: List[float],
+    lookback: int = 14
+) -> Optional[MACDDivergence]:
+    """
+    Аналогично RSI Divergence, но для MACD histogram.
+    
+    Bullish Divergence: цена делает Lower Low, MACD делает Higher Low
+    Bearish Divergence: цена делает Higher High, MACD делает Lower High
+    
+    Args:
+        prices: List of closing prices
+        macd_histogram: List of MACD histogram values
+        lookback: Lookback period for detecting divergence
+        
+    Returns:
+        MACDDivergence or None if insufficient data
+    """
+    # Minimum 5 extra periods needed for reliable peak/trough detection
+    # (requires 2 periods on each side of the peak/trough + 1 center period)
+    MIN_EXTRA_PERIODS = 5
+    if len(prices) < lookback + MIN_EXTRA_PERIODS or len(prices) != len(macd_histogram):
+        return None
+    
+    prices_array = np.array(prices[-lookback:])
+    macd_array = np.array(macd_histogram[-lookback:])
+    
+    # Strength multiplier for divergence detection
+    DIVERGENCE_STRENGTH_MULTIPLIER = 3
+    
+    # Find local highs and lows
+    price_highs = []
+    price_lows = []
+    macd_highs = []
+    macd_lows = []
+    
+    for i in range(2, len(prices_array) - 2):
+        # Local high
+        if prices_array[i] > prices_array[i-1] and prices_array[i] > prices_array[i+1]:
+            if prices_array[i] > prices_array[i-2] and prices_array[i] > prices_array[i+2]:
+                price_highs.append((i, prices_array[i]))
+                macd_highs.append((i, macd_array[i]))
+        
+        # Local low
+        if prices_array[i] < prices_array[i-1] and prices_array[i] < prices_array[i+1]:
+            if prices_array[i] < prices_array[i-2] and prices_array[i] < prices_array[i+2]:
+                price_lows.append((i, prices_array[i]))
+                macd_lows.append((i, macd_array[i]))
+    
+    divergence_type = "none"
+    strength = 0.0
+    explanation = "No MACD divergence detected"
+    
+    # Bullish divergence: price makes lower low, MACD makes higher low
+    if len(price_lows) >= 2 and len(macd_lows) >= 2:
+        last_price_low = price_lows[-1][1]
+        prev_price_low = price_lows[-2][1]
+        last_macd_low = macd_lows[-1][1]
+        prev_macd_low = macd_lows[-2][1]
+        
+        if last_price_low < prev_price_low and last_macd_low > prev_macd_low:
+            divergence_type = "bullish"
+            strength = min(100, abs(last_macd_low - prev_macd_low) * DIVERGENCE_STRENGTH_MULTIPLIER * 10)
+            explanation = "🟢 Bullish MACD Divergence: Price making lower lows but MACD making higher lows. Potential reversal up."
+    
+    # Bearish divergence: price makes higher high, MACD makes lower high
+    if len(price_highs) >= 2 and len(macd_highs) >= 2:
+        last_price_high = price_highs[-1][1]
+        prev_price_high = price_highs[-2][1]
+        last_macd_high = macd_highs[-1][1]
+        prev_macd_high = macd_highs[-2][1]
+        
+        if last_price_high > prev_price_high and last_macd_high < prev_macd_high:
+            divergence_type = "bearish"
+            strength = min(100, abs(last_macd_high - prev_macd_high) * DIVERGENCE_STRENGTH_MULTIPLIER * 10)
+            explanation = "🔴 Bearish MACD Divergence: Price making higher highs but MACD making lower highs. Potential reversal down."
+    
+    return MACDDivergence(type=divergence_type, strength=strength, explanation=explanation)
