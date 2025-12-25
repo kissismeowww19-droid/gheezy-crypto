@@ -262,13 +262,13 @@ class VolumeProfileEnhancer(BaseEnhancer):
         
         return volume_profile
     
-    def _find_nearest_level(self, price: float, levels: List[float]) -> Optional[float]:
+    def _find_nearest_level(self, price: float, levels) -> Optional[float]:
         """
         Найти ближайший уровень к цене.
         
         Args:
             price: Цена
-            levels: Список уровней
+            levels: Уровни (iterable)
         
         Returns:
             float: Ближайший уровень или None
