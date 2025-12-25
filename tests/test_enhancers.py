@@ -323,10 +323,13 @@ class TestEnhancerManager:
     @pytest.mark.asyncio
     async def test_get_total_score(self, manager):
         """Test get_total_score method."""
-        # Mock all enhancers
+        # Mock all enhancers including new ones
         with patch.object(manager.order_flow, 'get_score', return_value=5.0), \
              patch.object(manager.volume_profile, 'get_score', return_value=3.0), \
-             patch.object(manager.multi_exchange, 'get_score', return_value=2.0):
+             patch.object(manager.multi_exchange, 'get_score', return_value=2.0), \
+             patch.object(manager.liquidations, 'get_score', return_value=0.0), \
+             patch.object(manager.smart_money, 'get_score', return_value=0.0), \
+             patch.object(manager.wyckoff, 'get_score', return_value=0.0):
             
             total = await manager.get_total_score("BTC", 50000.0)
             assert total == 10.0  # 5 + 3 + 2
@@ -337,7 +340,10 @@ class TestEnhancerManager:
         # Mock order flow to fail, others succeed
         with patch.object(manager.order_flow, 'get_score', side_effect=Exception("API Error")), \
              patch.object(manager.volume_profile, 'get_score', return_value=3.0), \
-             patch.object(manager.multi_exchange, 'get_score', return_value=2.0):
+             patch.object(manager.multi_exchange, 'get_score', return_value=2.0), \
+             patch.object(manager.liquidations, 'get_score', return_value=0.0), \
+             patch.object(manager.smart_money, 'get_score', return_value=0.0), \
+             patch.object(manager.wyckoff, 'get_score', return_value=0.0):
             
             total = await manager.get_total_score("BTC", 50000.0)
             assert total == 5.0  # 0 (failed) + 3 + 2
@@ -348,7 +354,10 @@ class TestEnhancerManager:
         # Mock all enhancers to fail
         with patch.object(manager.order_flow, 'get_score', side_effect=Exception("Error")), \
              patch.object(manager.volume_profile, 'get_score', side_effect=Exception("Error")), \
-             patch.object(manager.multi_exchange, 'get_score', side_effect=Exception("Error")):
+             patch.object(manager.multi_exchange, 'get_score', side_effect=Exception("Error")), \
+             patch.object(manager.liquidations, 'get_score', side_effect=Exception("Error")), \
+             patch.object(manager.smart_money, 'get_score', side_effect=Exception("Error")), \
+             patch.object(manager.wyckoff, 'get_score', side_effect=Exception("Error")):
             
             total = await manager.get_total_score("BTC", 50000.0)
             assert total == 0.0  # All failed, should return 0

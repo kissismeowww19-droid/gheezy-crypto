@@ -88,8 +88,8 @@ class LiquidationEnhancer(BaseEnhancer):
             
             self.logger.info(
                 f"Liquidation score for {coin}: {score:.2f} "
-                f"(Nearest short: {zones.get('nearest_short', {}).get('price', 'N/A')}, "
-                f"Nearest long: {zones.get('nearest_long', {}).get('price', 'N/A')}, "
+                f"(Nearest short: {zones.get('nearest_short', {}).get('price', 'N/A') if zones.get('nearest_short') else 'N/A'}, "
+                f"Nearest long: {zones.get('nearest_long', {}).get('price', 'N/A') if zones.get('nearest_long') else 'N/A'}, "
                 f"Stop hunt: {zones.get('stop_hunt_detected', False)})"
             )
             
