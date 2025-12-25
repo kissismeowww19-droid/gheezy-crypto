@@ -6670,47 +6670,62 @@ class AISignalAnalyzer:
                 "name": "Funding",
                 "value": f"{rate:.3f}% ({status})"
             })
-        
+
         # 3. Liquidation Magnet (если есть данные)
         if deep_derivatives_data:
             liquidation_levels = deep_derivatives_data.get("liquidation_levels")
-            if liquidation_levels:
+            if liquidation_levels: 
                 nearest_short = liquidation_levels.get("nearest_short_liq")
                 nearest_long = liquidation_levels.get("nearest_long_liq")
                 
+                # Fix: handle both dict and float types
+                if isinstance(nearest_short, dict):
+                    short_price = nearest_short.get("price", 0)
+                elif isinstance(nearest_short, (int, float)):
+                    short_price = nearest_short
+                else: 
+                    short_price = 0
+
+                if isinstance(nearest_long, dict):
+                    long_price = nearest_long.get("price", 0)
+                elif isinstance(nearest_long, (int, float)):
+                    long_price = nearest_long
+                else:
+                    long_price = 0
+
                 # Выбираем ближайшую зону
-                if nearest_short and nearest_long:
-                    dist_short = abs(nearest_short.get("price", 0) - current_price)
-                    dist_long = abs(nearest_long.get("price", 0) - current_price)
-                    if dist_short < dist_long and nearest_short.get("price"):
-                        price_k = nearest_short["price"] / 1000
+                if short_price and long_price:
+                    dist_short = abs(short_price - current_price)
+                    dist_long = abs(long_price - current_price)
+                    if dist_short < dist_long and short_price:
+                        price_k = short_price / 1000
                         reasons.append({
                             "icon": "💧",
                             "name": "Магнит",
                             "value": f"${price_k:.1f}K (short liq)"
                         })
-                    elif nearest_long.get("price"):
-                        price_k = nearest_long["price"] / 1000
+                    elif long_price:
+                        price_k = long_price / 1000
                         reasons.append({
-                            "icon": "💧",
-                            "name": "Магнит",
+                            "icon":  "💧",
+                            "name":  "Магнит",
                             "value": f"${price_k:.1f}K (long liq)"
                         })
-                elif nearest_short and nearest_short.get("price"):
-                    price_k = nearest_short["price"] / 1000
+                elif short_price: 
+                    price_k = short_price / 1000
                     reasons.append({
                         "icon": "💧",
                         "name": "Магнит",
                         "value": f"${price_k:.1f}K (short liq)"
                     })
-                elif nearest_long and nearest_long.get("price"):
-                    price_k = nearest_long["price"] / 1000
-                    reasons.append({
+                elif long_price:
+                    price_k = long_price / 1000
+                    reasons. append({
                         "icon": "💧",
                         "name": "Магнит",
-                        "value": f"${price_k:.1f}K (long liq)"
+                        "value":  f"${price_k:.1f}K (long liq)"
                     })
-        
+
         # 4. Wyckoff Phase (если есть в signal_data)
         wyckoff_phase = signal_data.get("wyckoff_phase")
         if wyckoff_phase:
