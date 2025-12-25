@@ -172,8 +172,12 @@ class LiquidationEnhancer(BaseEnhancer):
         """
         Получить данные о ликвидациях (mock данные для демонстрации).
         
-        В реальном случае здесь будет API Coinglass или расчёт на основе
-        Open Interest + Leverage данных с Binance/Bybit.
+        TODO: Replace with real API integration in production.
+        Options:
+        1. Coinglass API: https://www.coinglass.com/api-docs
+        2. Calculate from Binance/Bybit Open Interest + Leverage data
+        
+        FIXME: Current mock data is for testing only and should not be used in production.
         """
         # Mock данные для демонстрации
         # В продакшене заменить на реальный API call

@@ -41,6 +41,12 @@ class SmartMoneyEnhancer(BaseEnhancer):
     # Минимальный размер импульса для Order Block (в %)
     MIN_IMPULSE_PERCENT = 2.0
     
+    # Максимальное количество Order Blocks для отслеживания
+    MAX_ORDER_BLOCKS = 5
+    
+    # Максимальное количество FVG для отслеживания
+    MAX_FVG_COUNT = 5
+    
     def __init__(self):
         """Инициализация Smart Money Enhancer."""
         super().__init__()
@@ -254,7 +260,7 @@ class SmartMoneyEnhancer(BaseEnhancer):
             
             # Оставляем только последние 5 самых сильных OB
             order_blocks.sort(key=lambda x: (x['timestamp'], x['strength']), reverse=True)
-            return order_blocks[:5]
+            return order_blocks[:self.MAX_ORDER_BLOCKS]
             
         except Exception as e:
             self.logger.error(f"Error finding order blocks: {e}")
@@ -329,7 +335,7 @@ class SmartMoneyEnhancer(BaseEnhancer):
             
             # Оставляем только последние 5 FVG
             fvgs.sort(key=lambda x: x['timestamp'], reverse=True)
-            return fvgs[:5]
+            return fvgs[:self.MAX_FVG_COUNT]
             
         except Exception as e:
             self.logger.error(f"Error finding FVG: {e}")

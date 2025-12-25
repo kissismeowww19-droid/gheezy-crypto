@@ -30,6 +30,12 @@ class WyckoffEnhancer(BaseEnhancer):
     TIMEFRAME = "1d"
     WEIGHT = 0.10  # 10%
     
+    # Минимальное количество свечей после SC/BC для анализа
+    MIN_CANDLES_AFTER_CLIMAX = 5
+    
+    # Минимальное движение для подтверждения фазы (%)
+    MIN_PHASE_MOVE_PERCENT = 3.0
+    
     # Маппинг символов
     SYMBOL_MAPPING = {
         "BTC": "BTCUSDT",
@@ -240,14 +246,14 @@ class WyckoffEnhancer(BaseEnhancer):
                 return {'detected': False}
             
             # Проверяем AR (Automatic Rally) - отскок после SC
-            if min_index >= len(recent_candles) - 5:
+            if min_index >= len(recent_candles) - self.MIN_CANDLES_AFTER_CLIMAX:
                 return {'detected': False}
             
-            ar_candles = recent_candles[min_index + 1:min_index + 6]
+            ar_candles = recent_candles[min_index + 1:min_index + self.MIN_CANDLES_AFTER_CLIMAX + 1]
             ar_high = max(c['high'] for c in ar_candles)
             ar_move = (ar_high - min_price) / min_price * 100
             
-            if ar_move < 3.0:  # Минимум 3% отскок
+            if ar_move < self.MIN_PHASE_MOVE_PERCENT:
                 return {'detected': False}
             
             # Определяем диапазон накопления
@@ -319,14 +325,14 @@ class WyckoffEnhancer(BaseEnhancer):
                 return {'detected': False}
             
             # Проверяем AR (Automatic Reaction) - откат после BC
-            if max_index >= len(recent_candles) - 5:
+            if max_index >= len(recent_candles) - self.MIN_CANDLES_AFTER_CLIMAX:
                 return {'detected': False}
             
-            ar_candles = recent_candles[max_index + 1:max_index + 6]
+            ar_candles = recent_candles[max_index + 1:max_index + self.MIN_CANDLES_AFTER_CLIMAX + 1]
             ar_low = min(c['low'] for c in ar_candles)
             ar_move = (max_price - ar_low) / max_price * 100
             
-            if ar_move < 3.0:  # Минимум 3% откат
+            if ar_move < self.MIN_PHASE_MOVE_PERCENT:
                 return {'detected': False}
             
             # Определяем диапазон распределения
