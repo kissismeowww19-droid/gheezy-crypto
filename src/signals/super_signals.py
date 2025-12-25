@@ -1002,6 +1002,8 @@ class SuperSignals:
         bb_position = analysis["bb_position"]
         price_to_support = analysis["price_to_support"]
         price_to_resistance = analysis["price_to_resistance"]
+        # Use abs() to reward magnitude regardless of direction
+        # Direction is already captured in analysis["direction"]
         change_24h = abs(analysis.get("change_24h", 0))
 
         # === НОВОЕ: Баллы за сильное движение 24h ===
