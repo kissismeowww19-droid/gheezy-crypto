@@ -1607,7 +1607,6 @@ async def callback_stats_coin(callback: CallbackQuery):
             
             # Форматирование времени последнего сигнала
             if stats['last_signal_time']:
-                from datetime import datetime
                 time_diff = datetime.now() - stats['last_signal_time']
                 hours = int(time_diff.total_seconds() // 3600)
                 if hours < 1:
