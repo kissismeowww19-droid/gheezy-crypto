@@ -13,6 +13,7 @@ from signals.indicators import (
 )
 from signals.signal_stability import SignalStabilityManager
 from signals.message_formatter import CompactMessageFormatter
+from signals.super_signals import SuperSignals
 
 __all__ = [
     "SignalAnalyzer",
@@ -22,4 +23,5 @@ __all__ = [
     "calculate_all_indicators",
     "SignalStabilityManager",
     "CompactMessageFormatter",
+    "SuperSignals",
 ]
