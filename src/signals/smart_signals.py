@@ -134,6 +134,9 @@ class SmartSignalAnalyzer:
     # Кэш невалидных символов
     INVALID_SYMBOL_CACHE_TTL = 3600  # 1 час
     
+    # Минимальная длина API ключа CoinGecko
+    MIN_API_KEY_LENGTH = 5  # Короче этого значения - считаем пустым
+    
     def __init__(self):
         self.exchanges = {
             "okx": OKXClient(),
@@ -253,7 +256,7 @@ class SmartSignalAnalyzer:
         headers = {}
         # Добавляем Demo API ключ если есть (увеличивает rate limit, но НЕ per_page)
         api_key = getattr(settings, 'coingecko_api_key', None)
-        if api_key and len(api_key) > 5:  # Проверяем что ключ не пустой
+        if api_key and len(api_key) > self.MIN_API_KEY_LENGTH:  # Проверяем что ключ не пустой
             headers["x-cg-demo-api-key"] = api_key
             logger.info("Using CoinGecko Demo API key")
         
