@@ -6681,8 +6681,13 @@ class AISignalAnalyzer:
             'fear_greed': fear_greed,
             'rsi': technical_data.get('rsi') if technical_data else None,
             'macd': technical_data.get('macd') if technical_data else None,
-            'funding': {'current_funding': funding_rate.get('funding_rate')} if funding_rate and funding_rate.get('funding_rate') is not None else None,
         }
+        
+        # Добавляем funding только если оно существует
+        if funding_rate:
+            funding_value = funding_rate.get('funding_rate')
+            if funding_value is not None:
+                formatter_enhancer_data['funding'] = {'current_funding': funding_value}
         
         # Добавляем TradingView рейтинг из signal_data если есть
         tradingview_rating = signal_data.get('tradingview_rating')

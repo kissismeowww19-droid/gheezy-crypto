@@ -370,7 +370,14 @@ class CompactMessageFormatter:
         macd = enhancer_data.get("macd", {})
         if macd.get("signal"):
             macd_signal = macd["signal"]
-            direction_text = "bullish" if macd_signal in ["bullish", "buy"] else "bearish" if macd_signal in ["bearish", "sell"] else "neutral"
+            # Determine direction text based on signal
+            if macd_signal in ["bullish", "buy"]:
+                direction_text = "bullish"
+            elif macd_signal in ["bearish", "sell"]:
+                direction_text = "bearish"
+            else:
+                direction_text = "neutral"
+            
             reasons.append({
                 "icon": "📈",
                 "name": "MACD",
