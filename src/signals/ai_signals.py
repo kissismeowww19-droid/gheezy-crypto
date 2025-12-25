@@ -464,6 +464,62 @@ class AISignalAnalyzer:
         
         return total
     
+    def calculate_adaptive_threshold(self, bullish_count: int, bearish_count: int) -> tuple[float, str]:
+        """
+        Рассчитывает адаптивный порог на основе конфликта факторов.
+        
+        Args:
+            bullish_count: Количество бычьих факторов
+            bearish_count: Количество медвежьих факторов
+        
+        Returns:
+            tuple: (threshold, conflict_level)
+            - threshold: адаптированный порог
+            - conflict_level: "none", "moderate", "strong"
+        """
+        BASE_THRESHOLD = 1.75
+        
+        # Минимум факторов для анализа конфликта
+        min_factors = min(bullish_count, bearish_count)
+        
+        if min_factors >= 2:
+            difference = abs(bullish_count - bearish_count)
+            
+            if difference == 0:
+                # Сильный конфликт: равное количество
+                return BASE_THRESHOLD + 0.75, "strong"
+            elif difference == 1:
+                # Умеренный конфликт
+                return BASE_THRESHOLD + 0.5, "moderate"
+        
+        return BASE_THRESHOLD, "none"
+    
+    def apply_adaptive_threshold(self, weighted_score: float, bullish_count: int, bearish_count: int) -> tuple[str, Optional[str]]:
+        """
+        Применяет адаптивный порог для определения направления.
+        
+        Returns:
+            tuple: (direction, warning_message)
+        """
+        threshold, conflict_level = self.calculate_adaptive_threshold(bullish_count, bearish_count)
+        
+        if weighted_score > threshold:
+            direction = "long"
+        elif weighted_score < -threshold:
+            direction = "short"
+        else:
+            direction = "sideways"
+        
+        # Предупреждение о конфликте
+        if conflict_level == "strong":
+            warning = "⚠️ Сильный конфликт факторов — порог повышен до ±2.50"
+        elif conflict_level == "moderate":
+            warning = "⚠️ Умеренный конфликт — порог повышен до ±2.25"
+        else:
+            warning = None
+        
+        return direction, warning
+    
     def calculate_real_sr_levels(self, ohlcv_data: List[dict], current_price: float) -> Dict:
         """
         Calculate REAL support and resistance levels from actual price data.
@@ -5124,19 +5180,29 @@ class AISignalAnalyzer:
         
         # ====== USE COMBINED SCORE FOR DIRECTION (NEW SYSTEM WITH OLD INTEGRATION) ======
         # Override direction based on combined_score (scale -10 to +10)
-        # Using named thresholds for direction determination
-        if combined_score > self.DIRECTION_LONG_THRESHOLD:
-            weighted_direction = 'long'
+        # Using ADAPTIVE thresholds for direction determination based on factor conflicts
+        bullish_count = consensus_data["bullish_count"]
+        bearish_count = consensus_data["bearish_count"]
+        
+        # Apply adaptive threshold
+        weighted_direction, conflict_warning = self.apply_adaptive_threshold(
+            combined_score, bullish_count, bearish_count
+        )
+        
+        # Log adaptive threshold info
+        threshold, conflict_level = self.calculate_adaptive_threshold(bullish_count, bearish_count)
+        logger.info(f"Adaptive threshold for {symbol}: {threshold:.2f} (conflict: {conflict_level})")
+        
+        # Calculate probability based on direction
+        if weighted_direction == 'long':
             weighted_probability = min(85, 50 + combined_score * 3.5)
-        elif combined_score < self.DIRECTION_SHORT_THRESHOLD:
-            weighted_direction = 'short'
+        elif weighted_direction == 'short':
             weighted_probability = min(85, 50 + abs(combined_score) * 3.5)
         else:
-            weighted_direction = 'neutral'
             weighted_probability = 50
         
         # Use weighted direction as final direction
-        final_direction = weighted_direction
+        final_direction = weighted_direction if weighted_direction != 'sideways' else 'neutral'
         final_probability = weighted_probability
         
         # Update text based on weighted direction
@@ -5316,6 +5382,8 @@ class AISignalAnalyzer:
             "block_sentiment_score": round(block_sentiment_score, 2),
             # Cross-asset correlation conflict flag
             "is_cross_conflict": is_cross_conflict,
+            # Adaptive threshold conflict warning
+            "conflict_warning": conflict_warning,
             # Macro analysis (Phase 3.1)
             "macro": macro_data if macro_data else {'score': 0, 'verdict': 'neutral'},
             # Options analysis (Phase 3.2)
@@ -6322,10 +6390,10 @@ class AISignalAnalyzer:
         # ===== ФАКТОРЫ АНАЛИЗА =====
         text += "📊 *ФАКТОРЫ АНАЛИЗА*\n"
         
-        # Считаем факторы
-        bullish_count = sum(1 for bullish, _ in reasons if bullish)
-        bearish_count = sum(1 for bullish, _ in reasons if not bullish)
-        neutral_count = max(0, self.TOTAL_FACTORS - bullish_count - bearish_count)
+        # Get actual factor counts from signal_data (already calculated in calculate_signal)
+        bullish_count = signal_data.get('bullish_count', 0)
+        bearish_count = signal_data.get('bearish_count', 0)
+        neutral_count = signal_data.get('neutral_count', 0)
         
         if bullish_count <= 1 and bearish_count == 0:
             # Слишком мало факторов для бычьего консенсуса
@@ -6341,7 +6409,14 @@ class AISignalAnalyzer:
             consensus_text = "НЕЙТРАЛЬНЫЙ ⚠️"
         
         text += f"Бычьих: {bullish_count} | Медвежьих: {bearish_count} | Нейтральных: {neutral_count}\n"
-        text += f"Консенсус: {consensus_text}\n\n"
+        text += f"Консенсус: {consensus_text}\n"
+        
+        # Add conflict warning if present
+        conflict_warning = signal_data.get('conflict_warning')
+        if conflict_warning:
+            text += f"{conflict_warning}\n"
+        
+        text += "\n"
         
         # ===== ПРЕДУПРЕЖДЕНИЕ О ТОРГУЕМОСТИ =====
         # Проверяем, торгуем ли сигнал
