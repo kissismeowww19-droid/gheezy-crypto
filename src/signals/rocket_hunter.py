@@ -28,7 +28,6 @@ class RocketHunterAnalyzer:
     """
     
     # Настройки сканирования
-    SCAN_LIMIT = 500  # Реалистичный лимит для CoinGecko Demo API
     MIN_SCORE = 7.0  # Минимальный score для показа
     MIN_VOLUME_USD = 100_000  # Минимальный объём 24h (без жёстких ограничений)
     MIN_POTENTIAL = 10.0  # Минимальный потенциал +10%
@@ -109,89 +108,199 @@ class RocketHunterAnalyzer:
         
         return True
     
-    async def scan_all_coins(self) -> List[Dict]:
+    async def fetch_binance_gainers(self) -> List[Dict]:
         """
-        Сканирует 500 монет из CoinGecko API с пагинацией.
-        
-        Returns:
-            Список монет с базовой информацией
+        Получает все торговые пары с Binance.
+        1 запрос = ~600 монет, без лимита!
         """
         await self._ensure_session()
         
-        all_coins = []
-        max_per_page = 250  # CoinGecko limit
+        url = "https://api.binance.com/api/v3/ticker/24hr"
+        
+        try:
+            async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    
+                    coins = []
+                    for ticker in data:
+                        symbol = ticker.get('symbol', '')
+                        
+                        # Только USDT пары
+                        if not symbol.endswith('USDT'):
+                            continue
+                        
+                        # Убираем USDT из названия
+                        base_symbol = symbol.replace('USDT', '')
+                        
+                        price_change_24h = float(ticker.get('priceChangePercent', 0))
+                        current_price = float(ticker.get('lastPrice', 0))
+                        volume_24h = float(ticker.get('quoteVolume', 0))  # В USDT
+                        
+                        coins.append({
+                            'symbol': base_symbol,
+                            'name': base_symbol,
+                            'current_price': current_price,
+                            'price_change_percentage_24h': price_change_24h,
+                            'price_change_percentage_1h_in_currency': 0,  # Binance не даёт 1h
+                            'total_volume': volume_24h,
+                            'market_cap': 0,
+                            'source': 'binance'
+                        })
+                    
+                    logger.info(f"Binance: fetched {len(coins)} coins")
+                    return coins
+        except Exception as e:
+            logger.error(f"Error fetching Binance data: {e}", exc_info=True)
+        
+        return []
+    
+    async def fetch_coincap_gainers(self) -> List[Dict]:
+        """
+        Получает топ-2000 монет с CoinCap.
+        Лимит: 200 запросов/мин — достаточно!
+        """
+        await self._ensure_session()
+        
+        url = "https://api.coincap.io/v2/assets?limit=2000"
+        
+        try:
+            async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    assets = data.get('data', [])
+                    
+                    coins = []
+                    for asset in assets:
+                        change_24h = asset.get('changePercent24Hr')
+                        if change_24h is None:
+                            continue
+                        
+                        coins.append({
+                            'symbol': asset.get('symbol', '').upper(),
+                            'name': asset.get('name', ''),
+                            'current_price': float(asset.get('priceUsd', 0) or 0),
+                            'price_change_percentage_24h': float(change_24h),
+                            'price_change_percentage_1h_in_currency': 0,
+                            'total_volume': float(asset.get('volumeUsd24Hr', 0) or 0),
+                            'market_cap': float(asset.get('marketCapUsd', 0) or 0),
+                            'source': 'coincap'
+                        })
+                    
+                    logger.info(f"CoinCap: fetched {len(coins)} coins")
+                    return coins
+        except Exception as e:
+            logger.error(f"Error fetching CoinCap data: {e}", exc_info=True)
+        
+        return []
+    
+    async def fetch_coingecko_page1(self) -> List[Dict]:
+        """
+        Получает 1 страницу с CoinGecko (250 монет).
+        Дополнительный источник с 1h данными.
+        """
+        await self._ensure_session()
+        
+        url = "https://api.coingecko.com/api/v3/coins/markets"
+        params = {
+            "vs_currency": "usd",
+            "order": "market_cap_desc",
+            "per_page": 250,
+            "page": 1,
+            "sparkline": "false",
+            "price_change_percentage": "1h,24h"
+        }
         
         headers = {}
         api_key = getattr(settings, 'coingecko_api_key', None)
         if api_key and len(api_key) > self.MIN_API_KEY_LENGTH:
             headers["x-cg-demo-api-key"] = api_key
-            logger.info("Using CoinGecko Demo API key for Rocket Hunter")
-        
-        total_pages = (self.SCAN_LIMIT + max_per_page - 1) // max_per_page
-        logger.info(f"Rocket Hunter: scanning {self.SCAN_LIMIT} coins, {total_pages} pages")
         
         try:
-            page = 1
-            retries = 0
-            max_retries = 3
-            
-            while page <= total_pages:
-                url = "https://api.coingecko.com/api/v3/coins/markets"
-                
-                remaining = self.SCAN_LIMIT - len(all_coins)
-                per_page = min(max_per_page, remaining)
-                
-                if per_page <= 0:
-                    break
-                
-                params = {
-                    "vs_currency": "usd",
-                    "order": "market_cap_desc",
-                    "per_page": str(per_page),
-                    "page": str(page),
-                    "sparkline": "false",
-                    "price_change_percentage": "1h,24h",
-                }
-                
-                async with self.session.get(
-                    url, 
-                    params=params, 
-                    headers=headers, 
-                    timeout=aiohttp.ClientTimeout(total=30)
-                ) as resp:
-                    if resp.status == 200:
-                        retries = 0  # Reset retries on success
-                        coins = await resp.json()
-                        all_coins.extend(coins)
-                        logger.info(f"Rocket Hunter page {page}/{total_pages}: {len(coins)} coins (total: {len(all_coins)})")
-                        
-                        if len(coins) < per_page:
-                            break
-                        
-                    elif resp.status in [401, 429]:
-                        retries += 1
-                        if retries > max_retries:
-                            logger.warning(f"Max retries reached, stopping at {len(all_coins)} coins")
-                            break
-                        logger.warning(f"CoinGecko rate limit ({resp.status}), retry {retries}/{max_retries}, waiting 20 sec...")
-                        await asyncio.sleep(20)
-                        continue
-                    else:
-                        logger.warning(f"CoinGecko API error: {resp.status}")
-                        break
-                
-                page += 1
-                
-                # Задержка между запросами
-                if page <= total_pages:
-                    await asyncio.sleep(6)
-            
-            logger.info(f"Rocket Hunter scanned {len(all_coins)} coins from CoinGecko")
-            return all_coins
-            
+            async with self.session.get(
+                url, 
+                params=params, 
+                headers=headers, 
+                timeout=aiohttp.ClientTimeout(total=30)
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    
+                    coins = []
+                    for coin in data:
+                        coins.append({
+                            'symbol': coin.get('symbol', '').upper(),
+                            'name': coin.get('name', ''),
+                            'current_price': float(coin.get('current_price', 0) or 0),
+                            'price_change_percentage_24h': float(coin.get('price_change_percentage_24h', 0) or 0),
+                            'price_change_percentage_1h_in_currency': float(coin.get('price_change_percentage_1h_in_currency', 0) or 0),
+                            'total_volume': float(coin.get('total_volume', 0) or 0),
+                            'market_cap': float(coin.get('market_cap', 0) or 0),
+                            'source': 'coingecko'
+                        })
+                    
+                    logger.info(f"CoinGecko: fetched {len(coins)} coins")
+                    return coins
         except Exception as e:
-            logger.error(f"Error scanning coins: {e}", exc_info=True)
-            return all_coins
+            logger.error(f"Error fetching CoinGecko data: {e}", exc_info=True)
+        
+        return []
+    
+    async def scan_all_coins(self) -> List[Dict]:
+        """
+        Сканирует монеты из всех 3 источников и объединяет.
+        
+        Returns:
+            Список монет с базовой информацией
+        """
+        logger.info("Rocket Hunter: scanning from 3 sources (Binance + CoinCap + CoinGecko)")
+        
+        # Параллельно загружаем из всех источников
+        binance_task = self.fetch_binance_gainers()
+        coincap_task = self.fetch_coincap_gainers()
+        coingecko_task = self.fetch_coingecko_page1()
+        
+        results = await asyncio.gather(
+            binance_task, 
+            coincap_task, 
+            coingecko_task,
+            return_exceptions=True
+        )
+        
+        binance_coins = results[0] if not isinstance(results[0], Exception) else []
+        coincap_coins = results[1] if not isinstance(results[1], Exception) else []
+        coingecko_coins = results[2] if not isinstance(results[2], Exception) else []
+        
+        # Объединяем и убираем дубликаты (приоритет: Binance > CoinGecko > CoinCap)
+        seen_symbols = set()
+        all_coins = []
+        
+        # Сначала Binance (реальные биржевые данные)
+        for coin in binance_coins:
+            symbol = coin['symbol']
+            if symbol not in seen_symbols:
+                seen_symbols.add(symbol)
+                all_coins.append(coin)
+        
+        # Потом CoinGecko (есть 1h данные)
+        for coin in coingecko_coins:
+            symbol = coin['symbol']
+            if symbol not in seen_symbols:
+                seen_symbols.add(symbol)
+                all_coins.append(coin)
+        
+        # Потом CoinCap (много монет)
+        for coin in coincap_coins:
+            symbol = coin['symbol']
+            if symbol not in seen_symbols:
+                seen_symbols.add(symbol)
+                all_coins.append(coin)
+        
+        logger.info(f"Rocket Hunter: total {len(all_coins)} unique coins "
+                    f"(Binance: {len(binance_coins)}, CoinCap: {len(coincap_coins)}, "
+                    f"CoinGecko: {len(coingecko_coins)})")
+        
+        return all_coins
     
     async def filter_coins(self, coins: List[Dict]) -> List[Dict]:
         """
@@ -501,6 +610,7 @@ class RocketHunterAnalyzer:
                 "potential_min": potential_min,
                 "potential_max": potential_max,
                 "exchange": exchange_name,
+                "source": coin.get('source', 'unknown'),
             }
             
         except Exception as e:
@@ -595,7 +705,7 @@ class RocketHunterAnalyzer:
             text += "😔 *Ракет не найдено*\n\n"
             text += "Попробуйте позже или используйте Умные сигналы\\.\n"
             text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            text += "📊 Данные: CoinGecko\n"
+            text += "📊 Данные: Binance \\+ CoinCap \\+ CoinGecko\n"
             text += "⚠️ Высокий риск\\! Только на свои\\!"
             return text
         
@@ -686,11 +796,21 @@ class RocketHunterAnalyzer:
             text += f"\\({((tp2 - current_price) / current_price * 100):+.1f}%\\)\n"
             text += f"📊 R:R = 1:{rr_ratio:.1f}\n"
             
+            # Источник данных
+            source = rocket.get('source', 'unknown')
+            source_names = {
+                'binance': 'Binance',
+                'coincap': 'CoinCap',
+                'coingecko': 'CoinGecko',
+                'unknown': 'Unknown'
+            }
+            text += f"📡 Источник: {source_names.get(source, source)}\n"
+            
             if idx < len(top5):
                 text += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         
         text += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        text += "📊 Данные: CoinGecko\n"
+        text += "📊 Данные: Binance \\+ CoinCap \\+ CoinGecko\n"
         text += "⚠️ Высокий риск\\! Только на свои\\!"
         
         return text

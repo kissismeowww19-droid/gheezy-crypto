@@ -17,7 +17,6 @@ async def test_rocket_hunter_initialization():
     """Test RocketHunterAnalyzer initialization."""
     analyzer = RocketHunterAnalyzer()
     
-    assert analyzer.SCAN_LIMIT == 500
     assert analyzer.MIN_SCORE == 7.0
     assert analyzer.MIN_POTENTIAL == 10.0
     assert len(analyzer.EXCLUDED_SYMBOLS) > 0
@@ -221,6 +220,7 @@ async def test_format_message_with_rockets():
             "potential_min": 23,
             "potential_max": 47,
             "exchange": "okx",
+            "source": "binance",
         }
     ]
     
@@ -234,102 +234,250 @@ async def test_format_message_with_rockets():
     assert "ЛОНГ" in message
     assert "Score: 9.2/10" in message
     assert "Потенциал: \\+23\\-47%" in message
+    assert "Источник: Binance" in message  # Check source is displayed
+    assert "Данные: Binance \\+ CoinCap \\+ CoinGecko" in message  # Check footer
     
     await analyzer.close()
 
 
 @pytest.mark.asyncio
-async def test_scan_all_coins_retry_logic():
-    """Test scan_all_coins retry logic with 401/429 errors."""
+async def test_scan_all_coins_multi_source():
+    """Test scan_all_coins fetches from all 3 sources."""
     analyzer = RocketHunterAnalyzer()
     
-    # Mock response that simulates 401 error then success
-    mock_responses = []
+    # Mock all three fetch methods
+    binance_coins = [
+        {"symbol": "BTC", "name": "BTC", "current_price": 50000, 
+         "price_change_percentage_24h": 5.0, "price_change_percentage_1h_in_currency": 1.0,
+         "total_volume": 50000000000, "market_cap": 1000000000000, "source": "binance"}
+    ]
     
-    # First call: 401 error
-    mock_401_resp = AsyncMock()
-    mock_401_resp.status = 401
-    mock_401_resp.__aenter__ = AsyncMock(return_value=mock_401_resp)
-    mock_401_resp.__aexit__ = AsyncMock(return_value=None)
+    coincap_coins = [
+        {"symbol": "ETH", "name": "Ethereum", "current_price": 3000,
+         "price_change_percentage_24h": 3.0, "price_change_percentage_1h_in_currency": 0.5,
+         "total_volume": 20000000000, "market_cap": 400000000000, "source": "coincap"}
+    ]
     
-    # Second call: success with coins
-    mock_200_resp = AsyncMock()
-    mock_200_resp.status = 200
-    mock_200_resp.json = AsyncMock(return_value=[
-        {"symbol": "btc", "total_volume": 50000000000, "price_change_percentage_24h": 5.0, "current_price": 50000}
-    ])
-    mock_200_resp.__aenter__ = AsyncMock(return_value=mock_200_resp)
-    mock_200_resp.__aexit__ = AsyncMock(return_value=None)
+    coingecko_coins = [
+        {"symbol": "ADA", "name": "Cardano", "current_price": 0.5,
+         "price_change_percentage_24h": 8.0, "price_change_percentage_1h_in_currency": 2.0,
+         "total_volume": 1000000000, "market_cap": 15000000000, "source": "coingecko"}
+    ]
     
-    # Track which call we're on
-    call_count = [0]
+    # Mock the individual fetch methods
+    with patch.object(analyzer, 'fetch_binance_gainers', new_callable=AsyncMock, return_value=binance_coins):
+        with patch.object(analyzer, 'fetch_coincap_gainers', new_callable=AsyncMock, return_value=coincap_coins):
+            with patch.object(analyzer, 'fetch_coingecko_page1', new_callable=AsyncMock, return_value=coingecko_coins):
+                coins = await analyzer.scan_all_coins()
     
-    def mock_get(*args, **kwargs):
-        call_count[0] += 1
-        if call_count[0] == 1:
-            return mock_401_resp
-        return mock_200_resp
+    # Should have all 3 coins
+    assert len(coins) == 3
+    symbols = [c["symbol"] for c in coins]
+    assert "BTC" in symbols
+    assert "ETH" in symbols
+    assert "ADA" in symbols
     
-    # Mock the session to limit to 1 page for testing
-    with patch.object(analyzer, '_ensure_session', new_callable=AsyncMock):
-        analyzer.session = AsyncMock()
-        analyzer.session.get = mock_get
-        analyzer.session.closed = False
-        
-        # Temporarily reduce SCAN_LIMIT for faster test
-        original_limit = analyzer.SCAN_LIMIT
-        analyzer.SCAN_LIMIT = 250
-        
-        # Mock asyncio.sleep to speed up test
-        with patch('asyncio.sleep', new_callable=AsyncMock):
-            coins = await analyzer.scan_all_coins()
-        
-        analyzer.SCAN_LIMIT = original_limit
+    # Check sources are preserved
+    sources = [c["source"] for c in coins]
+    assert "binance" in sources
+    assert "coincap" in sources
+    assert "coingecko" in sources
     
-    # Should have retried once after 401 and got coins on second attempt
+    await analyzer.close()
+
+
+@pytest.mark.asyncio
+async def test_scan_all_coins_deduplication():
+    """Test that scan_all_coins removes duplicates with correct priority."""
+    analyzer = RocketHunterAnalyzer()
+    
+    # Same symbol from different sources - Binance should take priority
+    binance_coins = [
+        {"symbol": "BTC", "name": "BTC", "current_price": 50000, 
+         "price_change_percentage_24h": 5.0, "price_change_percentage_1h_in_currency": 1.0,
+         "total_volume": 50000000000, "market_cap": 1000000000000, "source": "binance"}
+    ]
+    
+    coincap_coins = [
+        {"symbol": "BTC", "name": "Bitcoin", "current_price": 49900,  # Different price
+         "price_change_percentage_24h": 4.8, "price_change_percentage_1h_in_currency": 0.9,
+         "total_volume": 48000000000, "market_cap": 990000000000, "source": "coincap"}
+    ]
+    
+    coingecko_coins = [
+        {"symbol": "BTC", "name": "Bitcoin", "current_price": 50100,  # Different price
+         "price_change_percentage_24h": 5.2, "price_change_percentage_1h_in_currency": 1.1,
+         "total_volume": 51000000000, "market_cap": 1010000000000, "source": "coingecko"}
+    ]
+    
+    # Mock the individual fetch methods
+    with patch.object(analyzer, 'fetch_binance_gainers', new_callable=AsyncMock, return_value=binance_coins):
+        with patch.object(analyzer, 'fetch_coincap_gainers', new_callable=AsyncMock, return_value=coincap_coins):
+            with patch.object(analyzer, 'fetch_coingecko_page1', new_callable=AsyncMock, return_value=coingecko_coins):
+                coins = await analyzer.scan_all_coins()
+    
+    # Should have only 1 BTC (from Binance)
     assert len(coins) == 1
-    assert coins[0]["symbol"] == "btc"
-    assert call_count[0] == 2  # One failed, one success
+    assert coins[0]["symbol"] == "BTC"
+    assert coins[0]["source"] == "binance"
+    assert coins[0]["current_price"] == 50000  # Binance price
     
     await analyzer.close()
 
 
 @pytest.mark.asyncio
-async def test_scan_all_coins_max_retries():
-    """Test scan_all_coins stops after max retries."""
+async def test_fetch_binance_gainers():
+    """Test fetching coins from Binance API."""
     analyzer = RocketHunterAnalyzer()
     
-    # Mock response that always returns 401
-    mock_401_resp = AsyncMock()
-    mock_401_resp.status = 401
-    mock_401_resp.__aenter__ = AsyncMock(return_value=mock_401_resp)
-    mock_401_resp.__aexit__ = AsyncMock(return_value=None)
+    # Mock Binance API response
+    mock_binance_data = [
+        {
+            "symbol": "BTCUSDT",
+            "priceChangePercent": "5.0",
+            "lastPrice": "50000.0",
+            "quoteVolume": "50000000000"
+        },
+        {
+            "symbol": "ETHUSDT",
+            "priceChangePercent": "3.5",
+            "lastPrice": "3000.0",
+            "quoteVolume": "20000000000"
+        },
+        {
+            "symbol": "ADABTC",  # Should be filtered out (not USDT pair)
+            "priceChangePercent": "2.0",
+            "lastPrice": "0.00001",
+            "quoteVolume": "1000000"
+        }
+    ]
     
-    call_count = [0]
+    mock_resp = AsyncMock()
+    mock_resp.status = 200
+    mock_resp.json = AsyncMock(return_value=mock_binance_data)
     
-    def mock_get(*args, **kwargs):
-        call_count[0] += 1
-        return mock_401_resp
+    # Create a mock that properly returns itself as a context manager
+    mock_context_manager = AsyncMock()
+    mock_context_manager.__aenter__.return_value = mock_resp
+    mock_context_manager.__aexit__.return_value = None
     
-    # Mock the session
     with patch.object(analyzer, '_ensure_session', new_callable=AsyncMock):
         analyzer.session = AsyncMock()
-        analyzer.session.get = mock_get
+        analyzer.session.get = Mock(return_value=mock_context_manager)
         analyzer.session.closed = False
         
-        # Temporarily reduce SCAN_LIMIT for faster test
-        original_limit = analyzer.SCAN_LIMIT
-        analyzer.SCAN_LIMIT = 250
-        
-        # Mock asyncio.sleep to speed up test
-        with patch('asyncio.sleep', new_callable=AsyncMock):
-            coins = await analyzer.scan_all_coins()
-        
-        analyzer.SCAN_LIMIT = original_limit
+        coins = await analyzer.fetch_binance_gainers()
     
-    # Should have tried max 3 times (initial + 3 retries)
-    assert call_count[0] == 4  # 1 initial + 3 retries
-    assert len(coins) == 0  # No coins fetched
+    # Should have 2 coins (ADABTC filtered out)
+    assert len(coins) == 2
+    assert coins[0]["symbol"] == "BTC"
+    assert coins[0]["source"] == "binance"
+    assert coins[0]["current_price"] == 50000.0
+    assert coins[1]["symbol"] == "ETH"
+    
+    await analyzer.close()
+
+
+@pytest.mark.asyncio
+async def test_fetch_coincap_gainers():
+    """Test fetching coins from CoinCap API."""
+    analyzer = RocketHunterAnalyzer()
+    
+    # Mock CoinCap API response
+    mock_coincap_data = {
+        "data": [
+            {
+                "symbol": "BTC",
+                "name": "Bitcoin",
+                "priceUsd": "50000.0",
+                "changePercent24Hr": "5.0",
+                "volumeUsd24Hr": "50000000000",
+                "marketCapUsd": "1000000000000"
+            },
+            {
+                "symbol": "ETH",
+                "name": "Ethereum",
+                "priceUsd": "3000.0",
+                "changePercent24Hr": "3.5",
+                "volumeUsd24Hr": "20000000000",
+                "marketCapUsd": "400000000000"
+            }
+        ]
+    }
+    
+    mock_resp = AsyncMock()
+    mock_resp.status = 200
+    mock_resp.json = AsyncMock(return_value=mock_coincap_data)
+    
+    # Create a mock that properly returns itself as a context manager
+    mock_context_manager = AsyncMock()
+    mock_context_manager.__aenter__.return_value = mock_resp
+    mock_context_manager.__aexit__.return_value = None
+    
+    with patch.object(analyzer, '_ensure_session', new_callable=AsyncMock):
+        analyzer.session = AsyncMock()
+        analyzer.session.get = Mock(return_value=mock_context_manager)
+        analyzer.session.closed = False
+        
+        coins = await analyzer.fetch_coincap_gainers()
+    
+    assert len(coins) == 2
+    assert coins[0]["symbol"] == "BTC"
+    assert coins[0]["source"] == "coincap"
+    assert coins[0]["current_price"] == 50000.0
+    assert coins[1]["symbol"] == "ETH"
+    
+    await analyzer.close()
+
+
+@pytest.mark.asyncio
+async def test_fetch_coingecko_page1():
+    """Test fetching 1 page from CoinGecko API."""
+    analyzer = RocketHunterAnalyzer()
+    
+    # Mock CoinGecko API response
+    mock_coingecko_data = [
+        {
+            "symbol": "btc",
+            "name": "Bitcoin",
+            "current_price": 50000.0,
+            "price_change_percentage_24h": 5.0,
+            "price_change_percentage_1h_in_currency": 1.0,
+            "total_volume": 50000000000,
+            "market_cap": 1000000000000
+        },
+        {
+            "symbol": "eth",
+            "name": "Ethereum",
+            "current_price": 3000.0,
+            "price_change_percentage_24h": 3.5,
+            "price_change_percentage_1h_in_currency": 0.5,
+            "total_volume": 20000000000,
+            "market_cap": 400000000000
+        }
+    ]
+    
+    mock_resp = AsyncMock()
+    mock_resp.status = 200
+    mock_resp.json = AsyncMock(return_value=mock_coingecko_data)
+    
+    # Create a mock that properly returns itself as a context manager
+    mock_context_manager = AsyncMock()
+    mock_context_manager.__aenter__.return_value = mock_resp
+    mock_context_manager.__aexit__.return_value = None
+    
+    with patch.object(analyzer, '_ensure_session', new_callable=AsyncMock):
+        analyzer.session = AsyncMock()
+        analyzer.session.get = Mock(return_value=mock_context_manager)
+        analyzer.session.closed = False
+        
+        coins = await analyzer.fetch_coingecko_page1()
+    
+    assert len(coins) == 2
+    assert coins[0]["symbol"] == "BTC"  # Should be uppercased
+    assert coins[0]["source"] == "coingecko"
+    assert coins[0]["current_price"] == 50000.0
+    assert coins[1]["symbol"] == "ETH"
     
     await analyzer.close()
 
