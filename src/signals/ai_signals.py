@@ -170,6 +170,11 @@ class AISignalAnalyzer:
     # Sideways display constants
     SIDEWAYS_RANGE_PERCENT = 1.0  # Диапазон для боковика (+/-1.0%)
     
+    # Signal caching constants
+    SIGNAL_CACHE_TTL = 300  # 5 минут - TTL для кэша сигналов (предотвращает повторный анализ)
+    SUPPORT_SL_OFFSET = 0.995  # Offset для стоп-лосса ниже поддержки (0.5%)
+    RESISTANCE_SL_OFFSET = 1.005  # Offset для стоп-лосса выше сопротивления (0.5%)
+    
     # Supported coins for AI signals
     SUPPORTED_SIGNAL_COINS = {"BTC", "ETH", "TON", "SOL", "XRP"}
     
@@ -314,6 +319,9 @@ class AISignalAnalyzer:
         
         # Отдельное хранилище для сигналов корреляции (НЕ очищается при clear_cache, имеет TTL)
         self._correlation_signals: dict[str, dict] = {}
+        
+        # Хранение последнего полного сигнала для предотвращения повторного анализа
+        self._last_signal_data: dict[str, dict] = {}
         
         logger.info("AISignalAnalyzer initialized with 22-factor system")
     
@@ -7039,6 +7047,13 @@ class AISignalAnalyzer:
                 sentiment_data=sentiment_data
             )
             
+            # Store signal data for later retrieval (prevents second pass)
+            self._last_signal_data[symbol] = {
+                'signal_data': signal_data,
+                'market_data': market_data,
+                'timestamp': time.time()
+            }
+            
             # Format message with COMPACT formatter (15-20 lines)
             message = self.format_signal_message_compact(
                 symbol=symbol,
@@ -7064,6 +7079,9 @@ class AISignalAnalyzer:
         """
         Получить параметры сигнала для отслеживания.
         
+        ВАЖНО: Этот метод использует кэшированные данные из последнего вызова analyze_coin(),
+        чтобы избежать повторного анализа (который может дать другой результат).
+        
         Returns:
             {
                 "direction": "long",
@@ -7077,6 +7095,72 @@ class AISignalAnalyzer:
         symbol = symbol.upper()
         
         try:
+            # Проверяем, есть ли сохраненные данные из предыдущего analyze_coin()
+            last_signal = self._last_signal_data.get(symbol)
+            
+            if last_signal:
+                # Проверяем, не устарели ли данные (макс 5 минут)
+                age = time.time() - last_signal.get('timestamp', 0)
+                if age < self.SIGNAL_CACHE_TTL:
+                    # Используем сохраненные данные вместо повторного анализа
+                    signal_data = last_signal['signal_data']
+                    market_data = last_signal['market_data']
+                    
+                    current_price = market_data['price_usd']
+                    raw_direction = signal_data.get('raw_direction', 'sideways')
+                    probability = signal_data.get('probability', 50.0)
+                    
+                    # Получаем TP/SL из signal_data если есть
+                    sr_levels = signal_data.get('sr_levels', {})
+                    resistances = sr_levels.get('resistances', [])
+                    supports = sr_levels.get('supports', [])
+                    
+                    # Рассчитываем цены TP и SL
+                    if raw_direction == "sideways":
+                        tp1_price = current_price * (1 + self.SIDEWAYS_RANGE_PERCENT / 100)
+                        tp2_price = current_price * (1 + self.SIDEWAYS_RANGE_PERCENT / 100)
+                        sl_price = current_price * (1 - self.SIDEWAYS_RANGE_PERCENT / 100)
+                    elif raw_direction == "long":
+                        # Используем реальные уровни если доступны
+                        if resistances:
+                            tp1_price = resistances[0]['price']
+                            tp2_price = resistances[1]['price'] if len(resistances) > 1 else current_price * (1 + 2.0 / 100)
+                        else:
+                            tp1_price = current_price * (1 + 1.5 / 100)
+                            tp2_price = current_price * (1 + 2.0 / 100)
+                        
+                        if supports:
+                            sl_price = supports[0]['price'] * self.SUPPORT_SL_OFFSET  # Немного ниже поддержки
+                        else:
+                            sl_price = current_price * (1 - 0.6 / 100)
+                    else:  # short
+                        # Используем реальные уровни если доступны
+                        if supports:
+                            tp1_price = supports[0]['price']
+                            tp2_price = supports[1]['price'] if len(supports) > 1 else current_price * (1 - 2.0 / 100)
+                        else:
+                            tp1_price = current_price * (1 - 1.5 / 100)
+                            tp2_price = current_price * (1 - 2.0 / 100)
+                        
+                        if resistances:
+                            sl_price = resistances[0]['price'] * self.RESISTANCE_SL_OFFSET  # Немного выше сопротивления
+                        else:
+                            sl_price = current_price * (1 + 0.6 / 100)
+                    
+                    logger.info(f"Using cached signal data for {symbol} (age: {age:.0f}s)")
+                    
+                    return {
+                        "direction": raw_direction,
+                        "entry_price": current_price,
+                        "target1_price": tp1_price,
+                        "target2_price": tp2_price,
+                        "stop_loss_price": sl_price,
+                        "probability": probability
+                    }
+            
+            # Если нет сохраненных данных, делаем упрощенный анализ (fallback)
+            logger.warning(f"No cached signal data for {symbol}, falling back to simplified analysis")
+            
             # Получаем рыночные данные для цены
             market_data = await self.get_market_data(symbol)
             if market_data is None:
