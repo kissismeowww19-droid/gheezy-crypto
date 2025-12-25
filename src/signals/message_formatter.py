@@ -158,10 +158,10 @@ class CompactMessageFormatter:
         Форматирует цену с правильной точностью.
         
         Args:
-            price: Цена для форматирования (может быть None)
+            price: Цена для форматирования (может быть None, если цель не определена)
             
         Returns:
-            Отформатированная строка цены или "N/A" если price is None
+            Отформатированная строка цены или "N/A", если price is None.
         """
         if price is None:
             return "N/A"
