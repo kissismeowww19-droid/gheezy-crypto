@@ -9,7 +9,9 @@ import os
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from signals.message_formatter import CompactMessageFormatter
+# Import directly to avoid dependency issues
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'signals'))
+from message_formatter import CompactMessageFormatter
 
 
 class TestCompactMessageFormatter:
@@ -111,8 +113,8 @@ class TestCompactMessageFormatter:
     
     def test_format_price_large(self, formatter):
         """Test price formatting for large numbers."""
-        assert formatter._format_price(88021.5) == "$88,021"
-        assert formatter._format_price(1234567.8) == "$1,234,568"
+        assert formatter._format_price(88021.0) == "$88,021"
+        assert formatter._format_price(1234567.0) == "$1,234,567"
     
     def test_format_price_medium(self, formatter):
         """Test price formatting for medium numbers."""

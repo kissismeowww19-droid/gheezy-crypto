@@ -11,7 +11,9 @@ import os
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from signals.signal_stability import SignalStabilityManager
+# Import directly to avoid dependency issues
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'signals'))
+from signal_stability import SignalStabilityManager
 
 
 class TestSignalStabilityManager:
