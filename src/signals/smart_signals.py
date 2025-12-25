@@ -98,6 +98,31 @@ class SmartSignalAnalyzer:
         # === ДОПОЛНИТЕЛЬНЫЕ ОБЁРТКИ ===
         'TBTC', 'HBTC', 'RENBTC', 'SBTC', 'OBTC', 'PBTC', 'IMBTC',
         'XSUSHI', 'XRUNE', 'XVOTE',
+        
+        # === WRAPPED/BRIDGED токены (не торгуются на фьючерсах) ===
+        'USDC.E', 'USDC.e',
+        'BTC.B', 'BTC.b',
+        'UBTC',
+        'WAETHUSDC', 'WAETHUSDT',
+        
+        # === Биржевые токены без фьючерсов ===
+        'BTSE',
+        'BMX',
+        'UCN',
+        'KOGE',
+        
+        # === Региональные/нишевые стейблкоины ===
+        'EURC',
+        'AUSD',
+        
+        # === Мусорные/скам токены ===
+        'WHYPE',
+        'TIBBIR',
+        'CASH',
+        '币安人生',  # Китайские символы
+        
+        # === Другие проблемные ===
+        'BLIFE',
     }
     
     # Веса для скоринга
@@ -162,6 +187,41 @@ class SmartSignalAnalyzer:
         if self.session and not self.session.closed:
             await self.session.close()
     
+    def _is_valid_symbol(self, symbol: str) -> bool:
+        """
+        Проверяет валидность символа.
+        
+        Args:
+            symbol: Символ монеты (например, "BTC", "USDT")
+            
+        Returns:
+            True если символ валидный, False иначе
+        """
+        if not symbol:
+            return False
+        
+        # Исключаем символы с точкой (wrapped токены типа USDC.E, BTC.B)
+        if '.' in symbol:
+            return False
+        
+        # Исключаем символы с китайскими/не-ASCII символами
+        if not symbol.isascii():
+            return False
+        
+        # Исключаем из списка
+        if symbol.upper() in self.EXCLUDED_SYMBOLS:
+            return False
+        
+        # Исключаем символы с дефисами или подчёркиваниями (обычно проблемные)
+        if '_' in symbol or '-' in symbol:
+            return False
+        
+        # Исключаем слишком длинные символы (обычно некорректные)
+        if len(symbol) > 10:
+            return False
+        
+        return True
+    
     def _should_skip_symbol(self, symbol: str) -> bool:
         """
         Проверяет, нужно ли пропустить символ.
@@ -172,21 +232,7 @@ class SmartSignalAnalyzer:
         Returns:
             True если символ нужно пропустить, False иначе
         """
-        symbol_upper = symbol.upper()
-        
-        # Проверяем список исключений
-        if symbol_upper in self.EXCLUDED_SYMBOLS:
-            return True
-        
-        # Пропускаем символы с дефисами или подчёркиваниями (обычно проблемные)
-        if '_' in symbol or '-' in symbol:
-            return True
-        
-        # Пропускаем слишком длинные символы (обычно некорректные)
-        if len(symbol) > 10:
-            return True
-        
-        return False
+        return not self._is_valid_symbol(symbol)
     
     def _is_symbol_cached_invalid(self, symbol: str) -> bool:
         """
@@ -617,6 +663,29 @@ class SmartSignalAnalyzer:
             return "ШОРТ", "📉"
         return "НЕЙТРАЛЬНО", "➡️"
     
+    def _format_price(self, price: float) -> str:
+        """
+        Форматирует цену в зависимости от величины.
+        
+        Args:
+            price: Цена для форматирования
+            
+        Returns:
+            Отформатированная строка цены
+        """
+        if price <= 0:
+            return "$0.00"
+        elif price < 0.0001:
+            return f"${price:.6f}"
+        elif price < 0.01:
+            return f"${price:.4f}"
+        elif price < 1:
+            return f"${price:.3f}"
+        elif price < 1000:
+            return f"${price:.2f}"
+        else:
+            return f"${price:,.2f}"
+    
     def _calculate_levels(self, price: float, atr_pct: float, direction: str) -> Dict:
         """
         Рассчитывает уровни входа, SL и TP на основе ATR.
@@ -875,6 +944,9 @@ class SmartSignalAnalyzer:
             if result and not isinstance(result, Exception):
                 scored_coins.append(result)
         
+        # Фильтруем только ЛОНГ и ШОРТ, исключаем НЕЙТРАЛЬНО
+        scored_coins = [s for s in scored_coins if s.get('direction') in ['ЛОНГ', 'ШОРТ']]
+        
         # Сортируем по score
         scored_coins.sort(key=lambda x: x["score"], reverse=True)
         
@@ -973,7 +1045,10 @@ class SmartSignalAnalyzer:
             
             text += f"{medal} *\\#{idx + 1} {coin['symbol']}/USDT \\| {coin['direction_emoji']} {coin['direction']}*\n"
             text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            text += f"💰 Цена: ${coin['price']:,.2f}\n"
+            
+            # Форматируем цену с правильным количеством знаков после запятой
+            price_str = self._format_price(coin['price']).replace("$", "\\$").replace(",", "\\,").replace(".", "\\.")
+            text += f"💰 Цена: {price_str}\n"
             text += f"📈 Δ1h: {coin['change_1h']:+.1f}% \\| Δ4h: {coin['change_4h']:+.1f}% \\| Δ24h: {coin['change_24h']:+.1f}%\n"
             text += f"📊 Объём: {coin['volume_ratio']:.1f}x от среднего\n"
             text += f"📉 ATR: {coin['atr_pct']:.1f}% \\| BB: {coin['bb_width_pct']:.1f}%\n"
@@ -1014,10 +1089,18 @@ class SmartSignalAnalyzer:
             rr_ratio = reward / risk if risk > 0 else 0
             
             text += "📍 *Уровни:*\n"
-            text += f"• Вход: ${entry_low:,.2f}\\-{entry_high:,.2f}\n"
-            text += f"• Стоп: ${stop:,.2f} \\({((stop - current_price) / current_price * 100):+.1f}%\\)\n"
-            text += f"• TP1: ${tp1:,.2f} \\({((tp1 - current_price) / current_price * 100):+.1f}%\\)\n"
-            text += f"• TP2: ${tp2:,.2f} \\({((tp2 - current_price) / current_price * 100):+.1f}%\\)\n"
+            
+            # Форматируем уровни цен с правильным количеством знаков
+            entry_low_str = self._format_price(entry_low).replace("$", "").replace(",", "\\,").replace(".", "\\.")
+            entry_high_str = self._format_price(entry_high).replace("$", "").replace(",", "\\,").replace(".", "\\.")
+            stop_str = self._format_price(stop).replace("$", "").replace(",", "\\,").replace(".", "\\.")
+            tp1_str = self._format_price(tp1).replace("$", "").replace(",", "\\,").replace(".", "\\.")
+            tp2_str = self._format_price(tp2).replace("$", "").replace(",", "\\,").replace(".", "\\.")
+            
+            text += f"• Вход: \\${entry_low_str}\\-{entry_high_str}\n"
+            text += f"• Стоп: \\${stop_str} \\({((stop - current_price) / current_price * 100):+.1f}%\\)\n"
+            text += f"• TP1: \\${tp1_str} \\({((tp1 - current_price) / current_price * 100):+.1f}%\\)\n"
+            text += f"• TP2: \\${tp2_str} \\({((tp2 - current_price) / current_price * 100):+.1f}%\\)\n"
             text += f"📊 R:R = 1:{rr_ratio:.1f}\n"
             
             if idx < len(top3) - 1:
