@@ -163,6 +163,9 @@ class CompactMessageFormatter:
         Returns:
             Отформатированная строка цены
         """
+        if price is None:
+            return "N/A"
+        
         if price >= 1000:
             # Для больших чисел - без десятичных, с разделителями
             return f"${price:,.0f}"
