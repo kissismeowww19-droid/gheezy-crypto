@@ -10,6 +10,28 @@ from typing import Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
+def _get_fear_greed_label(value: int) -> str:
+    """
+    Get Fear & Greed label based on value.
+    
+    Args:
+        value: Fear & Greed index value (0-100)
+        
+    Returns:
+        Label string: "Extreme Fear", "Fear", "Neutral", "Greed", or "Extreme Greed"
+    """
+    if value <= 25:
+        return "Extreme Fear"
+    elif value <= 45:
+        return "Fear"
+    elif value <= 55:
+        return "Neutral"
+    elif value <= 75:
+        return "Greed"
+    else:
+        return "Extreme Greed"
+
+
 class CompactMessageFormatter:
     """
     Форматирует торговые сигналы в компактное сообщение (15-20 строк).
@@ -357,7 +379,12 @@ class CompactMessageFormatter:
         fear_greed = enhancer_data.get("fear_greed", {})
         if fear_greed.get("value") is not None:
             fg_value = fear_greed["value"]
-            fg_classification = fear_greed.get("value_classification", "")
+            # Try both key names for backward compatibility
+            fg_classification = fear_greed.get("classification") or fear_greed.get("value_classification")
+            
+            # If no classification provided, calculate it
+            if not fg_classification:
+                fg_classification = _get_fear_greed_label(fg_value)
             
             # Определяем эмодзи на основе значения
             if fg_value < 25:

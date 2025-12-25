@@ -11,7 +11,35 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 # Import directly to avoid dependency issues
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'signals'))
-from message_formatter import CompactMessageFormatter
+from message_formatter import CompactMessageFormatter, _get_fear_greed_label
+
+
+def test_get_fear_greed_label():
+    """Test the _get_fear_greed_label helper function."""
+    # Test Extreme Fear (0-25)
+    assert _get_fear_greed_label(0) == "Extreme Fear"
+    assert _get_fear_greed_label(25) == "Extreme Fear"
+    assert _get_fear_greed_label(23) == "Extreme Fear"
+    
+    # Test Fear (26-45)
+    assert _get_fear_greed_label(26) == "Fear"
+    assert _get_fear_greed_label(45) == "Fear"
+    assert _get_fear_greed_label(35) == "Fear"
+    
+    # Test Neutral (46-55)
+    assert _get_fear_greed_label(46) == "Neutral"
+    assert _get_fear_greed_label(55) == "Neutral"
+    assert _get_fear_greed_label(50) == "Neutral"
+    
+    # Test Greed (56-75)
+    assert _get_fear_greed_label(56) == "Greed"
+    assert _get_fear_greed_label(75) == "Greed"
+    assert _get_fear_greed_label(65) == "Greed"
+    
+    # Test Extreme Greed (76-100)
+    assert _get_fear_greed_label(76) == "Extreme Greed"
+    assert _get_fear_greed_label(100) == "Extreme Greed"
+    assert _get_fear_greed_label(90) == "Extreme Greed"
 
 
 class TestCompactMessageFormatter:
@@ -348,6 +376,42 @@ class TestCompactMessageFormatter:
         assert fg_reason["icon"] == "😱"  # Extreme fear emoji
         assert "23" in fg_reason["value"]
         assert "Fear" in fg_reason["value"]
+    
+    def test_get_top_reasons_fear_greed_with_classification_key(self, formatter):
+        """Test extracting Fear & Greed with 'classification' key (API format)."""
+        enhancer_data = {
+            "fear_greed": {
+                "value": 23,
+                "classification": "Extreme Fear"  # API uses this key
+            }
+        }
+        
+        reasons = formatter._get_top_reasons(enhancer_data)
+        
+        fg_reason = next((r for r in reasons if r["name"] == "F&G"), None)
+        assert fg_reason is not None
+        assert fg_reason["icon"] == "😱"
+        assert "23" in fg_reason["value"]
+        assert "Extreme Fear" in fg_reason["value"]
+    
+    def test_get_top_reasons_fear_greed_without_classification(self, formatter):
+        """Test extracting Fear & Greed without classification (should calculate it)."""
+        enhancer_data = {
+            "fear_greed": {
+                "value": 23
+                # No classification key - should be calculated
+            }
+        }
+        
+        reasons = formatter._get_top_reasons(enhancer_data)
+        
+        fg_reason = next((r for r in reasons if r["name"] == "F&G"), None)
+        assert fg_reason is not None
+        assert fg_reason["icon"] == "😱"
+        assert "23" in fg_reason["value"]
+        assert "Extreme Fear" in fg_reason["value"]  # Should be calculated
+        # Should NOT have empty parentheses
+        assert "()" not in fg_reason["value"]
     
     def test_get_top_reasons_rsi(self, formatter):
         """Test extracting RSI value reason."""
