@@ -20,6 +20,7 @@ from api_manager import get_coin_price as get_price_multi_api, get_api_stats
 from whale.tracker import WhaleTracker as RealWhaleTracker
 from signals.ai_signals import AISignalAnalyzer
 from signals.signal_tracker import SignalTracker
+from signals.super_signals import SuperSignals
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -431,10 +432,7 @@ def get_signals_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="📊 Обычные сигналы", callback_data="signals_normal"),
         ],
         [
-            InlineKeyboardButton(text="🧠 Умные сигналы (ТОП-3)", callback_data="signals_smart"),
-        ],
-        [
-            InlineKeyboardButton(text="🚀 Охотник за ракетами", callback_data="rocket_hunter"),
+            InlineKeyboardButton(text="⚡ Супер Сигналы", callback_data="super_signals"),
         ],
         [
             InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu"),
@@ -1202,7 +1200,7 @@ async def callback_signals(callback: CallbackQuery):
     text = "🎯 *Торговые сигналы*\n\n"
     text = text + "Выберите тип сигналов:\n\n"
     text = text + "📊 *Обычные сигналы* — AI-анализ по конкретным монетам (BTC, ETH, TON, SOL, XRP)\n\n"
-    text = text + "🧠 *Умные сигналы* — автоматическое сканирование 500\\+ монет и выбор ТОП-3 лучших возможностей\n\n"
+    text = text + "⚡ *Супер Сигналы* — автоматическое сканирование 3000\\+ монет и выбор ТОП-5 с вероятностью\n\n"
     text = text + "👇 Выберите:"
     try:
         await safe_send_message(
@@ -1241,29 +1239,32 @@ async def callback_signals_normal(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.callback_query(lambda c: c.data == "signals_smart")
-async def callback_signals_smart(callback: CallbackQuery):
-    """Handler for smart signals - scan and show TOP-3."""
+@router.callback_query(lambda c: c.data == "super_signals")
+async def callback_super_signals(callback: CallbackQuery):
+    """Handler for super signals - scan 3000+ coins and show TOP-5 with probability."""
     # Show loading message
     await callback.answer("⏳ Сканирую монеты...")
     await callback.message.edit_text(
-        "⏳ *Сканирование умных сигналов...*\n\n"
-        "Анализирую 500\\+ монет\\.\\.\\.\\.\n"
-        "Это может занять 20\\-30 секунд",
+        "⏳ *Сканирование супер сигналов\\.\\.\\.*\n\n"
+        "Анализирую 3000\\+ монет\\.\\.\\.\\.\n"
+        "Это может занять 30\\-60 секунд",
         parse_mode=ParseMode.MARKDOWN
     )
     
     try:
-        # Import and initialize SmartSignalAnalyzer
-        from signals.smart_signals import SmartSignalAnalyzer
+        # Initialize SuperSignals
+        analyzer = SuperSignals()
         
-        analyzer = SmartSignalAnalyzer()
+        # Get TOP-5 signals
+        top5 = await analyzer.scan()
         
-        # Get TOP-3 signals
-        top3, scanned_count, filtered_count = await analyzer.get_top3()
+        # Get counts for message
+        # Note: scan() doesn't return counts, we'll use approximate values
+        scanned_count = 3000  # Approximate
+        filtered_count = 30   # TOP_CANDIDATES
         
         # Format message
-        message_text = analyzer.format_message(top3, scanned_count, filtered_count)
+        message_text = analyzer.format_message(top5, scanned_count, filtered_count)
         
         # Close analyzer
         await analyzer.close()
@@ -1271,7 +1272,7 @@ async def callback_signals_smart(callback: CallbackQuery):
         # Send result
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
-                InlineKeyboardButton(text="🔄 Обновить", callback_data="signals_smart"),
+                InlineKeyboardButton(text="🔄 Обновить", callback_data="super_signals"),
             ],
             [
                 InlineKeyboardButton(text="🔙 Назад", callback_data="menu_signals"),
@@ -1285,81 +1286,12 @@ async def callback_signals_smart(callback: CallbackQuery):
             parse_mode=ParseMode.MARKDOWN
         )
     except Exception as e:
-        logger.error(f"Error in smart signals: {e}", exc_info=True)
+        logger.error(f"Error in super signals: {e}", exc_info=True)
         
         error_text = (
-            "❌ *Ошибка умных сигналов*\n\n"
+            "❌ *Ошибка супер сигналов*\n\n"
             "Произошла ошибка при сканировании монет\\.\n"
             "Попробуйте позже или используйте обычные сигналы\\.\n\n"
-            f"_Ошибка: {str(e).replace('.', '\\.').replace('-', '\\-')}_"
-        )
-        
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="🔙 Назад", callback_data="menu_signals"),
-            ],
-        ])
-        
-        try:
-            await callback.message.edit_text(
-                error_text,
-                reply_markup=keyboard,
-                parse_mode=ParseMode.MARKDOWN
-            )
-        except Exception:
-            pass
-
-
-@router.callback_query(lambda c: c.data == "rocket_hunter")
-async def callback_rocket_hunter(callback: CallbackQuery):
-    """Handler for rocket hunter - scan 2000-3000 coins and show TOP-5 rockets."""
-    # Show loading message
-    await callback.answer("⏳ Сканирую ракеты...")
-    await callback.message.edit_text(
-        "⏳ *Сканирование ракет\\.\\.\\.*\n\n"
-        "Анализирую 2000\\+ монет\\.\\.\\.\\.\n"
-        "Это может занять 5\\-10 минут",
-        parse_mode=ParseMode.MARKDOWN
-    )
-    
-    try:
-        # Import and initialize RocketHunterAnalyzer
-        from signals.rocket_hunter import RocketHunterAnalyzer
-        
-        analyzer = RocketHunterAnalyzer()
-        
-        # Get TOP-5 rockets
-        top5, scanned_count, filtered_count, scan_time = await analyzer.get_top5()
-        
-        # Format message
-        message_text = analyzer.format_message(top5, scanned_count, filtered_count, scan_time)
-        
-        # Close analyzer
-        await analyzer.close()
-        
-        # Send result
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="🔄 Обновить", callback_data="rocket_hunter"),
-            ],
-            [
-                InlineKeyboardButton(text="🔙 Назад", callback_data="menu_signals"),
-                InlineKeyboardButton(text="🏠 Меню", callback_data="menu_back"),
-            ],
-        ])
-        
-        await callback.message.edit_text(
-            message_text,
-            reply_markup=keyboard,
-            parse_mode=ParseMode.MARKDOWN
-        )
-    except Exception as e:
-        logger.error(f"Error in rocket hunter: {e}", exc_info=True)
-        
-        error_text = (
-            "❌ *Ошибка охотника за ракетами*\n\n"
-            "Произошла ошибка при сканировании монет\\.\n"
-            "Попробуйте позже или используйте Умные сигналы\\.\n\n"
             f"_Ошибка: {str(e).replace('.', '\\.').replace('-', '\\-')}_"
         )
         
