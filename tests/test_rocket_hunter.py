@@ -18,8 +18,8 @@ async def test_rocket_hunter_initialization():
     analyzer = RocketHunterAnalyzer()
     
     assert analyzer.SCAN_LIMIT == 3000
-    assert analyzer.MIN_SCORE == 7.7
-    assert analyzer.MIN_POTENTIAL == 20.0
+    assert analyzer.MIN_SCORE == 7.0
+    assert analyzer.MIN_POTENTIAL == 10.0
     assert len(analyzer.EXCLUDED_SYMBOLS) > 0
     
     await analyzer.close()
