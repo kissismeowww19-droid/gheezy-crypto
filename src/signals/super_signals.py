@@ -395,23 +395,28 @@ class SuperSignals:
         # 1. Пробуем Binance (основной)
         candles = await self.fetch_binance_klines(symbol, interval, limit)
         if candles and len(candles) >= 20:
+            logger.debug(f"{symbol}: got {len(candles)} candles from Binance")
             return candles, "binance"
         
         # 2. Пробуем Bybit
         candles = await self.fetch_bybit_klines(symbol, interval, limit)
         if candles and len(candles) >= 20:
+            logger.debug(f"{symbol}: got {len(candles)} candles from Bybit")
             return candles, "bybit"
         
         # 3. Пробуем MEXC
         candles = await self.fetch_mexc_klines(symbol, interval, limit)
         if candles and len(candles) >= 20:
+            logger.debug(f"{symbol}: got {len(candles)} candles from MEXC")
             return candles, "mexc"
         
         # 4. Пробуем Gate.io
         candles = await self.fetch_gateio_klines(symbol, interval, limit)
         if candles and len(candles) >= 20:
+            logger.debug(f"{symbol}: got {len(candles)} candles from Gate.io")
             return candles, "gateio"
         
+        logger.warning(f"{symbol}: ALL kline sources failed!")
         return [], ""
 
     async def fetch_binance_coins(self) -> List[Dict]:
@@ -749,17 +754,11 @@ class SuperSignals:
             
             exchange_name = exchange_1h or exchange_4h
             
-            # Получаем funding rate (опционально, только для фьючерсов)
+            # Funding rate - опционально, не блокируем если не получили
+            # Большинство монет не торгуются на фьючерсах, поэтому пропускаем
             funding_rate = None
-            for exch_name in ["okx", "bybit", "gate"]:
-                try:
-                    exchange = self.exchanges[exch_name]
-                    funding_data = await exchange.get_funding_rate(symbol)
-                    if funding_data:
-                        funding_rate = funding_data.get("funding_rate")
-                        break
-                except Exception:
-                    continue
+            # TODO: В будущем можно добавить быстрый способ получения funding
+            # Пока пропускаем чтобы не замедлять анализ
 
             # === Расчёт индикаторов ===
             analysis = self._calculate_indicators(candles_1h, candles_4h, current_price)
@@ -775,10 +774,17 @@ class SuperSignals:
             analysis["funding_rate"] = funding_rate
             analysis["source"] = coin.get("source", "unknown")
 
+            # Логируем результат анализа индикаторов
+            logger.debug(
+                f"{symbol}: RSI={analysis['rsi']:.1f}, "
+                f"MACD={analysis['macd']['histogram']:.6f}, "
+                f"Volume={analysis['volume_ratio']:.2f}x"
+            )
+
             # Расчёт вероятности
             probability = self.calculate_probability(analysis)
             if probability < self.MIN_PROBABILITY:
-                logger.debug(f"{symbol}: probability {probability}% < {self.MIN_PROBABILITY}% - skipped")
+                logger.info(f"{symbol}: probability {probability}% < {self.MIN_PROBABILITY}% - skipped (RSI={analysis['rsi']:.1f})")
                 return None
 
             analysis["probability"] = probability
@@ -1170,6 +1176,9 @@ class SuperSignals:
             if result:
                 analyzed.append(result)
             await asyncio.sleep(0.1)
+
+        # Логируем результат анализа
+        logger.info(f"SuperSignals: Analyzed {len(top_candidates)} coins, accepted {len(analyzed)}")
 
         # Сортируем по вероятности
         analyzed.sort(key=lambda x: x["probability"], reverse=True)
