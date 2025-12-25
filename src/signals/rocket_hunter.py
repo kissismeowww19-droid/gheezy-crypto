@@ -1,6 +1,7 @@
 """
 Rocket Hunter - система поиска "ракет" с потенциалом +10%+ роста/падения.
-Сканирует 500 монет из CoinGecko и находит ТОП-5 лучших сигналов.
+Сканирует монеты из 4 источников (Binance + CoinLore + CoinPaprika + CoinGecko) 
+и находит ТОП-5 лучших сигналов.
 Фьючерсные данные используются как бонус, но не обязательны.
 """
 
@@ -23,8 +24,9 @@ class RocketHunterAnalyzer:
     """
     Анализатор ракет - монет с потенциалом +10%+ роста или падения.
     
-    Сканирует 500 монет из CoinGecko, анализирует их по множеству факторов
-    и выбирает ТОП-5 лучших ракет. Фьючерсные данные - бонус, не обязательны.
+    Сканирует монеты из 4 источников (Binance + CoinLore + CoinPaprika + CoinGecko),
+    анализирует их по множеству факторов и выбирает ТОП-5 лучших ракет.
+    Фьючерсные данные - бонус, не обязательны.
     """
     
     # Настройки сканирования
@@ -155,42 +157,92 @@ class RocketHunterAnalyzer:
         
         return []
     
-    async def fetch_coincap_gainers(self) -> List[Dict]:
+    async def fetch_coinlore_gainers(self) -> List[Dict]:
         """
-        Получает топ-2000 монет с CoinCap.
-        Лимит: 200 запросов/мин — достаточно!
+        Получает монеты с CoinLore.
+        14,000+ монет, БЕЗ rate limit!
+        Работает в России.
         """
         await self._ensure_session()
         
-        url = "https://api.coincap.io/v2/assets?limit=2000"
+        all_coins = []
+        
+        # CoinLore отдаёт по 100 монет за запрос, берём первые 2000
+        for start in range(0, 2000, 100):
+            url = f"https://api.coinlore.net/api/tickers/?start={start}&limit=100"
+            
+            try:
+                async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        tickers = data.get('data', [])
+                        
+                        if not tickers:
+                            break
+                        
+                        for ticker in tickers:
+                            percent_change_24h = float(ticker.get('percent_change_24h', 0) or 0)
+                            percent_change_1h = float(ticker.get('percent_change_1h', 0) or 0)
+                            
+                            all_coins.append({
+                                'symbol': ticker.get('symbol', '').upper(),
+                                'name': ticker.get('name', ''),
+                                'current_price': float(ticker.get('price_usd', 0) or 0),
+                                'price_change_percentage_24h': percent_change_24h,
+                                'price_change_percentage_1h_in_currency': percent_change_1h,
+                                'total_volume': float(ticker.get('volume24', 0) or 0),
+                                'market_cap': float(ticker.get('market_cap_usd', 0) or 0),
+                                'source': 'coinlore'
+                            })
+                    else:
+                        break
+            except Exception as e:
+                logger.warning(f"CoinLore error at start={start}: {e}")
+                break
+            
+            # Небольшая задержка между запросами
+            await asyncio.sleep(0.5)
+        
+        logger.info(f"CoinLore: fetched {len(all_coins)} coins")
+        return all_coins
+    
+    async def fetch_coinpaprika_gainers(self) -> List[Dict]:
+        """
+        Получает все монеты с CoinPaprika.
+        2,500+ монет за 1 запрос, без регистрации.
+        Работает в России.
+        """
+        await self._ensure_session()
+        
+        url = "https://api.coinpaprika.com/v1/tickers"
         
         try:
             async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    assets = data.get('data', [])
                     
                     coins = []
-                    for asset in assets:
-                        change_24h = asset.get('changePercent24Hr')
-                        if change_24h is None:
-                            continue
+                    for ticker in data:
+                        quotes = ticker.get('quotes', {}).get('USD', {})
+                        
+                        percent_change_24h = float(quotes.get('percent_change_24h', 0) or 0)
+                        percent_change_1h = float(quotes.get('percent_change_1h', 0) or 0)
                         
                         coins.append({
-                            'symbol': asset.get('symbol', '').upper(),
-                            'name': asset.get('name', ''),
-                            'current_price': float(asset.get('priceUsd', 0) or 0),
-                            'price_change_percentage_24h': float(change_24h),
-                            'price_change_percentage_1h_in_currency': 0,
-                            'total_volume': float(asset.get('volumeUsd24Hr', 0) or 0),
-                            'market_cap': float(asset.get('marketCapUsd', 0) or 0),
-                            'source': 'coincap'
+                            'symbol': ticker.get('symbol', '').upper(),
+                            'name': ticker.get('name', ''),
+                            'current_price': float(quotes.get('price', 0) or 0),
+                            'price_change_percentage_24h': percent_change_24h,
+                            'price_change_percentage_1h_in_currency': percent_change_1h,
+                            'total_volume': float(quotes.get('volume_24h', 0) or 0),
+                            'market_cap': float(quotes.get('market_cap', 0) or 0),
+                            'source': 'coinpaprika'
                         })
                     
-                    logger.info(f"CoinCap: fetched {len(coins)} coins")
+                    logger.info(f"CoinPaprika: fetched {len(coins)} coins")
                     return coins
         except Exception as e:
-            logger.error(f"Error fetching CoinCap data: {e}", exc_info=True)
+            logger.warning(f"CoinPaprika error: {e}")
         
         return []
     
@@ -248,57 +300,64 @@ class RocketHunterAnalyzer:
     
     async def scan_all_coins(self) -> List[Dict]:
         """
-        Сканирует монеты из всех 3 источников и объединяет.
+        Сканирует монеты из всех источников и объединяет.
+        Binance + CoinLore + CoinPaprika + CoinGecko
         
         Returns:
             Список монет с базовой информацией
         """
-        logger.info("Rocket Hunter: scanning from 3 sources (Binance + CoinCap + CoinGecko)")
+        logger.info("Rocket Hunter: scanning from 4 sources (Binance + CoinLore + CoinPaprika + CoinGecko)")
         
         # Параллельно загружаем из всех источников
-        binance_task = self.fetch_binance_gainers()
-        coincap_task = self.fetch_coincap_gainers()
-        coingecko_task = self.fetch_coingecko_page1()
-        
         results = await asyncio.gather(
-            binance_task, 
-            coincap_task, 
-            coingecko_task,
+            self.fetch_binance_gainers(),
+            self.fetch_coinlore_gainers(),
+            self.fetch_coinpaprika_gainers(),
+            self.fetch_coingecko_page1(),
             return_exceptions=True
         )
         
         binance_coins = results[0] if not isinstance(results[0], Exception) else []
-        coincap_coins = results[1] if not isinstance(results[1], Exception) else []
-        coingecko_coins = results[2] if not isinstance(results[2], Exception) else []
+        coinlore_coins = results[1] if not isinstance(results[1], Exception) else []
+        coinpaprika_coins = results[2] if not isinstance(results[2], Exception) else []
+        coingecko_coins = results[3] if not isinstance(results[3], Exception) else []
         
-        # Объединяем и убираем дубликаты (приоритет: Binance > CoinGecko > CoinCap)
+        # Объединяем и убираем дубликаты
+        # Приоритет: Binance > CoinGecko > CoinPaprika > CoinLore
         seen_symbols = set()
         all_coins = []
         
-        # Сначала Binance (реальные биржевые данные)
+        # 1. Binance (реальные биржевые данные)
         for coin in binance_coins:
             symbol = coin['symbol']
             if symbol not in seen_symbols:
                 seen_symbols.add(symbol)
                 all_coins.append(coin)
         
-        # Потом CoinGecko (есть 1h данные)
+        # 2. CoinGecko (есть 1h данные, надёжный)
         for coin in coingecko_coins:
             symbol = coin['symbol']
             if symbol not in seen_symbols:
                 seen_symbols.add(symbol)
                 all_coins.append(coin)
         
-        # Потом CoinCap (много монет)
-        for coin in coincap_coins:
+        # 3. CoinPaprika (хорошие данные, 1h есть)
+        for coin in coinpaprika_coins:
+            symbol = coin['symbol']
+            if symbol not in seen_symbols:
+                seen_symbols.add(symbol)
+                all_coins.append(coin)
+        
+        # 4. CoinLore (много монет, 1h есть)
+        for coin in coinlore_coins:
             symbol = coin['symbol']
             if symbol not in seen_symbols:
                 seen_symbols.add(symbol)
                 all_coins.append(coin)
         
         logger.info(f"Rocket Hunter: total {len(all_coins)} unique coins "
-                    f"(Binance: {len(binance_coins)}, CoinCap: {len(coincap_coins)}, "
-                    f"CoinGecko: {len(coingecko_coins)})")
+                    f"(Binance: {len(binance_coins)}, CoinLore: {len(coinlore_coins)}, "
+                    f"CoinPaprika: {len(coinpaprika_coins)}, CoinGecko: {len(coingecko_coins)})")
         
         return all_coins
     
@@ -498,6 +557,10 @@ class RocketHunterAnalyzer:
             price_change_24h = coin.get('price_change_percentage_24h', 0) or 0
             volume_24h = coin.get('total_volume', 0) or 0
             market_cap = coin.get('market_cap', 0) or 0
+            
+            # DEBUG: логируем монеты с большим движением
+            if abs(price_change_24h) >= 20:
+                logger.debug(f"🔥 Big mover: {symbol} {price_change_24h:+.1f}%")
             
             # Проверка минимального потенциала
             if abs(price_change_24h) < self.MIN_POTENTIAL:
@@ -705,7 +768,7 @@ class RocketHunterAnalyzer:
             text += "😔 *Ракет не найдено*\n\n"
             text += "Попробуйте позже или используйте Умные сигналы\\.\n"
             text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            text += "📊 Данные: Binance \\+ CoinCap \\+ CoinGecko\n"
+            text += "📊 Данные: Binance \\+ CoinLore \\+ CoinPaprika \\+ CoinGecko\n"
             text += "⚠️ Высокий риск\\! Только на свои\\!"
             return text
         
@@ -800,7 +863,8 @@ class RocketHunterAnalyzer:
             source = rocket.get('source', 'unknown')
             source_names = {
                 'binance': 'Binance',
-                'coincap': 'CoinCap',
+                'coinlore': 'CoinLore',
+                'coinpaprika': 'CoinPaprika',
                 'coingecko': 'CoinGecko',
                 'unknown': 'Unknown'
             }
@@ -810,7 +874,7 @@ class RocketHunterAnalyzer:
                 text += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         
         text += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        text += "📊 Данные: Binance \\+ CoinCap \\+ CoinGecko\n"
+        text += "📊 Данные: Binance \\+ CoinLore \\+ CoinPaprika \\+ CoinGecko\n"
         text += "⚠️ Высокий риск\\! Только на свои\\!"
         
         return text
