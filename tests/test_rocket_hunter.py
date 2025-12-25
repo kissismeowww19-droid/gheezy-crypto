@@ -235,52 +235,61 @@ async def test_format_message_with_rockets():
     assert "Score: 9.2/10" in message
     assert "Потенциал: \\+23\\-47%" in message
     assert "Источник: Binance" in message  # Check source is displayed
-    assert "Данные: Binance \\+ CoinCap \\+ CoinGecko" in message  # Check footer
+    assert "Данные: Binance \\+ CoinLore \\+ CoinPaprika \\+ CoinGecko" in message  # Check footer
     
     await analyzer.close()
 
 
 @pytest.mark.asyncio
 async def test_scan_all_coins_multi_source():
-    """Test scan_all_coins fetches from all 3 sources."""
+    """Test scan_all_coins fetches from all 4 sources."""
     analyzer = RocketHunterAnalyzer()
     
-    # Mock all three fetch methods
+    # Mock all four fetch methods
     binance_coins = [
         {"symbol": "BTC", "name": "BTC", "current_price": 50000, 
          "price_change_percentage_24h": 5.0, "price_change_percentage_1h_in_currency": 1.0,
          "total_volume": 50000000000, "market_cap": 1000000000000, "source": "binance"}
     ]
     
-    coincap_coins = [
+    coinlore_coins = [
         {"symbol": "ETH", "name": "Ethereum", "current_price": 3000,
          "price_change_percentage_24h": 3.0, "price_change_percentage_1h_in_currency": 0.5,
-         "total_volume": 20000000000, "market_cap": 400000000000, "source": "coincap"}
+         "total_volume": 20000000000, "market_cap": 400000000000, "source": "coinlore"}
+    ]
+    
+    coinpaprika_coins = [
+        {"symbol": "ADA", "name": "Cardano", "current_price": 0.5,
+         "price_change_percentage_24h": 8.0, "price_change_percentage_1h_in_currency": 2.0,
+         "total_volume": 1000000000, "market_cap": 15000000000, "source": "coinpaprika"}
     ]
     
     coingecko_coins = [
-        {"symbol": "ADA", "name": "Cardano", "current_price": 0.5,
-         "price_change_percentage_24h": 8.0, "price_change_percentage_1h_in_currency": 2.0,
-         "total_volume": 1000000000, "market_cap": 15000000000, "source": "coingecko"}
+        {"symbol": "SOL", "name": "Solana", "current_price": 100,
+         "price_change_percentage_24h": 10.0, "price_change_percentage_1h_in_currency": 3.0,
+         "total_volume": 5000000000, "market_cap": 50000000000, "source": "coingecko"}
     ]
     
     # Mock the individual fetch methods
     with patch.object(analyzer, 'fetch_binance_gainers', new_callable=AsyncMock, return_value=binance_coins):
-        with patch.object(analyzer, 'fetch_coincap_gainers', new_callable=AsyncMock, return_value=coincap_coins):
-            with patch.object(analyzer, 'fetch_coingecko_page1', new_callable=AsyncMock, return_value=coingecko_coins):
-                coins = await analyzer.scan_all_coins()
+        with patch.object(analyzer, 'fetch_coinlore_gainers', new_callable=AsyncMock, return_value=coinlore_coins):
+            with patch.object(analyzer, 'fetch_coinpaprika_gainers', new_callable=AsyncMock, return_value=coinpaprika_coins):
+                with patch.object(analyzer, 'fetch_coingecko_page1', new_callable=AsyncMock, return_value=coingecko_coins):
+                    coins = await analyzer.scan_all_coins()
     
-    # Should have all 3 coins
-    assert len(coins) == 3
+    # Should have all 4 coins
+    assert len(coins) == 4
     symbols = [c["symbol"] for c in coins]
     assert "BTC" in symbols
     assert "ETH" in symbols
     assert "ADA" in symbols
+    assert "SOL" in symbols
     
     # Check sources are preserved
     sources = [c["source"] for c in coins]
     assert "binance" in sources
-    assert "coincap" in sources
+    assert "coinlore" in sources
+    assert "coinpaprika" in sources
     assert "coingecko" in sources
     
     await analyzer.close()
@@ -298,10 +307,16 @@ async def test_scan_all_coins_deduplication():
          "total_volume": 50000000000, "market_cap": 1000000000000, "source": "binance"}
     ]
     
-    coincap_coins = [
+    coinlore_coins = [
         {"symbol": "BTC", "name": "Bitcoin", "current_price": 49900,  # Different price
          "price_change_percentage_24h": 4.8, "price_change_percentage_1h_in_currency": 0.9,
-         "total_volume": 48000000000, "market_cap": 990000000000, "source": "coincap"}
+         "total_volume": 48000000000, "market_cap": 990000000000, "source": "coinlore"}
+    ]
+    
+    coinpaprika_coins = [
+        {"symbol": "BTC", "name": "Bitcoin", "current_price": 49950,  # Different price
+         "price_change_percentage_24h": 4.9, "price_change_percentage_1h_in_currency": 0.95,
+         "total_volume": 49000000000, "market_cap": 995000000000, "source": "coinpaprika"}
     ]
     
     coingecko_coins = [
@@ -312,9 +327,10 @@ async def test_scan_all_coins_deduplication():
     
     # Mock the individual fetch methods
     with patch.object(analyzer, 'fetch_binance_gainers', new_callable=AsyncMock, return_value=binance_coins):
-        with patch.object(analyzer, 'fetch_coincap_gainers', new_callable=AsyncMock, return_value=coincap_coins):
-            with patch.object(analyzer, 'fetch_coingecko_page1', new_callable=AsyncMock, return_value=coingecko_coins):
-                coins = await analyzer.scan_all_coins()
+        with patch.object(analyzer, 'fetch_coinlore_gainers', new_callable=AsyncMock, return_value=coinlore_coins):
+            with patch.object(analyzer, 'fetch_coinpaprika_gainers', new_callable=AsyncMock, return_value=coinpaprika_coins):
+                with patch.object(analyzer, 'fetch_coingecko_page1', new_callable=AsyncMock, return_value=coingecko_coins):
+                    coins = await analyzer.scan_all_coins()
     
     # Should have only 1 BTC (from Binance)
     assert len(coins) == 1
@@ -379,35 +395,37 @@ async def test_fetch_binance_gainers():
 
 
 @pytest.mark.asyncio
-async def test_fetch_coincap_gainers():
-    """Test fetching coins from CoinCap API."""
+async def test_fetch_coinlore_gainers():
+    """Test fetching coins from CoinLore API."""
     analyzer = RocketHunterAnalyzer()
     
-    # Mock CoinCap API response
-    mock_coincap_data = {
+    # Mock CoinLore API response
+    mock_coinlore_data = {
         "data": [
             {
                 "symbol": "BTC",
                 "name": "Bitcoin",
-                "priceUsd": "50000.0",
-                "changePercent24Hr": "5.0",
-                "volumeUsd24Hr": "50000000000",
-                "marketCapUsd": "1000000000000"
+                "price_usd": "50000.0",
+                "percent_change_24h": "5.0",
+                "percent_change_1h": "1.0",
+                "volume24": 50000000000,
+                "market_cap_usd": "1000000000000"
             },
             {
                 "symbol": "ETH",
                 "name": "Ethereum",
-                "priceUsd": "3000.0",
-                "changePercent24Hr": "3.5",
-                "volumeUsd24Hr": "20000000000",
-                "marketCapUsd": "400000000000"
+                "price_usd": "3000.0",
+                "percent_change_24h": "3.5",
+                "percent_change_1h": "0.5",
+                "volume24": 20000000000,
+                "market_cap_usd": "400000000000"
             }
         ]
     }
     
     mock_resp = AsyncMock()
     mock_resp.status = 200
-    mock_resp.json = AsyncMock(return_value=mock_coincap_data)
+    mock_resp.json = AsyncMock(return_value=mock_coinlore_data)
     
     # Create a mock that properly returns itself as a context manager
     mock_context_manager = AsyncMock()
@@ -419,11 +437,76 @@ async def test_fetch_coincap_gainers():
         analyzer.session.get = Mock(return_value=mock_context_manager)
         analyzer.session.closed = False
         
-        coins = await analyzer.fetch_coincap_gainers()
+        # Mock asyncio.sleep to speed up test
+        with patch('asyncio.sleep', new_callable=AsyncMock):
+            coins = await analyzer.fetch_coinlore_gainers()
+    
+    # Should have 2 coins for the first page
+    assert len(coins) >= 2
+    # Check first page results
+    assert any(c["symbol"] == "BTC" for c in coins)
+    assert any(c["symbol"] == "ETH" for c in coins)
+    btc_coin = next(c for c in coins if c["symbol"] == "BTC")
+    assert btc_coin["source"] == "coinlore"
+    assert btc_coin["current_price"] == 50000.0
+    
+    await analyzer.close()
+
+
+@pytest.mark.asyncio
+async def test_fetch_coinpaprika_gainers():
+    """Test fetching coins from CoinPaprika API."""
+    analyzer = RocketHunterAnalyzer()
+    
+    # Mock CoinPaprika API response
+    mock_coinpaprika_data = [
+        {
+            "symbol": "BTC",
+            "name": "Bitcoin",
+            "quotes": {
+                "USD": {
+                    "price": 50000.0,
+                    "percent_change_24h": 5.0,
+                    "percent_change_1h": 1.0,
+                    "volume_24h": 50000000000,
+                    "market_cap": 1000000000000
+                }
+            }
+        },
+        {
+            "symbol": "ETH",
+            "name": "Ethereum",
+            "quotes": {
+                "USD": {
+                    "price": 3000.0,
+                    "percent_change_24h": 3.5,
+                    "percent_change_1h": 0.5,
+                    "volume_24h": 20000000000,
+                    "market_cap": 400000000000
+                }
+            }
+        }
+    ]
+    
+    mock_resp = AsyncMock()
+    mock_resp.status = 200
+    mock_resp.json = AsyncMock(return_value=mock_coinpaprika_data)
+    
+    # Create a mock that properly returns itself as a context manager
+    mock_context_manager = AsyncMock()
+    mock_context_manager.__aenter__.return_value = mock_resp
+    mock_context_manager.__aexit__.return_value = None
+    
+    with patch.object(analyzer, '_ensure_session', new_callable=AsyncMock):
+        analyzer.session = AsyncMock()
+        analyzer.session.get = Mock(return_value=mock_context_manager)
+        analyzer.session.closed = False
+        
+        coins = await analyzer.fetch_coinpaprika_gainers()
     
     assert len(coins) == 2
     assert coins[0]["symbol"] == "BTC"
-    assert coins[0]["source"] == "coincap"
+    assert coins[0]["source"] == "coinpaprika"
     assert coins[0]["current_price"] == 50000.0
     assert coins[1]["symbol"] == "ETH"
     
