@@ -434,6 +434,9 @@ def get_signals_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🧠 Умные сигналы (ТОП-3)", callback_data="signals_smart"),
         ],
         [
+            InlineKeyboardButton(text="🚀 Охотник за ракетами", callback_data="rocket_hunter"),
+        ],
+        [
             InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu"),
         ],
     ])
@@ -1288,6 +1291,75 @@ async def callback_signals_smart(callback: CallbackQuery):
             "❌ *Ошибка умных сигналов*\n\n"
             "Произошла ошибка при сканировании монет\\.\n"
             "Попробуйте позже или используйте обычные сигналы\\.\n\n"
+            f"_Ошибка: {str(e).replace('.', '\\.').replace('-', '\\-')}_"
+        )
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🔙 Назад", callback_data="menu_signals"),
+            ],
+        ])
+        
+        try:
+            await callback.message.edit_text(
+                error_text,
+                reply_markup=keyboard,
+                parse_mode=ParseMode.MARKDOWN
+            )
+        except Exception:
+            pass
+
+
+@router.callback_query(lambda c: c.data == "rocket_hunter")
+async def callback_rocket_hunter(callback: CallbackQuery):
+    """Handler for rocket hunter - scan 2000-3000 coins and show TOP-5 rockets."""
+    # Show loading message
+    await callback.answer("⏳ Сканирую ракеты...")
+    await callback.message.edit_text(
+        "⏳ *Сканирование ракет\\.\\.\\.*\n\n"
+        "Анализирую 2000\\+ монет\\.\\.\\.\\.\n"
+        "Это может занять 5\\-10 минут",
+        parse_mode=ParseMode.MARKDOWN
+    )
+    
+    try:
+        # Import and initialize RocketHunterAnalyzer
+        from signals.rocket_hunter import RocketHunterAnalyzer
+        
+        analyzer = RocketHunterAnalyzer()
+        
+        # Get TOP-5 rockets
+        top5, scanned_count, filtered_count, scan_time = await analyzer.get_top5()
+        
+        # Format message
+        message_text = analyzer.format_message(top5, scanned_count, filtered_count, scan_time)
+        
+        # Close analyzer
+        await analyzer.close()
+        
+        # Send result
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🔄 Обновить", callback_data="rocket_hunter"),
+            ],
+            [
+                InlineKeyboardButton(text="🔙 Назад", callback_data="menu_signals"),
+                InlineKeyboardButton(text="🏠 Меню", callback_data="menu_back"),
+            ],
+        ])
+        
+        await callback.message.edit_text(
+            message_text,
+            reply_markup=keyboard,
+            parse_mode=ParseMode.MARKDOWN
+        )
+    except Exception as e:
+        logger.error(f"Error in rocket hunter: {e}", exc_info=True)
+        
+        error_text = (
+            "❌ *Ошибка охотника за ракетами*\n\n"
+            "Произошла ошибка при сканировании монет\\.\n"
+            "Попробуйте позже или используйте Умные сигналы\\.\n\n"
             f"_Ошибка: {str(e).replace('.', '\\.').replace('-', '\\-')}_"
         )
         
