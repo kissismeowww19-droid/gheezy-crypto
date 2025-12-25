@@ -590,7 +590,7 @@ class SignalTracker:
                 "worst_symbol": worst_symbol
             }
     
-    async def get_coin_stats(self, user_id: int, symbol: str) -> Dict:
+    def get_coin_stats(self, user_id: int, symbol: str) -> Dict:
         """
         Получить статистику по конкретной монете для пользователя.
         

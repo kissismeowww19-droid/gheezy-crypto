@@ -1589,7 +1589,7 @@ async def callback_stats_coin(callback: CallbackQuery):
     
     try:
         # Получаем статистику по монете
-        stats = await signal_tracker.get_coin_stats(user_id, symbol)
+        stats = signal_tracker.get_coin_stats(user_id, symbol)
         
         if stats['total'] == 0:
             text = f"📊 *СТАТИСТИКА {symbol}*\n"

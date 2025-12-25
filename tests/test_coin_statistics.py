@@ -33,13 +33,12 @@ class TestCoinStatistics:
         """Create a tracker instance with temporary database."""
         return SignalTracker(db_path=temp_db)
     
-    @pytest.mark.asyncio
-    async def test_get_coin_stats_no_signals(self, tracker):
+    def test_get_coin_stats_no_signals(self, tracker):
         """Test getting stats when user has no signals for a coin."""
         user_id = 123
         symbol = "BTC"
         
-        stats = await tracker.get_coin_stats(user_id, symbol)
+        stats = tracker.get_coin_stats(user_id, symbol)
         
         assert stats['total'] == 0
         assert stats['wins'] == 0
@@ -51,8 +50,8 @@ class TestCoinStatistics:
         assert stats['worst_signal'] == 0.0
         assert stats['last_signal_time'] is None
     
-    @pytest.mark.asyncio
-    async def test_get_coin_stats_with_signals(self, tracker):
+    
+    def test_get_coin_stats_with_signals(self, tracker):
         """Test getting stats with multiple signals."""
         user_id = 123
         symbol = "BTC"
@@ -96,7 +95,7 @@ class TestCoinStatistics:
             )
             conn.commit()
         
-        stats = await tracker.get_coin_stats(user_id, symbol)
+        stats = tracker.get_coin_stats(user_id, symbol)
         
         assert stats['total'] == 2
         assert stats['wins'] == 1
@@ -108,8 +107,8 @@ class TestCoinStatistics:
         assert stats['worst_signal'] < 0
         assert stats['last_signal_time'] is not None
     
-    @pytest.mark.asyncio
-    async def test_get_coin_stats_pending_signals(self, tracker):
+    
+    def test_get_coin_stats_pending_signals(self, tracker):
         """Test stats with pending signals."""
         user_id = 123
         symbol = "ETH"
@@ -137,7 +136,7 @@ class TestCoinStatistics:
             probability=0.68
         )
         
-        stats = await tracker.get_coin_stats(user_id, symbol)
+        stats = tracker.get_coin_stats(user_id, symbol)
         
         assert stats['total'] == 2
         assert stats['wins'] == 0
@@ -146,8 +145,8 @@ class TestCoinStatistics:
         assert stats['win_rate'] == 0.0  # No completed signals
         assert stats['total_pl'] == 0.0
     
-    @pytest.mark.asyncio
-    async def test_get_coin_stats_multiple_users(self, tracker):
+    
+    def test_get_coin_stats_multiple_users(self, tracker):
         """Test that stats are properly isolated per user."""
         user1_id = 123
         user2_id = 456
@@ -189,8 +188,8 @@ class TestCoinStatistics:
         )
         
         # Get stats for each user
-        user1_stats = await tracker.get_coin_stats(user1_id, symbol)
-        user2_stats = await tracker.get_coin_stats(user2_id, symbol)
+        user1_stats = tracker.get_coin_stats(user1_id, symbol)
+        user2_stats = tracker.get_coin_stats(user2_id, symbol)
         
         # User 1 should have 1 signal
         assert user1_stats['total'] == 1
@@ -198,8 +197,8 @@ class TestCoinStatistics:
         # User 2 should have 2 signals
         assert user2_stats['total'] == 2
     
-    @pytest.mark.asyncio
-    async def test_get_coin_stats_different_coins(self, tracker):
+    
+    def test_get_coin_stats_different_coins(self, tracker):
         """Test that stats are properly isolated per coin."""
         user_id = 123
         
@@ -239,8 +238,8 @@ class TestCoinStatistics:
         )
         
         # Get stats for each coin
-        btc_stats = await tracker.get_coin_stats(user_id, "BTC")
-        eth_stats = await tracker.get_coin_stats(user_id, "ETH")
+        btc_stats = tracker.get_coin_stats(user_id, "BTC")
+        eth_stats = tracker.get_coin_stats(user_id, "ETH")
         
         # BTC should have 1 signal
         assert btc_stats['total'] == 1
@@ -248,8 +247,8 @@ class TestCoinStatistics:
         # ETH should have 2 signals
         assert eth_stats['total'] == 2
     
-    @pytest.mark.asyncio
-    async def test_get_coin_stats_sideways_signals(self, tracker):
+    
+    def test_get_coin_stats_sideways_signals(self, tracker):
         """Test stats calculation with sideways signals."""
         user_id = 123
         symbol = "TON"
@@ -274,7 +273,7 @@ class TestCoinStatistics:
             )
             conn.commit()
         
-        stats = await tracker.get_coin_stats(user_id, symbol)
+        stats = tracker.get_coin_stats(user_id, symbol)
         
         assert stats['total'] == 1
         assert stats['wins'] == 1
