@@ -115,6 +115,15 @@ class RocketHunterAnalyzer:
     # Минимальная длина API ключа CoinGecko
     MIN_API_KEY_LENGTH = 5
 
+    # Конфигурация бирж для проверки торговых пар
+    EXCHANGE_CONFIG = {
+        "binance": "Binance",
+        "bybit": "Bybit",
+        "mexc": "MEXC",
+        "gateio": "Gate.io",
+        "kucoin": "KuCoin",
+    }
+
     def __init__(self):
         self.exchanges = {
             "okx": OKXClient(),
@@ -126,11 +135,7 @@ class RocketHunterAnalyzer:
 
         # Кэш торгуемых пар на биржах
         self.exchange_pairs: Dict[str, set] = {
-            "binance": set(),
-            "bybit": set(),
-            "mexc": set(),
-            "gateio": set(),
-            "kucoin": set(),
+            exchange_key: set() for exchange_key in self.EXCHANGE_CONFIG.keys()
         }
         self.pairs_loaded = False
 
@@ -178,7 +183,7 @@ class RocketHunterAnalyzer:
         if self.pairs_loaded:
             return
 
-        await asyncio.gather(
+        results = await asyncio.gather(
             self._load_binance_pairs(),
             self._load_bybit_pairs(),
             self._load_mexc_pairs(),
@@ -186,6 +191,15 @@ class RocketHunterAnalyzer:
             self._load_kucoin_pairs(),
             return_exceptions=True,
         )
+
+        # Проверяем какие биржи не загрузились
+        exchange_names = list(self.EXCHANGE_CONFIG.keys())
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                exchange_name = exchange_names[i]
+                logger.warning(
+                    f"Failed to load {self.EXCHANGE_CONFIG[exchange_name]} pairs: {result}"
+                )
 
         self.pairs_loaded = True
         logger.info(
@@ -293,15 +307,7 @@ class RocketHunterAnalyzer:
         symbol = symbol.upper()
         available = []
 
-        exchange_names = {
-            "binance": "Binance",
-            "bybit": "Bybit",
-            "mexc": "MEXC",
-            "gateio": "Gate.io",
-            "kucoin": "KuCoin",
-        }
-
-        for exchange_key, display_name in exchange_names.items():
+        for exchange_key, display_name in self.EXCHANGE_CONFIG.items():
             if symbol in self.exchange_pairs[exchange_key]:
                 available.append(display_name)
 
@@ -1076,8 +1082,10 @@ class RocketHunterAnalyzer:
                 for ex in exchanges:
                     text += f"• {ex} ✅\n"
                 text += "\n"
-            else:
+            elif self.pairs_loaded:
+                # Pairs loaded but coin not found on any exchange
                 text += "⚠️ Биржи не найдены\n\n"
+            # If pairs not loaded, skip this section entirely
 
             # Факторы
             if rocket.get("factors"):

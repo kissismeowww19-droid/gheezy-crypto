@@ -1064,6 +1064,9 @@ async def test_format_message_no_exchanges():
     """Test that format_message handles missing exchanges."""
     analyzer = RocketHunterAnalyzer()
 
+    # Set pairs_loaded to True to trigger the warning
+    analyzer.pairs_loaded = True
+
     rockets = [
         {
             "symbol": "TESTCOIN",
