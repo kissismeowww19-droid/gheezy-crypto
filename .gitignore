@@ -209,3 +209,4 @@ __marimo__/
 # SQLite whale database
 data/*.db
 data/*.db-journal
+test_compact_formatter.py
