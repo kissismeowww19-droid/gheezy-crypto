@@ -4,7 +4,7 @@ Validates the structure and basic functionality of the SuperSignals class.
 """
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 
 def test_super_signals_class_exists():
@@ -19,7 +19,7 @@ def test_super_signals_constants():
     
     # Check filtering constants
     assert hasattr(SuperSignals, 'MIN_PROBABILITY')
-    assert SuperSignals.MIN_PROBABILITY == 60
+    assert SuperSignals.MIN_PROBABILITY == 50  # Updated to 50
     
     assert hasattr(SuperSignals, 'TOP_CANDIDATES')
     assert SuperSignals.TOP_CANDIDATES == 30
@@ -64,6 +64,22 @@ def test_super_signals_methods_exist():
     
     assert hasattr(ss, 'close')
     assert callable(ss.close)
+    
+    # New kline fetching methods
+    assert hasattr(ss, 'fetch_binance_klines')
+    assert callable(ss.fetch_binance_klines)
+    
+    assert hasattr(ss, 'fetch_bybit_klines')
+    assert callable(ss.fetch_bybit_klines)
+    
+    assert hasattr(ss, 'fetch_mexc_klines')
+    assert callable(ss.fetch_mexc_klines)
+    
+    assert hasattr(ss, 'fetch_gateio_klines')
+    assert callable(ss.fetch_gateio_klines)
+    
+    assert hasattr(ss, 'fetch_klines_with_fallback')
+    assert callable(ss.fetch_klines_with_fallback)
 
 
 def test_apply_filters():
@@ -261,5 +277,124 @@ def test_format_message_empty():
     assert "СУПЕР СИГНАЛЫ" in message
     assert "3,000" in message or "3000" in message
     
-    # Should indicate no signals found (implicitly by having 0 signals)
-    assert "ТОП-0" in message
+    # Should indicate no signals found (either "ТОП-0" or "ТОП\\-0" with escaped dash)
+    assert "ТОП-0" in message or "ТОП\\-0" in message
+
+
+@pytest.mark.asyncio
+async def test_fetch_klines_with_fallback_returns_tuple():
+    """Test that fetch_klines_with_fallback returns a tuple of (candles, exchange)."""
+    from signals.super_signals import SuperSignals
+    
+    ss = SuperSignals()
+    
+    # Mock all the individual fetch methods to return empty
+    with patch.object(ss, 'fetch_binance_klines', new_callable=AsyncMock) as mock_binance:
+        with patch.object(ss, 'fetch_bybit_klines', new_callable=AsyncMock) as mock_bybit:
+            with patch.object(ss, 'fetch_mexc_klines', new_callable=AsyncMock) as mock_mexc:
+                with patch.object(ss, 'fetch_gateio_klines', new_callable=AsyncMock) as mock_gateio:
+                    mock_binance.return_value = []
+                    mock_bybit.return_value = []
+                    mock_mexc.return_value = []
+                    mock_gateio.return_value = []
+                    
+                    result = await ss.fetch_klines_with_fallback("BTC", "1h", 100)
+                    
+                    # Should return a tuple
+                    assert isinstance(result, tuple)
+                    assert len(result) == 2
+                    
+                    # Should be empty candles and empty exchange name
+                    candles, exchange = result
+                    assert candles == []
+                    assert exchange == ""
+    
+    await ss.close()
+
+
+@pytest.mark.asyncio
+async def test_fetch_klines_with_fallback_tries_binance_first():
+    """Test that fetch_klines_with_fallback tries Binance first."""
+    from signals.super_signals import SuperSignals
+    
+    ss = SuperSignals()
+    
+    # Mock Binance to return valid data
+    mock_candles = [{"timestamp": i, "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000} for i in range(30)]
+    
+    with patch.object(ss, 'fetch_binance_klines', new_callable=AsyncMock) as mock_binance:
+        with patch.object(ss, 'fetch_bybit_klines', new_callable=AsyncMock) as mock_bybit:
+            mock_binance.return_value = mock_candles
+            mock_bybit.return_value = []
+            
+            candles, exchange = await ss.fetch_klines_with_fallback("BTC", "1h", 100)
+            
+            # Should use Binance
+            assert len(candles) == 30
+            assert exchange == "binance"
+            
+            # Binance should be called
+            mock_binance.assert_called_once_with("BTC", "1h", 100)
+            
+            # Bybit should not be called since Binance succeeded
+            mock_bybit.assert_not_called()
+    
+    await ss.close()
+
+
+@pytest.mark.asyncio
+async def test_fetch_klines_with_fallback_falls_back_to_bybit():
+    """Test that fetch_klines_with_fallback falls back to Bybit if Binance fails."""
+    from signals.super_signals import SuperSignals
+    
+    ss = SuperSignals()
+    
+    # Mock Bybit to return valid data
+    mock_candles = [{"timestamp": i, "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000} for i in range(25)]
+    
+    with patch.object(ss, 'fetch_binance_klines', new_callable=AsyncMock) as mock_binance:
+        with patch.object(ss, 'fetch_bybit_klines', new_callable=AsyncMock) as mock_bybit:
+            with patch.object(ss, 'fetch_mexc_klines', new_callable=AsyncMock) as mock_mexc:
+                mock_binance.return_value = []  # Binance fails
+                mock_bybit.return_value = mock_candles  # Bybit succeeds
+                mock_mexc.return_value = []
+                
+                candles, exchange = await ss.fetch_klines_with_fallback("BTC", "1h", 100)
+                
+                # Should use Bybit
+                assert len(candles) == 25
+                assert exchange == "bybit"
+                
+                # Both should be called
+                mock_binance.assert_called_once()
+                mock_bybit.assert_called_once()
+                
+                # MEXC should not be called since Bybit succeeded
+                mock_mexc.assert_not_called()
+    
+    await ss.close()
+
+
+@pytest.mark.asyncio
+async def test_fetch_klines_with_fallback_requires_minimum_candles():
+    """Test that fetch_klines_with_fallback requires at least 20 candles."""
+    from signals.super_signals import SuperSignals
+    
+    ss = SuperSignals()
+    
+    # Mock Binance to return insufficient data (< 20 candles)
+    insufficient_candles = [{"timestamp": i, "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000} for i in range(15)]
+    sufficient_candles = [{"timestamp": i, "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000} for i in range(25)]
+    
+    with patch.object(ss, 'fetch_binance_klines', new_callable=AsyncMock) as mock_binance:
+        with patch.object(ss, 'fetch_bybit_klines', new_callable=AsyncMock) as mock_bybit:
+            mock_binance.return_value = insufficient_candles  # Not enough
+            mock_bybit.return_value = sufficient_candles  # Enough
+            
+            candles, exchange = await ss.fetch_klines_with_fallback("BTC", "1h", 100)
+            
+            # Should skip Binance and use Bybit
+            assert len(candles) == 25
+            assert exchange == "bybit"
+    
+    await ss.close()

@@ -29,7 +29,7 @@ class SuperSignals:
     """
 
     # Настройки
-    MIN_PROBABILITY = 60  # Минимальная вероятность для вывода
+    MIN_PROBABILITY = 50  # Минимальная вероятность для вывода (снижено с 60 для теста)
     TOP_CANDIDATES = 30   # Сколько анализировать глубоко
     TOP_SIGNALS = 5       # Сколько выводить
 
@@ -101,7 +101,7 @@ class SuperSignals:
         if self.pairs_loaded:
             return
 
-        results = await asyncio.gather(
+        await asyncio.gather(
             self._load_binance_pairs(),
             self._load_bybit_pairs(),
             self._load_mexc_pairs(),
@@ -221,6 +221,198 @@ class SuperSignals:
                 available.append(display_name)
 
         return available
+
+    async def fetch_binance_klines(self, symbol: str, interval: str = "1h", limit: int = 100) -> List[Dict]:
+        """
+        Получает свечи с Binance Spot API.
+        Это основной источник свечей — там есть почти все монеты.
+        """
+        await self._ensure_session()
+        
+        url = "https://api.binance.com/api/v3/klines"
+        params = {
+            "symbol": f"{symbol}USDT",
+            "interval": interval,
+            "limit": limit
+        }
+        
+        try:
+            async with self.session.get(
+                url, 
+                params=params, 
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    candles = []
+                    for k in data:
+                        candles.append({
+                            "timestamp": k[0],
+                            "open": float(k[1]),
+                            "high": float(k[2]),
+                            "low": float(k[3]),
+                            "close": float(k[4]),
+                            "volume": float(k[5])
+                        })
+                    return candles
+        except Exception as e:
+            logger.debug(f"Binance klines failed for {symbol}: {e}")
+        
+        return []
+
+    async def fetch_bybit_klines(self, symbol: str, interval: str = "1h", limit: int = 100) -> List[Dict]:
+        """
+        Получает свечи с Bybit Spot API (fallback).
+        """
+        await self._ensure_session()
+        
+        # Конвертация интервала
+        interval_map = {"1h": "60", "4h": "240", "1d": "D"}
+        bybit_interval = interval_map.get(interval, "60")
+        
+        url = "https://api.bybit.com/v5/market/kline"
+        params = {
+            "category": "spot",
+            "symbol": f"{symbol}USDT",
+            "interval": bybit_interval,
+            "limit": limit
+        }
+        
+        try:
+            async with self.session.get(
+                url, 
+                params=params, 
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    klines = data.get("result", {}).get("list", [])
+                    candles = []
+                    for k in reversed(klines):  # Bybit возвращает в обратном порядке
+                        candles.append({
+                            "timestamp": int(k[0]),
+                            "open": float(k[1]),
+                            "high": float(k[2]),
+                            "low": float(k[3]),
+                            "close": float(k[4]),
+                            "volume": float(k[5])
+                        })
+                    return candles
+        except Exception as e:
+            logger.debug(f"Bybit klines failed for {symbol}: {e}")
+        
+        return []
+
+    async def fetch_mexc_klines(self, symbol: str, interval: str = "1h", limit: int = 100) -> List[Dict]:
+        """
+        Получает свечи с MEXC API (fallback).
+        """
+        await self._ensure_session()
+        
+        # Конвертация интервала
+        interval_map = {"1h": "1h", "4h": "4h", "1d": "1d"}
+        mexc_interval = interval_map.get(interval, "1h")
+        
+        url = "https://api.mexc.com/api/v3/klines"
+        params = {
+            "symbol": f"{symbol}USDT",
+            "interval": mexc_interval,
+            "limit": limit
+        }
+        
+        try:
+            async with self.session.get(
+                url, 
+                params=params, 
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    candles = []
+                    for k in data:
+                        candles.append({
+                            "timestamp": k[0],
+                            "open": float(k[1]),
+                            "high": float(k[2]),
+                            "low": float(k[3]),
+                            "close": float(k[4]),
+                            "volume": float(k[5])
+                        })
+                    return candles
+        except Exception as e:
+            logger.debug(f"MEXC klines failed for {symbol}: {e}")
+        
+        return []
+
+    async def fetch_gateio_klines(self, symbol: str, interval: str = "1h", limit: int = 100) -> List[Dict]:
+        """
+        Получает свечи с Gate.io API (fallback).
+        """
+        await self._ensure_session()
+        
+        # Конвертация интервала
+        interval_map = {"1h": "1h", "4h": "4h", "1d": "1d"}
+        gate_interval = interval_map.get(interval, "1h")
+        
+        url = "https://api.gateio.ws/api/v4/spot/candlesticks"
+        params = {
+            "currency_pair": f"{symbol}_USDT",
+            "interval": gate_interval,
+            "limit": limit
+        }
+        
+        try:
+            async with self.session.get(
+                url, 
+                params=params, 
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    candles = []
+                    for k in data:
+                        candles.append({
+                            "timestamp": int(k[0]) * 1000,  # Gate.io возвращает секунды
+                            "open": float(k[5]),
+                            "high": float(k[3]),
+                            "low": float(k[4]),
+                            "close": float(k[2]),
+                            "volume": float(k[1])
+                        })
+                    return candles
+        except Exception as e:
+            logger.debug(f"Gate.io klines failed for {symbol}: {e}")
+        
+        return []
+
+    async def fetch_klines_with_fallback(self, symbol: str, interval: str = "1h", limit: int = 100) -> Tuple[List[Dict], str]:
+        """
+        Получает свечи с fallback chain: Binance → Bybit → MEXC → Gate.io
+        
+        Returns:
+            Tuple[List[Dict], str]: (свечи, название биржи)
+        """
+        # 1. Пробуем Binance (основной)
+        candles = await self.fetch_binance_klines(symbol, interval, limit)
+        if candles and len(candles) >= 20:
+            return candles, "binance"
+        
+        # 2. Пробуем Bybit
+        candles = await self.fetch_bybit_klines(symbol, interval, limit)
+        if candles and len(candles) >= 20:
+            return candles, "bybit"
+        
+        # 3. Пробуем MEXC
+        candles = await self.fetch_mexc_klines(symbol, interval, limit)
+        if candles and len(candles) >= 20:
+            return candles, "mexc"
+        
+        # 4. Пробуем Gate.io
+        candles = await self.fetch_gateio_klines(symbol, interval, limit)
+        if candles and len(candles) >= 20:
+            return candles, "gateio"
+        
+        return [], ""
 
     async def fetch_binance_coins(self) -> List[Dict]:
         """Получает все торговые пары с Binance (~600 монет)."""
@@ -542,32 +734,32 @@ class SuperSignals:
             else:
                 direction = "short"
 
-            # === Загрузка свечей для индикаторов ===
-            # Попробуем получить данные с биржи
-            candles_1h = None
-            candles_4h = None
-            exchange_name = None
+            # === Загрузка свечей с fallback ===
+            candles_1h, exchange_1h = await self.fetch_klines_with_fallback(symbol, "1h", 100)
+            candles_4h, exchange_4h = await self.fetch_klines_with_fallback(symbol, "4h", 50)
+            
+            # Проверяем что получили достаточно данных
+            if not candles_1h or len(candles_1h) < 20:
+                logger.debug(f"Not enough 1h candles for {symbol}")
+                return None
+                
+            if not candles_4h or len(candles_4h) < 20:
+                logger.debug(f"Not enough 4h candles for {symbol}")
+                return None
+            
+            exchange_name = exchange_1h or exchange_4h
+            
+            # Получаем funding rate (опционально, только для фьючерсов)
             funding_rate = None
-
             for exch_name in ["okx", "bybit", "gate"]:
                 try:
                     exchange = self.exchanges[exch_name]
-                    candles_1h = await exchange.get_candles(symbol, "1h", limit=100)
-                    candles_4h = await exchange.get_candles(symbol, "4h", limit=50)
-                    if candles_1h and len(candles_1h) >= 20 and candles_4h and len(candles_4h) >= 20:
-                        exchange_name = exch_name
-                        # Получаем funding rate
-                        funding_data = await exchange.get_funding_rate(symbol)
-                        if funding_data:
-                            funding_rate = funding_data.get("funding_rate")
+                    funding_data = await exchange.get_funding_rate(symbol)
+                    if funding_data:
+                        funding_rate = funding_data.get("funding_rate")
                         break
-                except Exception as e:
-                    logger.debug(f"Exchange {exch_name} failed for {symbol}: {e}")
+                except Exception:
                     continue
-
-            # Если не получилось с бирж - пропускаем
-            if not candles_1h or not candles_4h:
-                return None
 
             # === Расчёт индикаторов ===
             analysis = self._calculate_indicators(candles_1h, candles_4h, current_price)
@@ -586,6 +778,7 @@ class SuperSignals:
             # Расчёт вероятности
             probability = self.calculate_probability(analysis)
             if probability < self.MIN_PROBABILITY:
+                logger.debug(f"{symbol}: probability {probability}% < {self.MIN_PROBABILITY}% - skipped")
                 return None
 
             analysis["probability"] = probability
@@ -597,6 +790,7 @@ class SuperSignals:
             # Получаем список бирж
             analysis["exchanges"] = self.get_available_exchanges(symbol)
 
+            logger.info(f"{symbol}: probability {probability}% - ACCEPTED")
             return analysis
 
         except Exception as e:
@@ -899,7 +1093,6 @@ class SuperSignals:
         current_price = analysis["current_price"]
         support = analysis["support"]
         resistance = analysis["resistance"]
-        atr = analysis["atr"]
         direction = analysis["direction"]
 
         if direction == "long":
@@ -950,7 +1143,7 @@ class SuperSignals:
     async def scan(self) -> List[Dict]:
         """
         Главный метод сканирования.
-        Возвращает ТОП-5 сигналов с вероятностью ≥60%
+        Возвращает ТОП-5 сигналов с вероятностью ≥50%
         """
         start_time = time.time()
 
@@ -965,6 +1158,10 @@ class SuperSignals:
         top_candidates = filtered[: self.TOP_CANDIDATES]
 
         logger.info(f"SuperSignals: Stage 2 - Deep analysis of {len(top_candidates)} candidates")
+        
+        # Логируем кандидатов
+        for i, coin in enumerate(top_candidates[:5], 1):
+            logger.info(f"  Candidate #{i}: {coin['symbol']} ({coin['price_change_percentage_24h']:+.1f}%)")
 
         # Этап 2: Глубокий анализ
         analyzed = []
@@ -980,6 +1177,10 @@ class SuperSignals:
 
         elapsed = time.time() - start_time
         logger.info(f"SuperSignals: Found {len(top_signals)} signals in {elapsed:.1f}s")
+        
+        # Логируем результаты
+        for i, signal in enumerate(top_signals, 1):
+            logger.info(f"  Signal #{i}: {signal['symbol']} - {signal['probability']}% ({signal['direction']})")
 
         return top_signals
 
