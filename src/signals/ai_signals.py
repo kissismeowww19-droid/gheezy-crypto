@@ -42,6 +42,12 @@ except ImportError:
     PHASE3_OPTIONS = False
     PHASE3_AVAILABLE = False
 
+try:
+    from enhancers import EnhancerManager
+    ENHANCERS_AVAILABLE = True
+except ImportError:
+    ENHANCERS_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -292,6 +298,9 @@ class AISignalAnalyzer:
         self.macro_analyzer = MacroAnalyzer() if PHASE3_MACRO else None
         self.options_analyzer = OptionsAnalyzer() if PHASE3_OPTIONS else None
         self.sentiment_analyzer = SocialSentimentAnalyzer() if PHASE3_AVAILABLE else None
+        
+        # Enhancers (Order Flow, Volume Profile, Multi-Exchange)
+        self.enhancer = EnhancerManager() if ENHANCERS_AVAILABLE else None
         
         # Signal stabilizer для предотвращения частых изменений
         self.signal_stabilizer = SignalStabilizer()
@@ -4449,7 +4458,7 @@ class AISignalAnalyzer:
             "data_quality": round(data_quality, 2)
         }
     
-    def calculate_signal(self, symbol: str, whale_data: Dict, market_data: Dict, technical_data: Optional[Dict] = None, 
+    async def calculate_signal(self, symbol: str, whale_data: Dict, market_data: Dict, technical_data: Optional[Dict] = None, 
                         fear_greed: Optional[Dict] = None, funding_rate: Optional[Dict] = None,
                         order_book: Optional[Dict] = None, trades: Optional[Dict] = None,
                         futures_data: Optional[Dict] = None, onchain_data: Optional[Dict] = None,
@@ -5115,6 +5124,32 @@ class AISignalAnalyzer:
         # Calculate weighted score using new system with dynamic weights
         new_weighted_score = self.calculate_weighted_score(factor_scores, weights=symbol_weights)
         
+        # ====== APPLY ENHANCERS (Order Flow, Volume Profile, Multi-Exchange) ======
+        # Add extra score from enhancers (-25 to +25 range, normalized to match base_score scale)
+        enhancer_score = 0.0
+        enhancer_extra_data = {}
+        
+        if self.enhancer:
+            try:
+                current_price = market_data.get('price_usd', 0)
+                if current_price > 0:
+                    # Get total score from all enhancers
+                    enhancer_raw_score = await self.enhancer.get_total_score(symbol, current_price)
+                    
+                    # Normalize: enhancer_raw_score is -25 to +25, normalize to same scale as new_weighted_score (-10 to +10)
+                    # This gives enhancers approximately 20% weight in final score
+                    enhancer_score = (enhancer_raw_score / 25.0) * 2.0  # Scale to ±2 points max
+                    
+                    # Apply enhancer score to weighted score
+                    new_weighted_score += enhancer_score
+                    
+                    # Get extra data for display
+                    enhancer_extra_data = await self.enhancer.get_extra_data(symbol)
+                    
+                    logger.info(f"Enhancers for {symbol}: raw={enhancer_raw_score:.2f}, normalized={enhancer_score:.2f}")
+            except Exception as e:
+                logger.warning(f"Enhancers error for {symbol}: {e}")
+        
         # ====== APPLY CONFIRMATION BONUSES ======
         # Candlestick patterns and MACD Divergence act as confirmations, not separate signals
         # They strengthen existing signals when they align with the direction
@@ -5395,6 +5430,9 @@ class AISignalAnalyzer:
             "weighted_score": round(combined_score, 2),  # Combined score (70% NEW + 30% OLD) (-10 to +10)
             "new_weighted_score": round(new_weighted_score, 2),  # Pure NEW weighted score for reference
             "old_score": round(total_score, 2),  # OLD system score for reference
+            # NEW: Enhancers data
+            "enhancer_score": round(enhancer_score, 2),  # Enhancer contribution to score
+            "enhancer_data": enhancer_extra_data,  # Extra data from enhancers (POC, CVD, leader)
             # NEW: Real S/R levels
             "sr_levels": sr_levels,
             # NEW: 4-hour price prediction
@@ -6196,6 +6234,54 @@ class AISignalAnalyzer:
         text += f"• С бирж: {withdrawals_count} тx\n"
         text += f"• Net Flow: {net_flow_text} tx {net_flow_sentiment}\n\n"
         
+        # ===== ENHANCERS: ДОПОЛНИТЕЛЬНЫЙ АНАЛИЗ (Order Flow, Volume Profile, Multi-Exchange) =====
+        enhancer_data = signal_data.get('enhancer_data', {})
+        if enhancer_data:
+            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            text += "📊 *ДОПОЛНИТЕЛЬНЫЙ АНАЛИЗ*\n"
+            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            
+            # Order Flow (CVD)
+            order_flow_cvd = enhancer_data.get('order_flow_cvd')
+            if order_flow_cvd is not None:
+                cvd_sign = "+" if order_flow_cvd >= 0 else ""
+                cvd_millions = order_flow_cvd / 1_000_000
+                if abs(cvd_millions) >= 1:
+                    cvd_formatted = f"${cvd_sign}{cvd_millions:.1f}M"
+                else:
+                    cvd_thousands = order_flow_cvd / 1_000
+                    cvd_formatted = f"${cvd_sign}{cvd_thousands:.0f}K"
+                
+                if order_flow_cvd > 0:
+                    text += f"├ Order Flow: 🟢 Покупатели доминируют \\(CVD {cvd_formatted}\\)\n"
+                elif order_flow_cvd < 0:
+                    text += f"├ Order Flow: 🔴 Продавцы доминируют \\(CVD {cvd_formatted}\\)\n"
+                else:
+                    text += f"├ Order Flow: 🟡 Баланс \\(CVD {cvd_formatted}\\)\n"
+            
+            # Volume Profile (POC)
+            volume_profile_levels = enhancer_data.get('volume_profile_levels', {})
+            if volume_profile_levels and volume_profile_levels.get('poc'):
+                poc = volume_profile_levels['poc']
+                current_price = market_data.get('price_usd', 0)
+                
+                if current_price > 0:
+                    distance_pct = abs(current_price - poc) / current_price * 100
+                    
+                    if current_price < poc:
+                        text += f"├ Volume Profile: Цена ниже POC \\(${poc:,.0f}\\) на {distance_pct:.1f}%\n"
+                    elif current_price > poc:
+                        text += f"├ Volume Profile: Цена выше POC \\(${poc:,.0f}\\) на {distance_pct:.1f}%\n"
+                    else:
+                        text += f"├ Volume Profile: Цена у POC \\(${poc:,.0f}\\)\n"
+            
+            # Exchange Leader
+            exchange_leader = enhancer_data.get('exchange_leader', 'N/A')
+            if exchange_leader != 'N/A':
+                text += f"└ Лидер рынка: {exchange_leader}\n"
+            
+            text += "\n"
+        
         # ===== ДОПОЛНИТЕЛЬНЫЙ АНАЛИЗ (NEW) =====
         if technical_data and any(k in technical_data for k in ["rsi_divergence", "volume_spike", "adx"]):
             text += "📈 *ДОПОЛНИТЕЛЬНЫЙ АНАЛИЗ*\n"
@@ -6770,7 +6856,7 @@ class AISignalAnalyzer:
             logger.info(f"Data sources available: {available_count}/{total_sources} for {symbol}")
             
             # Calculate signal with all available data (30-factor system)
-            signal_data = self.calculate_signal(
+            signal_data = await self.calculate_signal(
                 symbol=symbol,
                 whale_data=whale_data,
                 market_data=market_data,
@@ -6893,7 +6979,7 @@ class AISignalAnalyzer:
             technical_data = await self.calculate_technical_indicators(symbol, ohlcv_data)
             
             # Рассчитываем сигнал (упрощенный)
-            signal_data = self.calculate_signal(
+            signal_data = await self.calculate_signal(
                 symbol=symbol,
                 whale_data=whale_data,
                 market_data=market_data,
