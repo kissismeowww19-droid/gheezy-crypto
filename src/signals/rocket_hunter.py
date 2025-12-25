@@ -207,7 +207,7 @@ class RocketHunterAnalyzer:
             "order": "market_cap_desc",
             "per_page": 250,
             "page": 1,
-            "sparkline": False,
+            "sparkline": "false",
             "price_change_percentage": "1h,24h"
         }
         
