@@ -31,6 +31,7 @@ from signals.technical_analysis import (
 )
 from signals.whale_analysis import DeepWhaleAnalyzer
 from signals.derivatives_analysis import DeepDerivativesAnalyzer
+from signals.signal_stability import SignalStabilityManager
 
 try:
     from signals.phase3 import MacroAnalyzer, OptionsAnalyzer, SocialSentimentAnalyzer
@@ -56,50 +57,11 @@ def clamp(value: float, min_val: float = -10.0, max_val: float = 10.0) -> float:
     return max(min_val, min(max_val, value))
 
 
-class SignalStabilizer:
-    """Стабилизатор сигналов - предотвращает частые изменения"""
-    
-    def __init__(self):
-        self._last_signals = {}  # {symbol: {direction, score, timestamp, price}}
-        self.MIN_TIME_BETWEEN_CHANGES = 3600  # 1 час минимум
-        self.MIN_SCORE_CHANGE = 2.0  # Минимальное изменение score для смены направления
-        self.MIN_PRICE_CHANGE = 0.02  # 2% изменение цены для пересмотра
-    
-    def should_update_signal(self, symbol: str, new_direction: str, new_score: float, current_price: float) -> bool:
-        """Проверяет, нужно ли обновлять сигнал"""
-        if symbol not in self._last_signals:
-            return True
-        
-        last = self._last_signals[symbol]
-        time_diff = time.time() - last['timestamp']
-        score_diff = abs(new_score - last['score'])
-        price_diff = abs(current_price - last['price']) / last['price']
-        
-        # Обновляем если:
-        # 1. Прошло больше 1 часа И score изменился значительно
-        # 2. Цена изменилась больше чем на 2%
-        # 3. Направление изменилось И score изменился значительно
-        
-        if time_diff < self.MIN_TIME_BETWEEN_CHANGES:
-            if price_diff < self.MIN_PRICE_CHANGE and score_diff < self.MIN_SCORE_CHANGE:
-                return False  # Слишком рано для изменения
-        
-        return True
-    
-    def get_stable_signal(self, symbol: str, new_direction: str, new_score: float, current_price: float) -> tuple:
-        """Возвращает стабильный сигнал с учётом гистерезиса"""
-        if not self.should_update_signal(symbol, new_direction, new_score, current_price):
-            last = self._last_signals[symbol]
-            return last['direction'], last['score'], False  # Возвращаем старый сигнал
-        
-        # Сохраняем новый сигнал
-        self._last_signals[symbol] = {
-            'direction': new_direction,
-            'score': new_score,
-            'timestamp': time.time(),
-            'price': current_price
-        }
-        return new_direction, new_score, True  # Новый сигнал
+# DEPRECATED: Old SignalStabilizer class removed - now using SignalStabilityManager
+# See signals.signal_stability for the new implementation with improved logic:
+# - Cooldown: 1 hour minimum between direction changes
+# - Confirmations: 3 confirmations required for direction change
+# - Score threshold: 30% score change bypasses cooldown
 
 
 class AISignalAnalyzer:
@@ -302,8 +264,8 @@ class AISignalAnalyzer:
         # Enhancers (Order Flow, Volume Profile, Multi-Exchange)
         self.enhancer = EnhancerManager() if ENHANCERS_AVAILABLE else None
         
-        # Signal stabilizer для предотвращения частых изменений
-        self.signal_stabilizer = SignalStabilizer()
+        # Signal stability manager для предотвращения частых изменений
+        self.stability_manager = SignalStabilityManager()
         
         # Маппинг символов для whale tracker
         self.blockchain_mapping = {
@@ -5192,23 +5154,32 @@ class AISignalAnalyzer:
         else:
             preliminary_direction = 'neutral'
         
-        # Применяем стабилизатор
-        stable_direction, stable_score, is_updated = self.signal_stabilizer.get_stable_signal(
-            symbol, preliminary_direction, combined_score, current_price
+        # Применяем новый stability manager
+        old_direction = self.previous_direction.get(symbol)
+        old_score = self.previous_scores.get(symbol, 0)
+        
+        stable_signal = self.stability_manager.get_stable_signal(
+            coin=symbol,
+            new_direction=preliminary_direction,
+            new_score=combined_score,
+            old_direction=old_direction,
+            old_score=old_score
         )
+        
+        stable_direction = stable_signal["direction"]
+        stable_score = stable_signal["score"]
+        is_updated = stable_signal["changed"]
         
         # Логируем изменения/стабильность сигнала
         if is_updated:
-            old_direction = self.previous_direction.get(symbol, 'unknown')
-            old_score = self.previous_scores.get(symbol, 0)
-            if old_direction != 'unknown' and old_direction != stable_direction:
+            if old_direction and old_direction != stable_direction:
                 logger.info(f"Signal CHANGED for {symbol}: {old_direction} → {stable_direction}")
                 logger.info(f"  Reason: score {old_score:.2f} → {stable_score:.2f} (diff: {abs(stable_score - old_score):.2f})")
                 logger.info(f"  Price: ${current_price:.2f}")
             else:
                 logger.info(f"Signal updated for {symbol}: {stable_direction} (score: {stable_score:.2f})")
         else:
-            logger.info(f"Signal STABLE for {symbol}: {stable_direction} (score: {stable_score:.2f}) - no changes due to stabilizer")
+            logger.info(f"Signal STABLE for {symbol}: {stable_direction} (score: {stable_score:.2f}) - {stable_signal['reason']}")
         
         # Используем стабильный score вместо combined
         combined_score = stable_score

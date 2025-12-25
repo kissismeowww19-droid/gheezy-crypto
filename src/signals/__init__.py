@@ -11,6 +11,8 @@ from signals.indicators import (
     RSI,
     calculate_all_indicators,
 )
+from signals.signal_stability import SignalStabilityManager
+from signals.message_formatter import CompactMessageFormatter
 
 __all__ = [
     "SignalAnalyzer",
@@ -18,4 +20,6 @@ __all__ = [
     "MACD",
     "BollingerBands",
     "calculate_all_indicators",
+    "SignalStabilityManager",
+    "CompactMessageFormatter",
 ]
