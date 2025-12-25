@@ -240,6 +240,8 @@ class SmartSignalAnalyzer:
         await self._ensure_session()
         
         all_coins = []
+        # Читаем лимит динамически из settings (не из class variable)
+        scan_limit = getattr(settings, 'smart_signals_scan_limit', 500)
         # CoinGecko бесплатный API ограничивает per_page до 250
         max_per_page = 250
         
@@ -248,7 +250,8 @@ class SmartSignalAnalyzer:
             headers["X-CG-Pro-API-Key"] = settings.coingecko_api_key
             max_per_page = 500  # Pro API поддерживает больше
         
-        total_pages = (self.SCAN_LIMIT + max_per_page - 1) // max_per_page
+        total_pages = (scan_limit + max_per_page - 1) // max_per_page
+        logger.info(f"Starting scan with limit={scan_limit}, max_per_page={max_per_page}, total_pages={total_pages}")
         max_retries = 3  # Максимум попыток для каждой страницы при rate limit
         
         try:
@@ -257,7 +260,7 @@ class SmartSignalAnalyzer:
                 url = "https://api.coingecko.com/api/v3/coins/markets"
                 
                 # Рассчитываем сколько монет запросить на этой странице
-                remaining = self.SCAN_LIMIT - len(all_coins)
+                remaining = scan_limit - len(all_coins)
                 per_page = min(max_per_page, remaining)
                 
                 if per_page <= 0:
@@ -398,6 +401,7 @@ class SmartSignalAnalyzer:
             # ШАГ 1: Сначала проверяем тикер (быстро, 1 запрос)
             ticker = await exchange.get_ticker(normalized_symbol)
             if not ticker:
+                logger.debug(f"Symbol {symbol} not found on {exchange_name}, caching as invalid")
                 self._cache_invalid_symbol(cache_key)
                 return None
             
