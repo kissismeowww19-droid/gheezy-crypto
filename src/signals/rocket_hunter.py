@@ -1,6 +1,7 @@
 """
 Rocket Hunter - система поиска "ракет" с потенциалом +10%+ роста/падения.
-Сканирует 2000-3000 монет из CoinGecko и находит ТОП-5 лучших сигналов.
+Сканирует 500 монет из CoinGecko и находит ТОП-5 лучших сигналов.
+Фьючерсные данные используются как бонус, но не обязательны.
 """
 
 import logging
@@ -22,17 +23,16 @@ class RocketHunterAnalyzer:
     """
     Анализатор ракет - монет с потенциалом +10%+ роста или падения.
     
-    Сканирует 2000-3000 монет из CoinGecko, анализирует их по множеству факторов
-    и выбирает ТОП-5 лучших ракет.
+    Сканирует 500 монет из CoinGecko, анализирует их по множеству факторов
+    и выбирает ТОП-5 лучших ракет. Фьючерсные данные - бонус, не обязательны.
     """
     
     # Настройки сканирования
-    SCAN_LIMIT = 3000  # Сканировать 2000-3000 монет
+    SCAN_LIMIT = 500  # Реалистичный лимит для CoinGecko Demo API
     MIN_SCORE = 7.0  # Минимальный score для показа
     MIN_VOLUME_USD = 100_000  # Минимальный объём 24h (без жёстких ограничений)
     MIN_POTENTIAL = 10.0  # Минимальный потенциал +10%
     MAX_SPREAD_PCT = 1.0  # Максимальный спред 1%
-    MAX_ANALYZE = 200  # Максимум монет для детального анализа
     
     # Исключенные символы (стейблкоины, wrapped токены, проблемные монеты)
     EXCLUDED_SYMBOLS = {
@@ -111,7 +111,7 @@ class RocketHunterAnalyzer:
     
     async def scan_all_coins(self) -> List[Dict]:
         """
-        Сканирует 2000-3000 монет из CoinGecko API с пагинацией.
+        Сканирует 500 монет из CoinGecko API с пагинацией.
         
         Returns:
             Список монет с базовой информацией
@@ -368,7 +368,8 @@ class RocketHunterAnalyzer:
     
     async def calculate_rocket_score(self, coin: Dict) -> Optional[Dict]:
         """
-        Рассчитывает score для ракеты.
+        Рассчитывает score для ракеты используя данные CoinGecko.
+        Фьючерсные данные = бонус, не обязательны.
         
         Args:
             coin: Данные монеты от CoinGecko
@@ -379,48 +380,30 @@ class RocketHunterAnalyzer:
         symbol = coin.get('symbol', '').upper()
         
         try:
-            # Получаем данные с бирж
-            exchange_data = await self._get_exchange_data(symbol)
-            if not exchange_data:
-                return None
-            
-            candles_4h = exchange_data['candles_4h']
-            candles_1h = exchange_data['candles_1h']
-            
-            # Базовые данные
+            # Базовые данные из CoinGecko (всегда есть!)
             current_price = float(coin.get('current_price', 0))
             if current_price <= 0:
                 return None
             
             price_change_1h = coin.get('price_change_percentage_1h_in_currency', 0) or 0
             price_change_24h = coin.get('price_change_percentage_24h', 0) or 0
+            volume_24h = coin.get('total_volume', 0) or 0
+            market_cap = coin.get('market_cap', 0) or 0
             
-            # Рассчитываем 4h change из свечей
-            if len(candles_4h) >= 2:
-                price_4h_ago = float(candles_4h[-2].get('close', current_price))
-                price_change_4h = ((current_price - price_4h_ago) / price_4h_ago * 100) if price_4h_ago > 0 else 0
-            else:
-                price_change_4h = 0
+            # Проверка минимального потенциала
+            if abs(price_change_24h) < self.MIN_POTENTIAL:
+                return None
             
-            # === SCORE CALCULATION ===
+            # === SCORE CALCULATION (на основе CoinGecko) ===
             score = 0
             factors = []
             
-            # 1. Объём (макс 3 балла)
-            volume_ratio = self._calculate_volume_ratio(candles_4h)
-            if volume_ratio >= 20:
-                score += 3
-                factors.append(f"📊 Объём взорвался ({volume_ratio:.0f}x)")
-            elif volume_ratio >= 10:
-                score += 2
-                factors.append(f"📊 Высокий объём ({volume_ratio:.0f}x)")
-            elif volume_ratio >= 5:
-                score += 1
-                factors.append(f"📊 Повышенный объём ({volume_ratio:.0f}x)")
-            
-            # 2. Движение цены (макс 3 балла)
+            # 1. Движение цены (макс 4 балла) - ГЛАВНЫЙ ФАКТОР
             abs_change_24h = abs(price_change_24h)
-            if abs_change_24h >= 30:
+            if abs_change_24h >= 50:
+                score += 4
+                factors.append(f"🚀 Огромное движение ({price_change_24h:+.1f}%)")
+            elif abs_change_24h >= 30:
                 score += 3
                 factors.append(f"📈 Сильное движение ({price_change_24h:+.1f}%)")
             elif abs_change_24h >= 20:
@@ -430,37 +413,60 @@ class RocketHunterAnalyzer:
                 score += 1
                 factors.append(f"📈 Движение ({price_change_24h:+.1f}%)")
             
-            # 3. Технические индикаторы (макс 2 балла)
-            bb_breakout = self._check_bollinger_breakout(candles_4h)
-            if bb_breakout:
+            # 2. Объём (макс 3 балла)
+            if volume_24h >= 100_000_000:  # $100M+
+                score += 3
+                factors.append(f"📊 Огромный объём (${volume_24h/1_000_000:.0f}M)")
+            elif volume_24h >= 10_000_000:  # $10M+
+                score += 2
+                factors.append(f"📊 Высокий объём (${volume_24h/1_000_000:.1f}M)")
+            elif volume_24h >= 1_000_000:  # $1M+
                 score += 1
-                factors.append("📈 Пробой Bollinger Bands")
+                factors.append(f"📊 Хороший объём (${volume_24h/1_000_000:.1f}M)")
             
-            rsi = self._calculate_rsi(candles_4h)
-            rsi_extreme = rsi > 70 or rsi < 30
-            if rsi_extreme:
+            # 3. Часовое движение подтверждает направление (макс 2 балла)
+            if price_change_24h > 0 and price_change_1h > 3:
+                score += 2
+                factors.append(f"⚡ Продолжает расти ({price_change_1h:+.1f}% за час)")
+            elif price_change_24h > 0 and price_change_1h > 1:
                 score += 1
-                factors.append(f"💹 RSI экстремум ({rsi:.1f})")
-            
-            # 4. Тренд подтверждение (макс 2 балла)
-            oi_growing = self._check_oi_growing(candles_4h)
-            if oi_growing:
+                factors.append(f"⚡ Растёт ({price_change_1h:+.1f}% за час)")
+            elif price_change_24h < 0 and price_change_1h < -3:
+                score += 2
+                factors.append(f"⚡ Продолжает падать ({price_change_1h:+.1f}% за час)")
+            elif price_change_24h < 0 and price_change_1h < -1:
                 score += 1
-                factors.append("🐋 Рост Open Interest")
+                factors.append(f"⚡ Падает ({price_change_1h:+.1f}% за час)")
             
-            funding_rate = exchange_data.get('funding_rate')
-            if funding_rate:
-                # Для LONG - отрицательный funding хорошо, для SHORT - положительный
-                funding_confirms = False
-                if price_change_24h > 0 and funding_rate < 0:
-                    funding_confirms = True
-                    factors.append("💹 Отрицательный funding")
-                elif price_change_24h < 0 and funding_rate > 0:
-                    funding_confirms = True
-                    factors.append("💹 Положительный funding")
+            # 4. Market Cap (макс 1 балл) - низкий = больше потенциала
+            if market_cap > 0 and market_cap < 100_000_000:  # < $100M
+                score += 1
+                factors.append("💎 Низкая капа (высокий потенциал)")
+            
+            # 5. БОНУС: Попробовать получить фьючерсные данные (необязательно)
+            exchange_data = await self._get_exchange_data(symbol)
+            exchange_name = None
+            funding_rate = None
+            oi_growing = False
+            
+            if exchange_data:
+                exchange_name = exchange_data.get('exchange')
+                funding_rate = exchange_data.get('funding_rate')
                 
-                if funding_confirms:
-                    score += 1
+                candles = exchange_data.get('candles_4h', [])
+                if candles:
+                    oi_growing = self._check_oi_growing(candles)
+                    if oi_growing:
+                        score += 1
+                        factors.append("🐋 Рост Open Interest")
+                
+                if funding_rate:
+                    if price_change_24h > 0 and funding_rate < 0:
+                        score += 1
+                        factors.append("💹 Funding подтверждает лонг")
+                    elif price_change_24h < 0 and funding_rate > 0:
+                        score += 1
+                        factors.append("💹 Funding подтверждает шорт")
             
             # Проверка минимального score
             if score < self.MIN_SCORE:
@@ -475,20 +481,17 @@ class RocketHunterAnalyzer:
                 direction_emoji = "📉"
             
             # Расчёт потенциала
-            if abs_change_24h < self.MIN_POTENTIAL:
-                # Недостаточно потенциала
-                return None
-            
-            potential_min = int(abs_change_24h * 1.0)
-            potential_max = int(abs_change_24h * 1.5)
+            potential_min = int(abs_change_24h * 0.5)
+            potential_max = int(abs_change_24h * 1.0)
             
             return {
                 "symbol": symbol,
+                "name": coin.get('name', symbol),
                 "price": current_price,
                 "change_1h": price_change_1h,
-                "change_4h": price_change_4h,
                 "change_24h": price_change_24h,
-                "volume_ratio": volume_ratio,
+                "volume_24h": volume_24h,
+                "market_cap": market_cap,
                 "funding_rate": funding_rate,
                 "oi_growing": oi_growing,
                 "score": score,
@@ -497,7 +500,7 @@ class RocketHunterAnalyzer:
                 "factors": factors,
                 "potential_min": potential_min,
                 "potential_max": potential_max,
-                "exchange": exchange_data['exchange'],
+                "exchange": exchange_name,
             }
             
         except Exception as e:
@@ -521,18 +524,18 @@ class RocketHunterAnalyzer:
         filtered_coins = await self.filter_coins(coins)
         filtered_count = len(filtered_coins)
         
-        # Рассчитываем scores для монет (с ограничением)
+        # Рассчитываем scores
         scored_coins = []
         
-        # Увеличен лимит для лучшей производительности при сканировании 2000-3000 монет
-        semaphore = asyncio.Semaphore(25)
-        max_coins_to_analyze = min(len(filtered_coins), self.MAX_ANALYZE)
+        # Параллельно с ограничением
+        semaphore = asyncio.Semaphore(10)  # Уменьшено для стабильности
         
         async def score_coin_with_limit(coin):
             async with semaphore:
                 return await self.calculate_rocket_score(coin)
         
-        tasks = [score_coin_with_limit(coin) for coin in filtered_coins[:max_coins_to_analyze]]
+        # Анализируем все отфильтрованные монеты (не только первые 200)
+        tasks = [score_coin_with_limit(coin) for coin in filtered_coins]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
         for result in results:
@@ -543,6 +546,8 @@ class RocketHunterAnalyzer:
         scored_coins.sort(key=lambda x: x["score"], reverse=True)
         
         scan_time = time.time() - start_time
+        
+        logger.info(f"Rocket Hunter found {len(scored_coins)} rockets from {filtered_count} coins")
         
         return scored_coins[:5], scanned_count, filtered_count, scan_time
     
@@ -604,15 +609,16 @@ class RocketHunterAnalyzer:
             
             # Изменения
             text += f"📈 Δ1h: {rocket['change_1h']:+.1f}% \\| "
-            text += f"Δ4h: {rocket['change_4h']:+.1f}% \\| "
             text += f"Δ24h: {rocket['change_24h']:+.1f}%\n"
             
             # Объём
-            volume_ratio = rocket['volume_ratio']
-            if volume_ratio >= 20:
-                text += f"📊 Объём: {volume_ratio:.0f}x от среднего\\! 🔥\n"
+            volume = rocket.get('volume_24h', 0)
+            if volume >= 100_000_000:
+                text += f"📊 Объём: \\${volume/1_000_000:.0f}M 🔥\n"
+            elif volume >= 1_000_000:
+                text += f"📊 Объём: \\${volume/1_000_000:.1f}M\n"
             else:
-                text += f"📊 Объём: {volume_ratio:.1f}x от среднего\n"
+                text += f"📊 Объём: \\${volume/1_000:.0f}K\n"
             
             # Funding и OI
             if rocket.get('funding_rate'):

@@ -17,7 +17,7 @@ async def test_rocket_hunter_initialization():
     """Test RocketHunterAnalyzer initialization."""
     analyzer = RocketHunterAnalyzer()
     
-    assert analyzer.SCAN_LIMIT == 3000
+    assert analyzer.SCAN_LIMIT == 500
     assert analyzer.MIN_SCORE == 7.0
     assert analyzer.MIN_POTENTIAL == 10.0
     assert len(analyzer.EXCLUDED_SYMBOLS) > 0
@@ -187,12 +187,12 @@ async def test_format_message_no_rockets():
     """Test message formatting when no rockets found."""
     analyzer = RocketHunterAnalyzer()
     
-    message = analyzer.format_message([], 3000, 500, 120.5)
+    message = analyzer.format_message([], 500, 250, 60.5)
     
     assert "🚀 *ОХОТНИК ЗА РАКЕТАМИ*" in message
-    assert "Просканировано: 3,000 монет" in message
+    assert "Просканировано: 500 монет" in message
     assert "Найдено ракет: 0" in message
-    assert "Время скана: 2 мин 0 сек" in message
+    assert "Время скана: 1 мин 0 сек" in message
     assert "😔 *Ракет не найдено*" in message
     
     await analyzer.close()
@@ -206,33 +206,34 @@ async def test_format_message_with_rockets():
     rockets = [
         {
             "symbol": "NEWCOIN",
+            "name": "NewCoin",
             "price": 0.0234,
             "change_1h": 8.2,
-            "change_4h": 15.3,
             "change_24h": 47.2,
-            "volume_ratio": 47.0,
+            "volume_24h": 47_000_000,
+            "market_cap": 50_000_000,
             "funding_rate": 0.00015,
             "oi_growing": True,
             "score": 9.2,
             "direction": "ЛОНГ",
             "direction_emoji": "📈",
-            "factors": ["📊 Объём взорвался (47x)", "📈 Пробой Bollinger Bands"],
-            "potential_min": 47,
-            "potential_max": 70,
+            "factors": ["🚀 Огромное движение (+47.2%)", "📊 Высокий объём ($47.0M)"],
+            "potential_min": 23,
+            "potential_max": 47,
             "exchange": "okx",
         }
     ]
     
-    message = analyzer.format_message(rockets, 3000, 500, 512.5)
+    message = analyzer.format_message(rockets, 500, 250, 128.5)
     
     assert "🚀 *ОХОТНИК ЗА РАКЕТАМИ*" in message
-    assert "Просканировано: 3,000 монет" in message
+    assert "Просканировано: 500 монет" in message
     assert "Найдено ракет: 1" in message
-    assert "Время скана: 8 мин 32 сек" in message
+    assert "Время скана: 2 мин 8 сек" in message
     assert "NEWCOIN/USDT" in message
     assert "ЛОНГ" in message
     assert "Score: 9.2/10" in message
-    assert "Потенциал: \\+47\\-70%" in message
+    assert "Потенциал: \\+23\\-47%" in message
     
     await analyzer.close()
 
