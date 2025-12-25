@@ -329,7 +329,11 @@ class TestEnhancerManager:
              patch.object(manager.multi_exchange, 'get_score', return_value=2.0), \
              patch.object(manager.liquidations, 'get_score', return_value=0.0), \
              patch.object(manager.smart_money, 'get_score', return_value=0.0), \
-             patch.object(manager.wyckoff, 'get_score', return_value=0.0):
+             patch.object(manager.wyckoff, 'get_score', return_value=0.0), \
+             patch.object(manager.on_chain, 'get_score', return_value=0.0), \
+             patch.object(manager.whale_tracker, 'get_score', return_value=0.0), \
+             patch.object(manager.funding_advanced, 'get_score', return_value=0.0), \
+             patch.object(manager.volatility, 'get_score', return_value=0.0):
             
             total = await manager.get_total_score("BTC", 50000.0)
             assert total == 10.0  # 5 + 3 + 2
@@ -343,7 +347,11 @@ class TestEnhancerManager:
              patch.object(manager.multi_exchange, 'get_score', return_value=2.0), \
              patch.object(manager.liquidations, 'get_score', return_value=0.0), \
              patch.object(manager.smart_money, 'get_score', return_value=0.0), \
-             patch.object(manager.wyckoff, 'get_score', return_value=0.0):
+             patch.object(manager.wyckoff, 'get_score', return_value=0.0), \
+             patch.object(manager.on_chain, 'get_score', return_value=0.0), \
+             patch.object(manager.whale_tracker, 'get_score', return_value=0.0), \
+             patch.object(manager.funding_advanced, 'get_score', return_value=0.0), \
+             patch.object(manager.volatility, 'get_score', return_value=0.0):
             
             total = await manager.get_total_score("BTC", 50000.0)
             assert total == 5.0  # 0 (failed) + 3 + 2
@@ -357,7 +365,11 @@ class TestEnhancerManager:
              patch.object(manager.multi_exchange, 'get_score', side_effect=Exception("Error")), \
              patch.object(manager.liquidations, 'get_score', side_effect=Exception("Error")), \
              patch.object(manager.smart_money, 'get_score', side_effect=Exception("Error")), \
-             patch.object(manager.wyckoff, 'get_score', side_effect=Exception("Error")):
+             patch.object(manager.wyckoff, 'get_score', side_effect=Exception("Error")), \
+             patch.object(manager.on_chain, 'get_score', side_effect=Exception("Error")), \
+             patch.object(manager.whale_tracker, 'get_score', side_effect=Exception("Error")), \
+             patch.object(manager.funding_advanced, 'get_score', side_effect=Exception("Error")), \
+             patch.object(manager.volatility, 'get_score', side_effect=Exception("Error")):
             
             total = await manager.get_total_score("BTC", 50000.0)
             assert total == 0.0  # All failed, should return 0
@@ -369,7 +381,14 @@ class TestEnhancerManager:
         
         with patch.object(manager.volume_profile, 'get_levels', return_value=mock_levels), \
              patch.object(manager.multi_exchange, 'get_leader', return_value="Binance"), \
-             patch.object(manager.order_flow, 'get_cvd', return_value=1000000.0):
+             patch.object(manager.order_flow, 'get_cvd', return_value=1000000.0), \
+             patch.object(manager.liquidations, 'get_liquidation_zones', return_value={}), \
+             patch.object(manager.smart_money, 'get_smc_levels', return_value={}), \
+             patch.object(manager.wyckoff, 'get_wyckoff_phase', return_value={}), \
+             patch.object(manager.on_chain, 'get_on_chain_data', return_value={}), \
+             patch.object(manager.whale_tracker, 'get_whale_activity', return_value={}), \
+             patch.object(manager.funding_advanced, 'get_funding_data', return_value={}), \
+             patch.object(manager.volatility, 'get_volatility_data', return_value={}):
             
             extra_data = await manager.get_extra_data("BTC")
             
@@ -384,7 +403,14 @@ class TestEnhancerManager:
         """Test get_extra_data when some methods fail."""
         with patch.object(manager.volume_profile, 'get_levels', side_effect=Exception("Error")), \
              patch.object(manager.multi_exchange, 'get_leader', return_value="Binance"), \
-             patch.object(manager.order_flow, 'get_cvd', return_value=1000000.0):
+             patch.object(manager.order_flow, 'get_cvd', return_value=1000000.0), \
+             patch.object(manager.liquidations, 'get_liquidation_zones', return_value={}), \
+             patch.object(manager.smart_money, 'get_smc_levels', return_value={}), \
+             patch.object(manager.wyckoff, 'get_wyckoff_phase', return_value={}), \
+             patch.object(manager.on_chain, 'get_on_chain_data', return_value={}), \
+             patch.object(manager.whale_tracker, 'get_whale_activity', return_value={}), \
+             patch.object(manager.funding_advanced, 'get_funding_data', return_value={}), \
+             patch.object(manager.volatility, 'get_volatility_data', return_value={}):
             
             extra_data = await manager.get_extra_data("BTC")
             
@@ -751,7 +777,11 @@ class TestEnhancerManagerUpdated:
              patch.object(manager.multi_exchange, 'get_score', return_value=2.0), \
              patch.object(manager.liquidations, 'get_score', return_value=6.0), \
              patch.object(manager.smart_money, 'get_score', return_value=4.0), \
-             patch.object(manager.wyckoff, 'get_score', return_value=5.0):
+             patch.object(manager.wyckoff, 'get_score', return_value=5.0), \
+             patch.object(manager.on_chain, 'get_score', return_value=0.0), \
+             patch.object(manager.whale_tracker, 'get_score', return_value=0.0), \
+             patch.object(manager.funding_advanced, 'get_score', return_value=0.0), \
+             patch.object(manager.volatility, 'get_score', return_value=0.0):
             
             total = await manager.get_total_score("BTC", 50000.0)
             assert total == 25.0  # 5 + 3 + 2 + 6 + 4 + 5
@@ -765,7 +795,11 @@ class TestEnhancerManagerUpdated:
              patch.object(manager.multi_exchange, 'get_score', return_value=2.0), \
              patch.object(manager.liquidations, 'get_score', side_effect=Exception("API Error")), \
              patch.object(manager.smart_money, 'get_score', side_effect=Exception("API Error")), \
-             patch.object(manager.wyckoff, 'get_score', side_effect=Exception("API Error")):
+             patch.object(manager.wyckoff, 'get_score', side_effect=Exception("API Error")), \
+             patch.object(manager.on_chain, 'get_score', return_value=0.0), \
+             patch.object(manager.whale_tracker, 'get_score', return_value=0.0), \
+             patch.object(manager.funding_advanced, 'get_score', return_value=0.0), \
+             patch.object(manager.volatility, 'get_score', return_value=0.0):
             
             total = await manager.get_total_score("BTC", 50000.0)
             assert total == 10.0  # 5 + 3 + 2 (new modules failed)
@@ -783,7 +817,11 @@ class TestEnhancerManagerUpdated:
              patch.object(manager.order_flow, 'get_cvd', return_value=1000000.0), \
              patch.object(manager.liquidations, 'get_liquidation_zones', return_value=mock_zones), \
              patch.object(manager.smart_money, 'get_smc_levels', return_value=mock_smc), \
-             patch.object(manager.wyckoff, 'get_wyckoff_phase', return_value=mock_wyckoff):
+             patch.object(manager.wyckoff, 'get_wyckoff_phase', return_value=mock_wyckoff), \
+             patch.object(manager.on_chain, 'get_on_chain_data', return_value={}), \
+             patch.object(manager.whale_tracker, 'get_whale_activity', return_value={}), \
+             patch.object(manager.funding_advanced, 'get_funding_data', return_value={}), \
+             patch.object(manager.volatility, 'get_volatility_data', return_value={}):
             
             extra_data = await manager.get_extra_data("BTC", 50000.0)
             
@@ -794,3 +832,479 @@ class TestEnhancerManagerUpdated:
             assert 'smc_levels' in extra_data
             assert 'wyckoff_phase' in extra_data
             assert extra_data['wyckoff_phase']['phase'] == 'accumulation'
+
+
+class TestOnChainEnhancer:
+    """Tests for OnChainEnhancer class."""
+    
+    @pytest.fixture
+    def on_chain(self):
+        """Create an OnChainEnhancer instance."""
+        from enhancers.on_chain import OnChainEnhancer
+        return OnChainEnhancer()
+    
+    @pytest.mark.asyncio
+    async def test_get_score_unsupported_coin(self, on_chain):
+        """Test get_score for unsupported coin."""
+        score = await on_chain.get_score("DOGE")
+        assert score == 0.0
+    
+    @pytest.mark.asyncio
+    async def test_get_score_btc(self, on_chain):
+        """Test get_score for BTC."""
+        score = await on_chain.get_score("BTC")
+        # Score should be within range
+        assert -10.0 <= score <= 10.0
+    
+    @pytest.mark.asyncio
+    async def test_get_score_eth(self, on_chain):
+        """Test get_score for ETH."""
+        score = await on_chain.get_score("ETHUSDT")
+        # Score should be within range
+        assert -10.0 <= score <= 10.0
+    
+    @pytest.mark.asyncio
+    async def test_get_exchange_netflow(self, on_chain):
+        """Test get_exchange_netflow method."""
+        netflow = await on_chain.get_exchange_netflow("BTC")
+        
+        assert "netflow_24h" in netflow
+        assert "netflow_7d" in netflow
+        assert "signal" in netflow
+        assert netflow["signal"] in ["bullish", "bearish", "neutral"]
+    
+    @pytest.mark.asyncio
+    async def test_get_mvrv(self, on_chain):
+        """Test get_mvrv method."""
+        mvrv = await on_chain.get_mvrv("BTC")
+        
+        assert "mvrv" in mvrv
+        assert "signal" in mvrv
+        assert "percentile" in mvrv
+        assert mvrv["signal"] in ["bullish", "bearish", "neutral"]
+    
+    @pytest.mark.asyncio
+    async def test_get_stablecoin_flow(self, on_chain):
+        """Test get_stablecoin_flow method."""
+        flow = await on_chain.get_stablecoin_flow()
+        
+        assert "usdt_netflow" in flow
+        assert "usdc_netflow" in flow
+        assert "total" in flow
+        assert "signal" in flow
+    
+    @pytest.mark.asyncio
+    async def test_get_on_chain_data(self, on_chain):
+        """Test get_on_chain_data method."""
+        data = await on_chain.get_on_chain_data("BTC")
+        
+        assert "supported" in data
+        if data["supported"]:
+            assert "netflow" in data
+            assert "mvrv" in data
+            assert "stablecoin" in data
+
+
+class TestWhaleTrackerEnhancer:
+    """Tests for WhaleTrackerEnhancer class."""
+    
+    @pytest.fixture
+    def whale_tracker(self):
+        """Create a WhaleTrackerEnhancer instance."""
+        from enhancers.whale_tracker import WhaleTrackerEnhancer
+        return WhaleTrackerEnhancer()
+    
+    @pytest.mark.asyncio
+    async def test_get_score(self, whale_tracker):
+        """Test get_score method."""
+        score = await whale_tracker.get_score("BTC", current_price=50000.0)
+        # Score should be within range
+        assert -8.0 <= score <= 8.0
+    
+    @pytest.mark.asyncio
+    async def test_get_whale_activity(self, whale_tracker):
+        """Test get_whale_activity method."""
+        activity = await whale_tracker.get_whale_activity("BTC")
+        
+        assert "accumulation_24h" in activity
+        assert "large_txs" in activity
+        assert "net_flow" in activity
+        assert "signal" in activity
+        assert activity["net_flow"] in ["outflow", "inflow", "neutral"]
+        assert activity["signal"] in ["bullish", "bearish", "neutral"]
+    
+    @pytest.mark.asyncio
+    async def test_get_top_wallets_change(self, whale_tracker):
+        """Test get_top_wallets_change method."""
+        changes = await whale_tracker.get_top_wallets_change("BTC")
+        
+        assert "change_24h" in changes
+        assert "change_7d" in changes
+        assert "percent_change_24h" in changes
+        assert "signal" in changes
+        assert changes["signal"] in ["accumulating", "distributing", "neutral"]
+    
+    def test_calculate_activity_score(self, whale_tracker):
+        """Test _calculate_activity_score method."""
+        data = {
+            "net_flow": "outflow",
+            "total_withdrawals": 30_000_000,
+            "total_deposits": 5_000_000
+        }
+        score = whale_tracker._calculate_activity_score(data)
+        assert score > 0  # Outflow should be bullish
+    
+    def test_calculate_wallet_score(self, whale_tracker):
+        """Test _calculate_wallet_score method."""
+        data = {
+            "signal": "accumulating",
+            "change_24h": 800,
+            "change_7d": 3000
+        }
+        score = whale_tracker._calculate_wallet_score(data)
+        assert score > 0  # Accumulating should be bullish
+
+
+class TestFundingAdvancedEnhancer:
+    """Tests for FundingAdvancedEnhancer class."""
+    
+    @pytest.fixture
+    def funding_advanced(self):
+        """Create a FundingAdvancedEnhancer instance."""
+        from enhancers.funding_advanced import FundingAdvancedEnhancer
+        return FundingAdvancedEnhancer()
+    
+    @pytest.mark.asyncio
+    async def test_get_score(self, funding_advanced):
+        """Test get_score method."""
+        score = await funding_advanced.get_score("BTC")
+        # Score should be within range
+        assert -7.0 <= score <= 7.0
+    
+    @pytest.mark.asyncio
+    async def test_get_funding_data(self, funding_advanced):
+        """Test get_funding_data method."""
+        data = await funding_advanced.get_funding_data("BTC")
+        
+        assert "current_funding" in data
+        assert "predicted_funding" in data
+        assert "funding_8h_avg" in data
+        assert "is_extreme" in data
+        assert "extreme_type" in data
+        assert "oi_change_24h" in data
+        assert "signal" in data
+    
+    def test_predict_funding(self, funding_advanced):
+        """Test _predict_funding method."""
+        history = [0.0001, 0.0002, 0.0003, 0.0004]
+        current = 0.0005
+        predicted = funding_advanced._predict_funding(current, history)
+        
+        assert isinstance(predicted, float)
+        # Should be roughly continuing the upward trend
+        assert predicted >= current - 0.001
+    
+    def test_combine_funding_oi_extreme_positive(self, funding_advanced):
+        """Test _combine_funding_oi with extreme positive funding."""
+        signal = funding_advanced._combine_funding_oi(
+            funding=0.0015,  # Extreme positive
+            oi_change=5.0,
+            price_change=2.0,
+            is_extreme=True,
+            extreme_type="positive"
+        )
+        assert signal == "bearish_reversal"
+    
+    def test_combine_funding_oi_extreme_negative(self, funding_advanced):
+        """Test _combine_funding_oi with extreme negative funding."""
+        signal = funding_advanced._combine_funding_oi(
+            funding=-0.0008,  # Extreme negative
+            oi_change=5.0,
+            price_change=-2.0,
+            is_extreme=True,
+            extreme_type="negative"
+        )
+        assert signal == "bullish_reversal"
+
+
+class TestVolatilityEnhancer:
+    """Tests for VolatilityEnhancer class."""
+    
+    @pytest.fixture
+    def volatility(self):
+        """Create a VolatilityEnhancer instance."""
+        from enhancers.volatility import VolatilityEnhancer
+        return VolatilityEnhancer()
+    
+    @pytest.mark.asyncio
+    async def test_get_score(self, volatility):
+        """Test get_score method."""
+        score = await volatility.get_score("BTC")
+        # Score should be within range
+        assert -6.0 <= score <= 6.0
+    
+    @pytest.mark.asyncio
+    async def test_get_atr(self, volatility):
+        """Test get_atr method."""
+        atr = await volatility.get_atr("BTC", timeframe="4h")
+        assert isinstance(atr, float)
+        assert atr > 0
+    
+    @pytest.mark.asyncio
+    async def test_detect_bb_squeeze(self, volatility):
+        """Test detect_bb_squeeze method."""
+        squeeze_data = await volatility.detect_bb_squeeze("BTC")
+        
+        assert "squeeze" in squeeze_data
+        assert "squeeze_duration" in squeeze_data
+        assert "expected_breakout" in squeeze_data
+        assert "momentum" in squeeze_data
+        assert isinstance(squeeze_data["squeeze"], bool)
+    
+    @pytest.mark.asyncio
+    async def test_get_volatility_percentile(self, volatility):
+        """Test get_volatility_percentile method."""
+        percentile = await volatility.get_volatility_percentile("BTC")
+        
+        assert "current_volatility" in percentile
+        assert "avg_volatility_30d" in percentile
+        assert "percentile" in percentile
+        assert "regime" in percentile
+        assert percentile["regime"] in ["low", "normal", "high"]
+    
+    def test_calculate_atr_from_ohlcv(self, volatility):
+        """Test calculate_atr_from_ohlcv method."""
+        ohlcv_data = [
+            {'high': 50500, 'low': 49500, 'close': 50000},
+            {'high': 50800, 'low': 49800, 'close': 50500},
+            {'high': 51000, 'low': 50000, 'close': 50700},
+            {'high': 51200, 'low': 50500, 'close': 51000},
+            {'high': 51500, 'low': 50800, 'close': 51200},
+            {'high': 51800, 'low': 51000, 'close': 51500},
+            {'high': 52000, 'low': 51200, 'close': 51800},
+            {'high': 52200, 'low': 51500, 'close': 52000},
+            {'high': 52500, 'low': 51800, 'close': 52200},
+            {'high': 52800, 'low': 52000, 'close': 52500},
+            {'high': 53000, 'low': 52200, 'close': 52800},
+            {'high': 53200, 'low': 52500, 'close': 53000},
+            {'high': 53500, 'low': 52800, 'close': 53200},
+            {'high': 53800, 'low': 53000, 'close': 53500},
+            {'high': 54000, 'low': 53200, 'close': 53800},
+        ]
+        
+        atr = volatility.calculate_atr_from_ohlcv(ohlcv_data, period=14)
+        assert isinstance(atr, float)
+        assert atr > 0
+
+
+class TestDynamicTargetsEnhancer:
+    """Tests for DynamicTargetsEnhancer class."""
+    
+    @pytest.fixture
+    def dynamic_targets(self):
+        """Create a DynamicTargetsEnhancer instance."""
+        from enhancers.dynamic_targets import DynamicTargetsEnhancer
+        return DynamicTargetsEnhancer()
+    
+    @pytest.mark.asyncio
+    async def test_get_score(self, dynamic_targets):
+        """Test get_score method (should always return 0)."""
+        score = await dynamic_targets.get_score("BTC")
+        assert score == 0.0
+    
+    @pytest.mark.asyncio
+    async def test_calculate_targets_long(self, dynamic_targets):
+        """Test calculate_targets for LONG position."""
+        enhancer_data = {
+            'volatility': {'atr': 1000.0},
+            'volume_profile_levels': {'vah': 51000, 'val': 49000, 'poc': 50000},
+            'liquidation_zones': {
+                'short_zones': [{'price': 52000, 'volume': 80000000}],
+                'long_zones': []
+            },
+            'smc_levels': {'order_blocks': []}
+        }
+        
+        targets = await dynamic_targets.calculate_targets(
+            coin="BTC",
+            entry_price=50000.0,
+            signal_type="LONG",
+            enhancer_data=enhancer_data
+        )
+        
+        assert "entry" in targets
+        assert "stop_loss" in targets
+        assert "take_profit_1" in targets
+        assert "take_profit_2" in targets
+        assert "risk_reward" in targets
+        assert "trailing_stop" in targets
+        assert "reasoning" in targets
+        
+        # Validate relationships
+        assert targets["stop_loss"] < targets["entry"]
+        assert targets["take_profit_1"] > targets["entry"]
+        assert targets["take_profit_2"] > targets["take_profit_1"]
+        assert targets["risk_reward"] >= 2.0  # Minimum R:R
+    
+    @pytest.mark.asyncio
+    async def test_calculate_targets_short(self, dynamic_targets):
+        """Test calculate_targets for SHORT position."""
+        enhancer_data = {
+            'volatility': {'atr': 1000.0},
+            'volume_profile_levels': {'vah': 51000, 'val': 49000, 'poc': 50000},
+            'liquidation_zones': {
+                'short_zones': [],
+                'long_zones': [{'price': 48000, 'volume': 120000000}]
+            },
+            'smc_levels': {'order_blocks': []}
+        }
+        
+        targets = await dynamic_targets.calculate_targets(
+            coin="BTC",
+            entry_price=50000.0,
+            signal_type="SHORT",
+            enhancer_data=enhancer_data
+        )
+        
+        # Validate relationships for SHORT
+        assert targets["stop_loss"] > targets["entry"]
+        assert targets["take_profit_1"] < targets["entry"]
+        assert targets["take_profit_2"] < targets["take_profit_1"]
+        assert targets["risk_reward"] >= 2.0
+    
+    def test_calculate_stop_loss_long(self, dynamic_targets):
+        """Test _calculate_stop_loss for LONG."""
+        sl_data = dynamic_targets._calculate_stop_loss(
+            entry=50000.0,
+            signal_type="LONG",
+            atr=1000.0,
+            order_blocks=[]
+        )
+        
+        assert "price" in sl_data
+        assert "reason" in sl_data
+        assert sl_data["price"] < 50000.0
+    
+    def test_calculate_stop_loss_short(self, dynamic_targets):
+        """Test _calculate_stop_loss for SHORT."""
+        sl_data = dynamic_targets._calculate_stop_loss(
+            entry=50000.0,
+            signal_type="SHORT",
+            atr=1000.0,
+            order_blocks=[]
+        )
+        
+        assert "price" in sl_data
+        assert "reason" in sl_data
+        assert sl_data["price"] > 50000.0
+    
+    def test_calculate_take_profits_long(self, dynamic_targets):
+        """Test _calculate_take_profits for LONG."""
+        tp_data = dynamic_targets._calculate_take_profits(
+            entry=50000.0,
+            stop_loss=48500.0,
+            signal_type="LONG",
+            volume_profile={'vah': 51500, 'val': 48500, 'poc': 50000},
+            liquidation_zones={'short_zones': [{'price': 52500}], 'long_zones': []},
+            atr=1000.0
+        )
+        
+        assert len(tp_data) == 2
+        assert tp_data[0]["price"] > 50000.0
+        assert tp_data[1]["price"] > tp_data[0]["price"]
+
+
+class TestEnhancerManagerWithNewModules:
+    """Tests for EnhancerManager with all 11 modules."""
+    
+    @pytest.fixture
+    def manager(self):
+        """Create an EnhancerManager instance."""
+        from enhancers.enhancer_manager import EnhancerManager
+        return EnhancerManager()
+    
+    @pytest.mark.asyncio
+    async def test_get_total_score_all_modules(self, manager):
+        """Test get_total_score with all 11 modules."""
+        # Mock all enhancers
+        with patch.object(manager.order_flow, 'get_score', return_value=5.0), \
+             patch.object(manager.volume_profile, 'get_score', return_value=3.0), \
+             patch.object(manager.multi_exchange, 'get_score', return_value=2.0), \
+             patch.object(manager.liquidations, 'get_score', return_value=6.0), \
+             patch.object(manager.smart_money, 'get_score', return_value=4.0), \
+             patch.object(manager.wyckoff, 'get_score', return_value=5.0), \
+             patch.object(manager.on_chain, 'get_score', return_value=7.0), \
+             patch.object(manager.whale_tracker, 'get_score', return_value=4.0), \
+             patch.object(manager.funding_advanced, 'get_score', return_value=3.0), \
+             patch.object(manager.volatility, 'get_score', return_value=2.0):
+            
+            total = await manager.get_total_score("BTC", 50000.0)
+            assert total == 41.0  # Sum of all modules
+    
+    @pytest.mark.asyncio
+    async def test_get_extra_data_all_modules(self, manager):
+        """Test get_extra_data with new modules."""
+        mock_on_chain = {"supported": True, "netflow": {}}
+        mock_whale = {"signal": "bullish"}
+        mock_funding = {"current_funding": 0.001}
+        mock_volatility = {"atr": 1000}
+        
+        with patch.object(manager.volume_profile, 'get_levels', return_value={}), \
+             patch.object(manager.multi_exchange, 'get_leader', return_value="Binance"), \
+             patch.object(manager.order_flow, 'get_cvd', return_value=1000000.0), \
+             patch.object(manager.liquidations, 'get_liquidation_zones', return_value={}), \
+             patch.object(manager.smart_money, 'get_smc_levels', return_value={}), \
+             patch.object(manager.wyckoff, 'get_wyckoff_phase', return_value={}), \
+             patch.object(manager.on_chain, 'get_on_chain_data', return_value=mock_on_chain), \
+             patch.object(manager.whale_tracker, 'get_whale_activity', return_value=mock_whale), \
+             patch.object(manager.funding_advanced, 'get_funding_data', return_value=mock_funding), \
+             patch.object(manager.volatility, 'get_volatility_data', return_value=mock_volatility):
+            
+            extra_data = await manager.get_extra_data("BTC", 50000.0)
+            
+            # Check all new fields
+            assert 'on_chain' in extra_data
+            assert 'whale_activity' in extra_data
+            assert 'funding' in extra_data
+            assert 'volatility' in extra_data
+            assert extra_data['on_chain']['supported'] == True
+            assert extra_data['whale_activity']['signal'] == "bullish"
+    
+    @pytest.mark.asyncio
+    async def test_get_dynamic_targets(self, manager):
+        """Test get_dynamic_targets method."""
+        mock_targets = {
+            "entry": 50000.0,
+            "stop_loss": 48500.0,
+            "take_profit_1": 51500.0,
+            "take_profit_2": 53000.0,
+            "risk_reward": 2.0,
+            "trailing_stop": {"enabled": True}
+        }
+        
+        with patch.object(manager, 'get_extra_data', return_value={}), \
+             patch.object(manager.dynamic_targets, 'calculate_targets', return_value=mock_targets):
+            
+            targets = await manager.get_dynamic_targets("BTC", 50000.0, "LONG")
+            
+            assert "entry" in targets
+            assert "stop_loss" in targets
+            assert "take_profit_1" in targets
+            assert "take_profit_2" in targets
+            assert targets["risk_reward"] >= 2.0
+    
+    @pytest.mark.asyncio
+    async def test_module_count(self, manager):
+        """Test that all 11 modules are initialized."""
+        # Check all module instances exist
+        assert hasattr(manager, 'order_flow')
+        assert hasattr(manager, 'volume_profile')
+        assert hasattr(manager, 'multi_exchange')
+        assert hasattr(manager, 'liquidations')
+        assert hasattr(manager, 'smart_money')
+        assert hasattr(manager, 'wyckoff')
+        assert hasattr(manager, 'on_chain')
+        assert hasattr(manager, 'whale_tracker')
+        assert hasattr(manager, 'funding_advanced')
+        assert hasattr(manager, 'volatility')
+        assert hasattr(manager, 'dynamic_targets')
