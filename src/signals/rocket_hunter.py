@@ -160,8 +160,9 @@ class RocketHunterAnalyzer:
     async def fetch_coinlore_gainers(self) -> List[Dict]:
         """
         Получает монеты с CoinLore.
-        14,000+ монет, БЕЗ rate limit!
+        14,000+ монет, без API key.
         Работает в России.
+        Добавлена задержка 0.5 сек между запросами для стабильности.
         """
         await self._ensure_session()
         
@@ -200,7 +201,7 @@ class RocketHunterAnalyzer:
                 logger.warning(f"CoinLore error at start={start}: {e}")
                 break
             
-            # Небольшая задержка между запросами
+            # Задержка между запросами для стабильности
             await asyncio.sleep(0.5)
         
         logger.info(f"CoinLore: fetched {len(all_coins)} coins")
