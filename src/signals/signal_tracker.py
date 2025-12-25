@@ -9,6 +9,10 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, List
 from pathlib import Path
 import logging
+import asyncio
+
+# Import module for historical price checking (allows for easier mocking in tests)
+import api_manager
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +165,9 @@ class SignalTracker:
         """
         Проверить результат предыдущего сигнала для этой монеты.
         
+        Теперь проверяет результат по ИСТОРИЧЕСКИМ ЦЕНАМ за 4 часа после сигнала,
+        а не по текущей цене!
+        
         Возвращает:
         {
             "had_signal": True,
@@ -179,9 +186,9 @@ class SignalTracker:
             # Получить последний pending сигнал для этого user+symbol
             cursor = conn.execute('''
                 SELECT id, direction, entry_price, target1_price, target2_price, 
-                       stop_loss_price, probability, timestamp, result
+                       stop_loss_price, probability, timestamp, result, checked_at, exit_price
                 FROM signals
-                WHERE user_id = ? AND symbol = ? AND result = 'pending'
+                WHERE user_id = ? AND symbol = ?
                 ORDER BY timestamp DESC
                 LIMIT 1
             ''', (user_id, symbol))
@@ -192,42 +199,124 @@ class SignalTracker:
                 return None
             
             signal_id, direction, entry_price, target1_price, target2_price, \
-                stop_loss_price, probability, timestamp_str, result = row
+                stop_loss_price, probability, timestamp_str, result, checked_at_str, exit_price = row
             
             timestamp = datetime.fromisoformat(timestamp_str)
+            checked_at = self._parse_datetime(checked_at_str)
             
-            # Проверяем результат на основе текущей цены
+            # Если сигнал уже проверен (не pending), возвращаем закэшированный результат
+            if result != 'pending' and checked_at:
+                # Используем сохранённую exit_price из БД, или entry_price если exit_price None
+                cached_exit_price = exit_price if exit_price is not None else entry_price
+                return self._format_signal_result(
+                    direction, entry_price, target1_price, target2_price,
+                    stop_loss_price, result, timestamp, cached_exit_price
+                )
+            
+            # Проверяем, созрел ли сигнал (прошло ли 4 часа)
+            time_elapsed = datetime.now() - timestamp
+            hours_elapsed = time_elapsed.total_seconds() / 3600
+            
+            # Если сигнал ещё не созрел (<4 часов), возвращаем "в процессе"
+            if hours_elapsed < 4:
+                return self._format_signal_result(
+                    direction, entry_price, target1_price, target2_price,
+                    stop_loss_price, 'pending', timestamp, current_price
+                )
+            
+            # Сигнал созрел (>4 часов) - проверяем по историческим ценам
+            logger.info(f"Сигнал {signal_id} созрел, проверяем по историческим ценам")
+            
+            # Рассчитываем временной диапазон: created_at → created_at + 4 часа
+            signal_start = timestamp
+            signal_end = timestamp + timedelta(hours=4)
+            
+            from_ts = int(signal_start.timestamp())
+            to_ts = int(signal_end.timestamp())
+            
+            # Получаем исторические цены
+            try:
+                historical_data = asyncio.run(
+                    api_manager.get_historical_prices(symbol, from_ts, to_ts)
+                )
+            except Exception as e:
+                logger.error(f"Ошибка получения исторических цен: {e}")
+                historical_data = None
+            
+            # Если не удалось получить исторические данные, используем текущую цену
+            if not historical_data or not historical_data.get("success"):
+                logger.warning(
+                    f"Не удалось получить исторические данные для {symbol}, "
+                    f"используем текущую цену"
+                )
+                return self._check_with_current_price(
+                    conn, signal_id, direction, entry_price, target1_price,
+                    target2_price, stop_loss_price, timestamp, current_price
+                )
+            
+            # Проверяем результат по историческим ценам
+            max_price = historical_data["max_price"]
+            min_price = historical_data["min_price"]
+            
+            logger.info(
+                f"Исторические цены для {symbol}: "
+                f"min=${min_price:.2f}, max=${max_price:.2f}"
+            )
+            
             target1_reached = False
             target2_reached = False
             stop_hit = False
-            final_result = 'pending'
+            final_result = 'loss'  # По умолчанию loss если цели не достигнуты
+            exit_price = entry_price
             pnl_percent = 0.0
             
             if direction == "long":
-                # Для long сигнала
-                if current_price >= target1_price:
-                    target1_reached = True
-                    final_result = 'win'
-                    pnl_percent = ((current_price - entry_price) / entry_price) * 100
-                    if current_price >= target2_price:
-                        target2_reached = True
-                elif current_price <= stop_loss_price:
+                # Для long: проверяем, был ли задет стоп ПЕРВЫМ
+                if min_price <= stop_loss_price:
+                    # Стоп был задет
                     stop_hit = True
                     final_result = 'loss'
-                    pnl_percent = ((current_price - entry_price) / entry_price) * 100
+                    exit_price = stop_loss_price
+                    pnl_percent = ((stop_loss_price - entry_price) / entry_price) * 100
+                elif max_price >= target1_price:
+                    # Цель достигнута, стоп не задет
+                    target1_reached = True
+                    final_result = 'win'
+                    exit_price = target1_price
+                    pnl_percent = ((target1_price - entry_price) / entry_price) * 100
+                    if max_price >= target2_price:
+                        target2_reached = True
+                        exit_price = target2_price
+                        pnl_percent = ((target2_price - entry_price) / entry_price) * 100
+                else:
+                    # Ни цель, ни стоп не достигнуты за 4 часа
+                    final_result = 'loss'
+                    exit_price = max_price  # Используем максимальную цену
+                    pnl_percent = ((max_price - entry_price) / entry_price) * 100
             
             elif direction == "short":
-                # Для short сигнала
-                if current_price <= target1_price:
-                    target1_reached = True
-                    final_result = 'win'
-                    pnl_percent = ((entry_price - current_price) / entry_price) * 100
-                    if current_price <= target2_price:
-                        target2_reached = True
-                elif current_price >= stop_loss_price:
+                # Для short: проверяем, был ли задет стоп ПЕРВЫМ
+                if max_price >= stop_loss_price:
+                    # Стоп был задет
                     stop_hit = True
                     final_result = 'loss'
-                    pnl_percent = ((entry_price - current_price) / entry_price) * 100
+                    exit_price = stop_loss_price
+                    pnl_percent = ((entry_price - stop_loss_price) / entry_price) * 100
+                elif min_price <= target1_price:
+                    # Цель достигнута, стоп не задет
+                    target1_reached = True
+                    final_result = 'win'
+                    exit_price = target1_price
+                    pnl_percent = ((entry_price - target1_price) / entry_price) * 100
+                    if min_price <= target2_price:
+                        target2_reached = True
+                        exit_price = target2_price
+                        pnl_percent = ((entry_price - target2_price) / entry_price) * 100
+                else:
+                    # Ни цель, ни стоп не достигнуты за 4 часа
+                    final_result = 'loss'
+                    exit_price = min_price  # Используем минимальную цену
+                    pnl_percent = ((entry_price - min_price) / entry_price) * 100
             
             elif direction == "sideways":
                 # Для sideways - проверяем, осталась ли цена в диапазоне
@@ -235,47 +324,166 @@ class SignalTracker:
                 upper_bound = entry_price * (1 + range_percent / 100)
                 lower_bound = entry_price * (1 - range_percent / 100)
                 
-                if lower_bound <= current_price <= upper_bound:
+                # Проверяем, оставались ли ВСЕ цены в диапазоне
+                all_in_range = min_price >= lower_bound and max_price <= upper_bound
+                
+                if all_in_range:
                     final_result = 'win'
                     pnl_percent = 0.5  # Небольшая прибыль за правильный прогноз
                 else:
                     final_result = 'loss'
                     pnl_percent = -0.5
+                
+                exit_price = (min_price + max_price) / 2  # Средняя цена
             
-            # Обновляем результат в БД если изменился
-            if final_result != 'pending':
-                conn.execute('''
-                    UPDATE signals
-                    SET result = ?, exit_price = ?, checked_at = ?
-                    WHERE id = ?
-                ''', (final_result, current_price, datetime.now(), signal_id))
-                conn.commit()
-                logger.info(f"Updated signal {signal_id}: {final_result} with P&L {pnl_percent:.2f}%")
+            # Обновляем результат в БД (кэшируем)
+            conn.execute('''
+                UPDATE signals
+                SET result = ?, exit_price = ?, checked_at = ?
+                WHERE id = ?
+            ''', (final_result, exit_price, datetime.now(), signal_id))
+            conn.commit()
             
-            # Расчёт времени с момента сигнала
-            time_elapsed = datetime.now() - timestamp
-            hours = int(time_elapsed.total_seconds() // 3600)
-            minutes = int((time_elapsed.total_seconds() % 3600) // 60)
+            logger.info(
+                f"Обновлен сигнал {signal_id}: {final_result} "
+                f"with P&L {pnl_percent:.2f}% (historical check)"
+            )
             
-            if hours > 0:
-                time_elapsed_str = f"{hours}ч {minutes}мин"
+            return self._format_signal_result(
+                direction, entry_price, target1_price, target2_price,
+                stop_loss_price, final_result, timestamp, exit_price,
+                target1_reached, target2_reached, stop_hit, pnl_percent
+            )
+    
+    def _check_with_current_price(
+        self,
+        conn,
+        signal_id: int,
+        direction: str,
+        entry_price: float,
+        target1_price: float,
+        target2_price: float,
+        stop_loss_price: float,
+        timestamp: datetime,
+        current_price: float
+    ) -> Dict:
+        """Fallback: проверка по текущей цене (старая логика)."""
+        target1_reached = False
+        target2_reached = False
+        stop_hit = False
+        final_result = 'pending'
+        pnl_percent = 0.0
+        
+        if direction == "long":
+            if current_price >= target1_price:
+                target1_reached = True
+                final_result = 'win'
+                pnl_percent = ((current_price - entry_price) / entry_price) * 100
+                if current_price >= target2_price:
+                    target2_reached = True
+            elif current_price <= stop_loss_price:
+                stop_hit = True
+                final_result = 'loss'
+                pnl_percent = ((current_price - entry_price) / entry_price) * 100
+        
+        elif direction == "short":
+            if current_price <= target1_price:
+                target1_reached = True
+                final_result = 'win'
+                pnl_percent = ((entry_price - current_price) / entry_price) * 100
+                if current_price <= target2_price:
+                    target2_reached = True
+            elif current_price >= stop_loss_price:
+                stop_hit = True
+                final_result = 'loss'
+                pnl_percent = ((entry_price - current_price) / entry_price) * 100
+        
+        elif direction == "sideways":
+            range_percent = 1.0
+            upper_bound = entry_price * (1 + range_percent / 100)
+            lower_bound = entry_price * (1 - range_percent / 100)
+            
+            if lower_bound <= current_price <= upper_bound:
+                final_result = 'win'
+                pnl_percent = 0.5
             else:
-                time_elapsed_str = f"{minutes}мин"
-            
-            return {
-                "had_signal": True,
-                "direction": direction,
-                "entry_price": entry_price,
-                "target1_price": target1_price,
-                "target2_price": target2_price,
-                "stop_loss_price": stop_loss_price,
-                "target1_reached": target1_reached,
-                "target2_reached": target2_reached,
-                "stop_hit": stop_hit,
-                "result": final_result,
-                "pnl_percent": pnl_percent,
-                "time_elapsed": time_elapsed_str
-            }
+                final_result = 'loss'
+                pnl_percent = -0.5
+        
+        # Обновляем результат в БД если изменился
+        if final_result != 'pending':
+            conn.execute('''
+                UPDATE signals
+                SET result = ?, exit_price = ?, checked_at = ?
+                WHERE id = ?
+            ''', (final_result, current_price, datetime.now(), signal_id))
+            conn.commit()
+            logger.info(
+                f"Updated signal {signal_id}: {final_result} "
+                f"with P&L {pnl_percent:.2f}% (current price fallback)"
+            )
+        
+        return self._format_signal_result(
+            direction, entry_price, target1_price, target2_price,
+            stop_loss_price, final_result, timestamp, current_price,
+            target1_reached, target2_reached, stop_hit, pnl_percent
+        )
+    
+    def _format_signal_result(
+        self,
+        direction: str,
+        entry_price: float,
+        target1_price: float,
+        target2_price: float,
+        stop_loss_price: float,
+        result: str,
+        timestamp: datetime,
+        exit_price: float,
+        target1_reached: bool = False,
+        target2_reached: bool = False,
+        stop_hit: bool = False,
+        pnl_percent: float = 0.0
+    ) -> Dict:
+        """Форматировать результат проверки сигнала."""
+        # Расчёт времени с момента сигнала
+        time_elapsed = datetime.now() - timestamp
+        hours = int(time_elapsed.total_seconds() // 3600)
+        minutes = int((time_elapsed.total_seconds() % 3600) // 60)
+        
+        if hours > 0:
+            time_elapsed_str = f"{hours}ч {minutes}мин"
+        else:
+            time_elapsed_str = f"{minutes}мин"
+        
+        # Для pending сигналов пересчитываем флаги на основе текущего состояния
+        if result == 'pending':
+            if direction == "long":
+                target1_reached = exit_price >= target1_price
+                target2_reached = exit_price >= target2_price
+                stop_hit = exit_price <= stop_loss_price
+                if target1_reached or target2_reached or stop_hit:
+                    pnl_percent = ((exit_price - entry_price) / entry_price) * 100
+            elif direction == "short":
+                target1_reached = exit_price <= target1_price
+                target2_reached = exit_price <= target2_price
+                stop_hit = exit_price >= stop_loss_price
+                if target1_reached or target2_reached or stop_hit:
+                    pnl_percent = ((entry_price - exit_price) / entry_price) * 100
+        
+        return {
+            "had_signal": True,
+            "direction": direction,
+            "entry_price": entry_price,
+            "target1_price": target1_price,
+            "target2_price": target2_price,
+            "stop_loss_price": stop_loss_price,
+            "target1_reached": target1_reached,
+            "target2_reached": target2_reached,
+            "stop_hit": stop_hit,
+            "result": result,
+            "pnl_percent": pnl_percent,
+            "time_elapsed": time_elapsed_str
+        }
     
     def get_user_stats(self, user_id: int) -> Dict:
         """

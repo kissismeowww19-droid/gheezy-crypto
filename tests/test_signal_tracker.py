@@ -9,6 +9,7 @@ from pathlib import Path
 import tempfile
 import sys
 import os
+from unittest.mock import patch, AsyncMock
 
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -32,6 +33,16 @@ class TestSignalTracker:
     def tracker(self, temp_db):
         """Create a tracker instance with temporary database."""
         return SignalTracker(db_path=temp_db)
+    
+    def _make_signal_old(self, tracker, signal_id, hours_ago=5):
+        """Helper to make a signal appear older than it is."""
+        old_timestamp = datetime.now() - timedelta(hours=hours_ago)
+        with sqlite3.connect(tracker.db_path) as conn:
+            conn.execute(
+                'UPDATE signals SET timestamp = ? WHERE id = ?',
+                (old_timestamp.isoformat(), signal_id)
+            )
+            conn.commit()
     
     def test_initialization(self, tracker, temp_db):
         """Test that tracker initializes correctly."""
@@ -113,9 +124,9 @@ class TestSignalTracker:
         assert result is None
     
     def test_check_previous_signal_long_win(self, tracker):
-        """Test checking a long signal that wins."""
+        """Test checking a long signal that wins (fallback to current price)."""
         # Save a long signal
-        tracker.save_signal(
+        signal = tracker.save_signal(
             user_id=123,
             symbol="BTC",
             direction="long",
@@ -126,12 +137,19 @@ class TestSignalTracker:
             probability=65.0
         )
         
-        # Check with price at target1 (win)
-        result = tracker.check_previous_signal(
-            user_id=123,
-            symbol="BTC",
-            current_price=50750.0
-        )
+        # Make signal old enough (>4 hours)
+        self._make_signal_old(tracker, signal.id, hours_ago=5)
+        
+        # Mock API to fail, forcing fallback to current price
+        with patch('api_manager.get_historical_prices', new_callable=AsyncMock) as mock_api:
+            mock_api.return_value = {"success": False}
+            
+            # Check with price at target1 (win)
+            result = tracker.check_previous_signal(
+                user_id=123,
+                symbol="BTC",
+                current_price=50750.0
+            )
         
         assert result is not None
         assert result["had_signal"] is True
@@ -144,9 +162,9 @@ class TestSignalTracker:
         assert result["pnl_percent"] == pytest.approx(1.5, rel=0.01)
     
     def test_check_previous_signal_long_loss(self, tracker):
-        """Test checking a long signal that loses."""
+        """Test checking a long signal that loses (fallback to current price)."""
         # Save a long signal
-        tracker.save_signal(
+        signal = tracker.save_signal(
             user_id=123,
             symbol="BTC",
             direction="long",
@@ -157,12 +175,19 @@ class TestSignalTracker:
             probability=65.0
         )
         
-        # Check with price at stop loss (loss)
-        result = tracker.check_previous_signal(
-            user_id=123,
-            symbol="BTC",
-            current_price=49700.0
-        )
+        # Make signal old enough (>4 hours)
+        self._make_signal_old(tracker, signal.id, hours_ago=5)
+        
+        # Mock API to fail, forcing fallback to current price
+        with patch('api_manager.get_historical_prices', new_callable=AsyncMock) as mock_api:
+            mock_api.return_value = {"success": False}
+            
+            # Check with price at stop loss (loss)
+            result = tracker.check_previous_signal(
+                user_id=123,
+                symbol="BTC",
+                current_price=49700.0
+            )
         
         assert result is not None
         assert result["had_signal"] is True
@@ -172,9 +197,9 @@ class TestSignalTracker:
         assert result["pnl_percent"] < 0
     
     def test_check_previous_signal_short_win(self, tracker):
-        """Test checking a short signal that wins."""
+        """Test checking a short signal that wins (fallback to current price)."""
         # Save a short signal
-        tracker.save_signal(
+        signal = tracker.save_signal(
             user_id=456,
             symbol="ETH",
             direction="short",
@@ -185,12 +210,19 @@ class TestSignalTracker:
             probability=70.0
         )
         
-        # Check with price at target1 (win)
-        result = tracker.check_previous_signal(
-            user_id=456,
-            symbol="ETH",
-            current_price=2955.0
-        )
+        # Make signal old enough (>4 hours)
+        self._make_signal_old(tracker, signal.id, hours_ago=5)
+        
+        # Mock API to fail, forcing fallback to current price
+        with patch('api_manager.get_historical_prices', new_callable=AsyncMock) as mock_api:
+            mock_api.return_value = {"success": False}
+            
+            # Check with price at target1 (win)
+            result = tracker.check_previous_signal(
+                user_id=456,
+                symbol="ETH",
+                current_price=2955.0
+            )
         
         assert result is not None
         assert result["direction"] == "short"
@@ -199,9 +231,9 @@ class TestSignalTracker:
         assert result["pnl_percent"] == pytest.approx(1.5, rel=0.01)
     
     def test_check_previous_signal_short_loss(self, tracker):
-        """Test checking a short signal that loses."""
+        """Test checking a short signal that loses (fallback to current price)."""
         # Save a short signal
-        tracker.save_signal(
+        signal = tracker.save_signal(
             user_id=456,
             symbol="ETH",
             direction="short",
@@ -212,12 +244,19 @@ class TestSignalTracker:
             probability=70.0
         )
         
-        # Check with price at stop loss (loss)
-        result = tracker.check_previous_signal(
-            user_id=456,
-            symbol="ETH",
-            current_price=3018.0
-        )
+        # Make signal old enough (>4 hours)
+        self._make_signal_old(tracker, signal.id, hours_ago=5)
+        
+        # Mock API to fail, forcing fallback to current price
+        with patch('api_manager.get_historical_prices', new_callable=AsyncMock) as mock_api:
+            mock_api.return_value = {"success": False}
+            
+            # Check with price at stop loss (loss)
+            result = tracker.check_previous_signal(
+                user_id=456,
+                symbol="ETH",
+                current_price=3018.0
+            )
         
         assert result is not None
         assert result["stop_hit"] is True
@@ -250,9 +289,9 @@ class TestSignalTracker:
         assert result["stop_hit"] is False
     
     def test_check_previous_signal_sideways_win(self, tracker):
-        """Test checking a sideways signal that wins."""
+        """Test checking a sideways signal that wins (fallback to current price)."""
         # Save a sideways signal
-        tracker.save_signal(
+        signal = tracker.save_signal(
             user_id=789,
             symbol="TON",
             direction="sideways",
@@ -263,12 +302,19 @@ class TestSignalTracker:
             probability=55.0
         )
         
-        # Check with price in range (win)
-        result = tracker.check_previous_signal(
-            user_id=789,
-            symbol="TON",
-            current_price=5.0
-        )
+        # Make signal old enough (>4 hours)
+        self._make_signal_old(tracker, signal.id, hours_ago=5)
+        
+        # Mock API to fail, forcing fallback to current price
+        with patch('api_manager.get_historical_prices', new_callable=AsyncMock) as mock_api:
+            mock_api.return_value = {"success": False}
+            
+            # Check with price in range (win)
+            result = tracker.check_previous_signal(
+                user_id=789,
+                symbol="TON",
+                current_price=5.0
+            )
         
         assert result is not None
         assert result["direction"] == "sideways"
@@ -290,7 +336,7 @@ class TestSignalTracker:
         user_id = 123
         
         # Save some signals
-        tracker.save_signal(
+        signal1 = tracker.save_signal(
             user_id=user_id,
             symbol="BTC",
             direction="long",
@@ -301,7 +347,7 @@ class TestSignalTracker:
             probability=65.0
         )
         
-        tracker.save_signal(
+        signal2 = tracker.save_signal(
             user_id=user_id,
             symbol="ETH",
             direction="short",
@@ -312,9 +358,17 @@ class TestSignalTracker:
             probability=70.0
         )
         
-        # Trigger wins and losses
-        tracker.check_previous_signal(user_id, "BTC", 50750.0)  # Win
-        tracker.check_previous_signal(user_id, "ETH", 3018.0)  # Loss
+        # Make signals old enough
+        self._make_signal_old(tracker, signal1.id, hours_ago=5)
+        self._make_signal_old(tracker, signal2.id, hours_ago=5)
+        
+        # Mock API to fail, forcing fallback to current price
+        with patch('api_manager.get_historical_prices', new_callable=AsyncMock) as mock_api:
+            mock_api.return_value = {"success": False}
+            
+            # Trigger wins and losses
+            tracker.check_previous_signal(user_id, "BTC", 50750.0)  # Win
+            tracker.check_previous_signal(user_id, "ETH", 3018.0)  # Loss
         
         stats = tracker.get_user_stats(user_id)
         
