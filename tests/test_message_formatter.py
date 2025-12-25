@@ -40,7 +40,6 @@ class TestCompactMessageFormatter:
             confidence=75.0,
             timeframe="4H",
             levels={
-                "poc": 88176.0,
                 "resistance": 88659.0,
                 "support": 86850.0
             },
@@ -61,7 +60,8 @@ class TestCompactMessageFormatter:
         assert "1:2.3" in message
         assert "4H" in message
         assert "75%" in message
-        assert "POC" in message
+        assert "Сопр" in message  # Changed from "POC" to "Сопр" (resistance)
+        assert "Подд" in message  # Support
         assert "Wyckoff" in message
         assert "Киты" in message
     
@@ -244,7 +244,7 @@ class TestCompactMessageFormatter:
         assert "$85,800" in smc_reason["value"]
     
     def test_get_top_reasons_limit(self, formatter):
-        """Test that only top 4 reasons are returned."""
+        """Test that only top N reasons are returned based on limit."""
         enhancer_data = {
             "wyckoff": {"phase": "accumulation", "confidence": 0.65},
             "whale_activity": {"signal": "bullish"},
@@ -258,6 +258,117 @@ class TestCompactMessageFormatter:
         
         # Should return maximum 4 reasons
         assert len(reasons) <= 4
+    
+    def test_get_top_reasons_fear_greed(self, formatter):
+        """Test extracting Fear & Greed Index reason."""
+        enhancer_data = {
+            "fear_greed": {
+                "value": 23,
+                "value_classification": "Fear"
+            }
+        }
+        
+        reasons = formatter._get_top_reasons(enhancer_data)
+        
+        fg_reason = next((r for r in reasons if r["name"] == "F&G"), None)
+        assert fg_reason is not None
+        assert fg_reason["icon"] == "😱"  # Extreme fear emoji
+        assert "23" in fg_reason["value"]
+        assert "Fear" in fg_reason["value"]
+    
+    def test_get_top_reasons_rsi(self, formatter):
+        """Test extracting RSI value reason."""
+        enhancer_data = {
+            "rsi": {
+                "value": 44.9
+            }
+        }
+        
+        reasons = formatter._get_top_reasons(enhancer_data)
+        
+        rsi_reason = next((r for r in reasons if r["name"] == "RSI"), None)
+        assert rsi_reason is not None
+        assert rsi_reason["icon"] == "📊"
+        assert "44.9" in rsi_reason["value"]
+    
+    def test_get_top_reasons_macd(self, formatter):
+        """Test extracting MACD direction reason."""
+        enhancer_data = {
+            "macd": {
+                "signal": "bullish"
+            }
+        }
+        
+        reasons = formatter._get_top_reasons(enhancer_data)
+        
+        macd_reason = next((r for r in reasons if r["name"] == "MACD"), None)
+        assert macd_reason is not None
+        assert macd_reason["icon"] == "📈"
+        assert "bullish" in macd_reason["value"]
+    
+    def test_get_top_reasons_tradingview(self, formatter):
+        """Test extracting TradingView rating reason."""
+        enhancer_data = {
+            "tradingview": {
+                "summary": {
+                    "RECOMMENDATION": "STRONG_BUY"
+                }
+            }
+        }
+        
+        reasons = formatter._get_top_reasons(enhancer_data)
+        
+        tv_reason = next((r for r in reasons if r["name"] == "TV"), None)
+        assert tv_reason is not None
+        assert tv_reason["icon"] == "📺"
+        assert "BUY" in tv_reason["value"]
+    
+    def test_liquidation_price_formatting_small_coins(self, formatter):
+        """Test that liquidation prices are formatted correctly for small coins (TON, XRP)."""
+        # Test TON price (~$1.5)
+        enhancer_data_ton = {
+            "liquidation_zones": {
+                "nearest_short": {
+                    "price": 1.5
+                }
+            },
+            "current_price": 1.4
+        }
+        
+        reasons = formatter._get_top_reasons(enhancer_data_ton)
+        liq_reason = next((r for r in reasons if r["name"] == "Магнит"), None)
+        assert liq_reason is not None
+        assert "$1.50" in liq_reason["value"]  # Should be $1.50, not $0.0K
+        
+        # Test XRP price (~$1.86)
+        enhancer_data_xrp = {
+            "liquidation_zones": {
+                "nearest_short": {
+                    "price": 1.86
+                }
+            },
+            "current_price": 1.80
+        }
+        
+        reasons = formatter._get_top_reasons(enhancer_data_xrp)
+        liq_reason = next((r for r in reasons if r["name"] == "Магнит"), None)
+        assert liq_reason is not None
+        assert "$1.86" in liq_reason["value"]  # Should be $1.86, not $0.0K
+        
+        # Test BTC price (~$90K)
+        enhancer_data_btc = {
+            "liquidation_zones": {
+                "nearest_short": {
+                    "price": 90700.0
+                }
+            },
+            "current_price": 88000.0
+        }
+        
+        reasons = formatter._get_top_reasons(enhancer_data_btc)
+        liq_reason = next((r for r in reasons if r["name"] == "Магнит"), None)
+        assert liq_reason is not None
+        assert "$90.7K" in liq_reason["value"]  # Should be $90.7K for large prices
     
     def test_format_with_enhancer_data(self, formatter):
         """Test formatting with enhancer_data instead of reasons."""
