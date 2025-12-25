@@ -207,6 +207,79 @@ class TestCompactMessageFormatter:
         assert "90.7K" in liq_reason["value"]
         assert "short liq" in liq_reason["value"]
     
+    def test_get_top_reasons_liquidation_float_format(self, formatter):
+        """Test extracting liquidation magnet reason when data is float instead of dict."""
+        enhancer_data = {
+            "liquidation_zones": {
+                "nearest_short": 90372.0  # Direct float value instead of {"price": 90372.0}
+            },
+            "current_price": 88000.0
+        }
+        
+        reasons = formatter._get_top_reasons(enhancer_data)
+        
+        liq_reason = next((r for r in reasons if r["name"] == "Магнит"), None)
+        assert liq_reason is not None
+        assert liq_reason["icon"] == "💧"
+        assert "90.4K" in liq_reason["value"]
+        assert "short liq" in liq_reason["value"]
+    
+    def test_get_top_reasons_liquidation_both_formats(self, formatter):
+        """Test extracting liquidation magnet when both short and long are floats."""
+        enhancer_data = {
+            "liquidation_zones": {
+                "nearest_short": 90372.0,  # Float format
+                "nearest_long": 85000.0    # Float format
+            },
+            "current_price": 88000.0
+        }
+        
+        reasons = formatter._get_top_reasons(enhancer_data)
+        
+        liq_reason = next((r for r in reasons if r["name"] == "Магнит"), None)
+        assert liq_reason is not None
+        assert liq_reason["icon"] == "💧"
+        # Should pick the closer one (85000 is 3000 away, 90372 is 2372 away)
+        assert "90.4K" in liq_reason["value"]
+        assert "short liq" in liq_reason["value"]
+    
+    def test_get_top_reasons_liquidation_mixed_formats(self, formatter):
+        """Test extracting liquidation magnet when one is dict and one is float."""
+        enhancer_data = {
+            "liquidation_zones": {
+                "nearest_short": {"price": 90700.0},  # Dict format
+                "nearest_long": 85000.0               # Float format
+            },
+            "current_price": 88000.0
+        }
+        
+        reasons = formatter._get_top_reasons(enhancer_data)
+        
+        liq_reason = next((r for r in reasons if r["name"] == "Магнит"), None)
+        assert liq_reason is not None
+        assert liq_reason["icon"] == "💧"
+        # Should pick the closer one (85000 is 3000 away, 90700 is 2700 away)
+        assert "90.7K" in liq_reason["value"]
+        assert "short liq" in liq_reason["value"]
+    
+    def test_normalize_liquidation_zone(self, formatter):
+        """Test the _normalize_liquidation_zone helper method."""
+        # Test float input
+        result = formatter._normalize_liquidation_zone(90372.0)
+        assert result == {"price": 90372.0}
+        
+        # Test int input
+        result = formatter._normalize_liquidation_zone(90000)
+        assert result == {"price": 90000}
+        
+        # Test dict input (should return as-is)
+        result = formatter._normalize_liquidation_zone({"price": 90372.0})
+        assert result == {"price": 90372.0}
+        
+        # Test None input
+        result = formatter._normalize_liquidation_zone(None)
+        assert result is None
+    
     def test_get_top_reasons_funding(self, formatter):
         """Test extracting funding rate reason."""
         enhancer_data = {
