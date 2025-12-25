@@ -170,6 +170,11 @@ class AISignalAnalyzer:
     # Sideways display constants
     SIDEWAYS_RANGE_PERCENT = 1.0  # Диапазон для боковика (+/-1.0%)
     
+    # Signal caching constants
+    SIGNAL_CACHE_TTL = 300  # 5 минут - TTL для кэша сигналов (предотвращает повторный анализ)
+    SUPPORT_SL_OFFSET = 0.995  # Offset для стоп-лосса ниже поддержки (0.5%)
+    RESISTANCE_SL_OFFSET = 1.005  # Offset для стоп-лосса выше сопротивления (0.5%)
+    
     # Supported coins for AI signals
     SUPPORTED_SIGNAL_COINS = {"BTC", "ETH", "TON", "SOL", "XRP"}
     
@@ -7096,7 +7101,7 @@ class AISignalAnalyzer:
             if last_signal:
                 # Проверяем, не устарели ли данные (макс 5 минут)
                 age = time.time() - last_signal.get('timestamp', 0)
-                if age < 300:  # 5 минут
+                if age < self.SIGNAL_CACHE_TTL:
                     # Используем сохраненные данные вместо повторного анализа
                     signal_data = last_signal['signal_data']
                     market_data = last_signal['market_data']
@@ -7125,7 +7130,7 @@ class AISignalAnalyzer:
                             tp2_price = current_price * (1 + 2.0 / 100)
                         
                         if supports:
-                            sl_price = supports[0]['price'] * 0.995  # Немного ниже поддержки
+                            sl_price = supports[0]['price'] * self.SUPPORT_SL_OFFSET  # Немного ниже поддержки
                         else:
                             sl_price = current_price * (1 - 0.6 / 100)
                     else:  # short
@@ -7138,7 +7143,7 @@ class AISignalAnalyzer:
                             tp2_price = current_price * (1 - 2.0 / 100)
                         
                         if resistances:
-                            sl_price = resistances[0]['price'] * 1.005  # Немного выше сопротивления
+                            sl_price = resistances[0]['price'] * self.RESISTANCE_SL_OFFSET  # Немного выше сопротивления
                         else:
                             sl_price = current_price * (1 + 0.6 / 100)
                     
