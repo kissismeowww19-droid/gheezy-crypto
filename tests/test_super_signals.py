@@ -4,7 +4,7 @@ Validates the structure and basic functionality of the SuperSignals class.
 """
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 
 def test_super_signals_class_exists():

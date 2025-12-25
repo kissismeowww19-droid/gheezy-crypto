@@ -101,7 +101,7 @@ class SuperSignals:
         if self.pairs_loaded:
             return
 
-        results = await asyncio.gather(
+        await asyncio.gather(
             self._load_binance_pairs(),
             self._load_bybit_pairs(),
             self._load_mexc_pairs(),
@@ -354,7 +354,7 @@ class SuperSignals:
         interval_map = {"1h": "1h", "4h": "4h", "1d": "1d"}
         gate_interval = interval_map.get(interval, "1h")
         
-        url = f"https://api.gateio.ws/api/v4/spot/candlesticks"
+        url = "https://api.gateio.ws/api/v4/spot/candlesticks"
         params = {
             "currency_pair": f"{symbol}_USDT",
             "interval": gate_interval,
@@ -758,7 +758,7 @@ class SuperSignals:
                     if funding_data:
                         funding_rate = funding_data.get("funding_rate")
                         break
-                except:
+                except Exception:
                     continue
 
             # === Расчёт индикаторов ===
@@ -1093,7 +1093,6 @@ class SuperSignals:
         current_price = analysis["current_price"]
         support = analysis["support"]
         resistance = analysis["resistance"]
-        atr = analysis["atr"]
         direction = analysis["direction"]
 
         if direction == "long":
