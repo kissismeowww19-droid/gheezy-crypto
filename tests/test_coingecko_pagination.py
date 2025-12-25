@@ -52,6 +52,7 @@ class TestCoinGeckoPagination:
         # Mock settings without API key (free API)
         with patch('signals.smart_signals.settings') as mock_settings:
             mock_settings.coingecko_api_key = ""
+            mock_settings.smart_signals_scan_limit = 500
             
             # Mock asyncio.sleep to avoid delays
             with patch('asyncio.sleep', new_callable=AsyncMock):
@@ -66,12 +67,13 @@ class TestCoinGeckoPagination:
             assert coins[499]["id"] == "coin499"
     
     @pytest.mark.asyncio
-    async def test_scan_all_coins_with_pro_api(self):
-        """Test that Pro API uses single request with 500 coins."""
+    async def test_scan_all_coins_with_demo_api(self):
+        """Test that Demo API key also uses pagination with 250 per_page (2 requests for 500 coins)."""
         analyzer = SmartSignalAnalyzer()
         
-        # Create mock response for single page with 500 coins
-        all_coins = [{"id": f"coin{i}", "symbol": f"SYM{i}", "current_price": 100 + i} for i in range(500)]
+        # Create mock responses for two pages (Demo API also has 250 per_page limit)
+        page1_coins = [{"id": f"coin{i}", "symbol": f"SYM{i}", "current_price": 100 + i} for i in range(250)]
+        page2_coins = [{"id": f"coin{i}", "symbol": f"SYM{i}", "current_price": 100 + i} for i in range(250, 500)]
         
         call_count = [0]
         
@@ -79,8 +81,12 @@ class TestCoinGeckoPagination:
         async def mock_get(*args, **kwargs):
             call_count[0] += 1
             mock_resp = AsyncMock()
-            mock_resp.status = 200
-            mock_resp.json = AsyncMock(return_value=all_coins)
+            if call_count[0] == 1:
+                mock_resp.status = 200
+                mock_resp.json = AsyncMock(return_value=page1_coins)
+            else:
+                mock_resp.status = 200
+                mock_resp.json = AsyncMock(return_value=page2_coins)
             yield mock_resp
         
         # Create mock session
@@ -91,20 +97,23 @@ class TestCoinGeckoPagination:
         # Set the session directly
         analyzer.session = mock_session
         
-        # Mock settings with API key (Pro API)
+        # Mock settings with API key (Demo API)
         with patch('signals.smart_signals.settings') as mock_settings:
-            mock_settings.coingecko_api_key = "test_pro_api_key"
+            mock_settings.coingecko_api_key = "test_demo_api_key"
+            mock_settings.smart_signals_scan_limit = 500
             
-            # Execute the scan
-            coins = await analyzer.scan_all_coins()
+            # Mock asyncio.sleep to avoid delays
+            with patch('asyncio.sleep', new_callable=AsyncMock):
+                # Execute the scan
+                coins = await analyzer.scan_all_coins()
             
             # Verify we got all 500 coins
             assert len(coins) == 500
             assert coins[0]["id"] == "coin0"
             assert coins[499]["id"] == "coin499"
             
-            # Verify get was called only once (Pro API single request)
-            assert call_count[0] == 1
+            # Verify get was called twice (Demo API also uses pagination)
+            assert call_count[0] == 2
     
     @pytest.mark.asyncio
     async def test_scan_all_coins_handles_api_error(self):
@@ -138,6 +147,7 @@ class TestCoinGeckoPagination:
         # Mock settings without API key
         with patch('signals.smart_signals.settings') as mock_settings:
             mock_settings.coingecko_api_key = ""
+            mock_settings.smart_signals_scan_limit = 500
             
             # Mock asyncio.sleep to avoid delays
             with patch('asyncio.sleep', new_callable=AsyncMock):
@@ -184,6 +194,7 @@ class TestCoinGeckoPagination:
         # Mock settings without API key
         with patch('signals.smart_signals.settings') as mock_settings:
             mock_settings.coingecko_api_key = ""
+            mock_settings.smart_signals_scan_limit = 500
             
             # Mock asyncio.sleep to avoid actual delays in tests
             with patch('asyncio.sleep', new_callable=AsyncMock):
@@ -227,6 +238,7 @@ class TestCoinGeckoPagination:
         # Mock settings without API key
         with patch('signals.smart_signals.settings') as mock_settings:
             mock_settings.coingecko_api_key = ""
+            mock_settings.smart_signals_scan_limit = 500
             
             # Mock asyncio.sleep to avoid delays
             with patch('asyncio.sleep', new_callable=AsyncMock):

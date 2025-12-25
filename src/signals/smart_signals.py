@@ -134,6 +134,9 @@ class SmartSignalAnalyzer:
     # Кэш невалидных символов
     INVALID_SYMBOL_CACHE_TTL = 3600  # 1 час
     
+    # Минимальная длина API ключа CoinGecko
+    MIN_API_KEY_LENGTH = 5  # Короче этого значения - считаем пустым
+    
     def __init__(self):
         self.exchanges = {
             "okx": OKXClient(),
@@ -234,6 +237,9 @@ class SmartSignalAnalyzer:
         """
         Сканирует все монеты из CoinGecko API с пагинацией.
         
+        Бесплатный API ограничивает per_page до 250, поэтому
+        для получения 500 монет делаем 2 запроса.
+        
         Returns:
             Список монет с базовой информацией
         """
@@ -242,13 +248,17 @@ class SmartSignalAnalyzer:
         all_coins = []
         # Читаем лимит динамически из settings (не из class variable)
         scan_limit = getattr(settings, 'smart_signals_scan_limit', 500)
-        # CoinGecko бесплатный API ограничивает per_page до 250
+        
+        # Бесплатный CoinGecko API ограничивает per_page до 250
+        # НЕ меняем это значение даже если есть API ключ (Demo ключ тоже ограничен)
         max_per_page = 250
         
         headers = {}
-        if hasattr(settings, 'coingecko_api_key') and settings.coingecko_api_key:
-            headers["X-CG-Pro-API-Key"] = settings.coingecko_api_key
-            max_per_page = 500  # Pro API поддерживает больше
+        # Добавляем Demo API ключ если есть (увеличивает rate limit, но НЕ per_page)
+        api_key = getattr(settings, 'coingecko_api_key', None)
+        if api_key and len(api_key) > self.MIN_API_KEY_LENGTH:  # Проверяем что ключ не пустой
+            headers["x-cg-demo-api-key"] = api_key
+            logger.info("Using CoinGecko Demo API key")
         
         total_pages = (scan_limit + max_per_page - 1) // max_per_page
         logger.info(f"Starting scan with limit={scan_limit}, max_per_page={max_per_page}, total_pages={total_pages}")
@@ -1014,6 +1024,7 @@ class SmartSignalAnalyzer:
                 text += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         
         text += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        text += "📊 Данные: CoinGecko\n"
         text += "⏱️ Следующее обновление: по запросу\n"
         text += "⚠️ Не является финансовым советом"
         
