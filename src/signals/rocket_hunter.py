@@ -516,7 +516,8 @@ class RocketHunterAnalyzer:
         # Рассчитываем scores для монет (с ограничением)
         scored_coins = []
         
-        semaphore = asyncio.Semaphore(10)
+        # Увеличен лимит для лучшей производительности при сканировании 2000-3000 монет
+        semaphore = asyncio.Semaphore(25)
         max_coins_to_analyze = min(len(filtered_coins), self.MAX_ANALYZE)
         
         async def score_coin_with_limit(coin):

@@ -31,17 +31,17 @@ async def test_is_valid_symbol():
     analyzer = RocketHunterAnalyzer()
     
     # Valid symbols
-    assert analyzer._is_valid_symbol("BTC") == True
-    assert analyzer._is_valid_symbol("ETH") == True
-    assert analyzer._is_valid_symbol("NEWCOIN") == True
+    assert analyzer._is_valid_symbol("BTC")
+    assert analyzer._is_valid_symbol("ETH")
+    assert analyzer._is_valid_symbol("NEWCOIN")
     
     # Invalid symbols
-    assert analyzer._is_valid_symbol("USDT") == False  # Stablecoin
-    assert analyzer._is_valid_symbol("WBTC") == False  # Wrapped
-    assert analyzer._is_valid_symbol("BTC.B") == False  # Has dot
-    assert analyzer._is_valid_symbol("币安人生") == False  # Non-ASCII
-    assert analyzer._is_valid_symbol("TOO_LONG") == False  # Has underscore
-    assert analyzer._is_valid_symbol("") == False  # Empty
+    assert not analyzer._is_valid_symbol("USDT")  # Stablecoin
+    assert not analyzer._is_valid_symbol("WBTC")  # Wrapped
+    assert not analyzer._is_valid_symbol("BTC.B")  # Has dot
+    assert not analyzer._is_valid_symbol("币安人生")  # Non-ASCII
+    assert not analyzer._is_valid_symbol("TOO_LONG")  # Has underscore
+    assert not analyzer._is_valid_symbol("")  # Empty
     
     await analyzer.close()
 
@@ -81,12 +81,12 @@ async def test_check_bollinger_breakout():
     
     # Normal prices within bands
     candles = [{"close": 100 + i} for i in range(20)]
-    assert analyzer._check_bollinger_breakout(candles) == False
+    assert not analyzer._check_bollinger_breakout(candles)
     
     # Breakout above upper band
     candles = [{"close": 100} for _ in range(19)]
     candles.append({"close": 200})  # Sudden spike
-    assert analyzer._check_bollinger_breakout(candles) == True
+    assert analyzer._check_bollinger_breakout(candles)
     
     await analyzer.close()
 
@@ -117,12 +117,12 @@ async def test_check_oi_growing():
     # Growing volume (proxy for OI)
     candles = [{"volume": 100} for _ in range(5)]
     candles.extend([{"volume": 150} for _ in range(5)])
-    assert analyzer._check_oi_growing(candles) == True
+    assert analyzer._check_oi_growing(candles)
     
     # Declining volume
     candles = [{"volume": 150} for _ in range(5)]
     candles.extend([{"volume": 100} for _ in range(5)])
-    assert analyzer._check_oi_growing(candles) == False
+    assert not analyzer._check_oi_growing(candles)
     
     await analyzer.close()
 
