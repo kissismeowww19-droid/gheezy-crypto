@@ -6584,7 +6584,24 @@ class AISignalAnalyzer:
         probability = signal_data.get('probability', 50.0)
         current_price = market_data['price_usd']
         
-        # Рассчитываем TP и SL
+        # Получаем enhancer_data из signal_data (содержит Volume Profile и другие данные)
+        enhancer_extra_data = signal_data.get('enhancer_data', {})
+        
+        # Получаем уровни поддержки/сопротивления из технических индикаторов
+        sr_levels_data = signal_data.get('sr_levels', {})
+        resistances = sr_levels_data.get('resistances', [])
+        supports = sr_levels_data.get('supports', [])
+        
+        # Получаем ATR для расчёта targets
+        atr_value = 0
+        if technical_data and 'atr' in technical_data:
+            atr_value = technical_data['atr'].get('value', 0)
+        
+        # Если ATR не доступен, используем примерное значение (1.5% от цены)
+        if not atr_value or atr_value == 0:
+            atr_value = current_price * 0.015
+        
+        # Рассчитываем реальные TP и SL на основе уровней поддержки/сопротивления
         if raw_direction == "sideways":
             # Для боковика показываем диапазон
             tp1 = current_price * (1 + self.SIDEWAYS_RANGE_PERCENT / 100)
@@ -6594,27 +6611,29 @@ class AISignalAnalyzer:
             tp2_label = f"+{self.SIDEWAYS_RANGE_PERCENT}%"
             sl_label = f"-{self.SIDEWAYS_RANGE_PERCENT}%"
             rr = None
-        elif raw_direction == "long":
-            tp1 = current_price * (1 + 1.5 / 100)  # +1.5%
-            tp2 = current_price * (1 + 2.0 / 100)  # +2.0%
-            sl = current_price * (1 - 0.6 / 100)   # -0.6%
-            tp1_label = "+1.5%"
-            tp2_label = "+2.0%"
-            sl_label = "-0.6%"
-            # R:R = profit / risk
-            profit = abs(tp1 - current_price)
-            risk = abs(current_price - sl)
-            rr = profit / risk if risk > 0 else 0
-        else:  # short
-            tp1 = current_price * (1 - 1.5 / 100)  # -1.5%
-            tp2 = current_price * (1 - 2.0 / 100)  # -2.0%
-            sl = current_price * (1 + 0.6 / 100)   # +0.6%
-            tp1_label = "-1.5%"
-            tp2_label = "-2.0%"
-            sl_label = "+0.6%"
-            profit = abs(current_price - tp1)
-            risk = abs(sl - current_price)
-            rr = profit / risk if risk > 0 else 0
+        else:
+            # Используем реальные уровни для LONG/SHORT
+            real_targets = self.calculate_real_targets(
+                direction=raw_direction,
+                current_price=current_price,
+                resistances=resistances,
+                supports=supports,
+                atr=atr_value
+            )
+            
+            tp1 = real_targets.get('tp1', current_price * 1.015)
+            tp2 = real_targets.get('tp2', current_price * 1.025)
+            sl = real_targets.get('stop_loss', current_price * 0.995)
+            rr = real_targets.get('rr_ratio', 0)
+            
+            # Calculate percentage labels
+            tp1_pct = ((tp1 / current_price) - 1) * 100 if tp1 else 0
+            tp2_pct = ((tp2 / current_price) - 1) * 100 if tp2 else 0
+            sl_pct = ((sl / current_price) - 1) * 100 if sl else 0
+            
+            tp1_label = f"{tp1_pct:+.1f}%"
+            tp2_label = f"{tp2_pct:+.1f}%"
+            sl_label = f"{sl_pct:+.1f}%"
         
         # Подготовка targets для компактного формата
         targets = {
@@ -6627,119 +6646,70 @@ class AISignalAnalyzer:
             "rr": rr
         }
         
-        # Подготовка ключевых уровней
+        # Подготовка ключевых уровней из Volume Profile и S/R levels
         levels = {}
-        if technical_data:
-            # POC из volume profile если есть
-            volume_profile = technical_data.get("volume_profile")
-            if volume_profile and "poc" in volume_profile:
-                levels["poc"] = volume_profile["poc"]
+        
+        # Получаем Volume Profile levels из enhancer_data
+        volume_profile_levels = enhancer_extra_data.get('volume_profile_levels', {})
+        if volume_profile_levels:
+            vah = volume_profile_levels.get('vah')  # Value Area High
+            val = volume_profile_levels.get('val')  # Value Area Low
+            poc = volume_profile_levels.get('poc')  # Point of Control
             
-            # Support и Resistance
-            pivots = technical_data.get("pivot_points")
-            if pivots:
-                levels["resistance"] = pivots.get("R1")
-                levels["support"] = pivots.get("S1")
+            # Используем VAH и VAL как сопротивление и поддержку
+            if vah:
+                levels['resistance'] = vah
+            if val:
+                levels['support'] = val
         
-        # Подготовка причин для входа
-        reasons = []
+        # Если Volume Profile недоступен, используем ближайшие S/R levels
+        if not levels.get('resistance') and resistances:
+            levels['resistance'] = resistances[0]['price']
+        if not levels.get('support') and supports:
+            levels['support'] = supports[0]['price']
         
-        # 1. Fear & Greed
-        if fear_greed and fear_greed.get("value") is not None:
-            fg_value = fear_greed["value"]
-            fg_classification = fear_greed.get("value_classification", "Neutral")
-            reasons.append({
-                "icon": "😱" if fg_value < 30 else "😊" if fg_value > 70 else "😐",
-                "name": "Fear & Greed",
-                "value": f"{fg_value} ({fg_classification})"
-            })
+        # Добавляем второй уровень сопротивления и поддержки
+        if resistances and len(resistances) > 1:
+            levels['resistance2'] = resistances[1]['price']
+        if supports and len(supports) > 1:
+            levels['support2'] = supports[1]['price']
         
-        # 2. Funding Rate
-        if funding_rate and funding_rate.get("funding_rate") is not None:
-            rate = funding_rate["funding_rate"] * 100
-            if abs(rate) < 0.01:
-                status = "норма"
-            elif rate > 0.05:
-                status = "высокий"
-            elif rate < -0.05:
-                status = "отрицательный"
-            else:
-                status = "норма"
-            reasons.append({
-                "icon": "📊",
-                "name": "Funding",
-                "value": f"{rate:.3f}% ({status})"
-            })
-
-        # 3. Liquidation Magnet (если есть данные)
+        # Подготовка enhancer_data для передачи в formatter
+        # Это будет использоваться для извлечения "Почему вход" причин
+        formatter_enhancer_data = {
+            'current_price': current_price,
+            'fear_greed': fear_greed,
+            'rsi': technical_data.get('rsi') if technical_data else None,
+            'macd': technical_data.get('macd') if technical_data else None,
+        }
+        
+        # Добавляем funding только если оно существует
+        if funding_rate:
+            funding_value = funding_rate.get('funding_rate')
+            if funding_value is not None:
+                formatter_enhancer_data['funding'] = {'current_funding': funding_value}
+        
+        # Добавляем TradingView рейтинг из signal_data если есть
+        tradingview_rating = signal_data.get('tradingview_rating')
+        if tradingview_rating:
+            formatter_enhancer_data['tradingview'] = tradingview_rating
+        
+        # Добавляем данные о ликвидациях из deep_derivatives_data
         if deep_derivatives_data:
-            liquidation_levels = deep_derivatives_data.get("liquidation_levels")
-            if liquidation_levels: 
-                nearest_short = liquidation_levels.get("nearest_short_liq")
-                nearest_long = liquidation_levels.get("nearest_long_liq")
-                
-                # Fix: handle both dict and float types
-                if isinstance(nearest_short, dict):
-                    short_price = nearest_short.get("price", 0)
-                elif isinstance(nearest_short, (int, float)):
-                    short_price = nearest_short
-                else: 
-                    short_price = 0
-
-                if isinstance(nearest_long, dict):
-                    long_price = nearest_long.get("price", 0)
-                elif isinstance(nearest_long, (int, float)):
-                    long_price = nearest_long
-                else:
-                    long_price = 0
-
-                # Выбираем ближайшую зону
-                if short_price and long_price:
-                    dist_short = abs(short_price - current_price)
-                    dist_long = abs(long_price - current_price)
-                    if dist_short < dist_long and short_price:
-                        price_k = short_price / 1000
-                        reasons.append({
-                            "icon": "💧",
-                            "name": "Магнит",
-                            "value": f"${price_k:.1f}K (short liq)"
-                        })
-                    elif long_price:
-                        price_k = long_price / 1000
-                        reasons.append({
-                            "icon":  "💧",
-                            "name":  "Магнит",
-                            "value": f"${price_k:.1f}K (long liq)"
-                        })
-                elif short_price: 
-                    price_k = short_price / 1000
-                    reasons.append({
-                        "icon": "💧",
-                        "name": "Магнит",
-                        "value": f"${price_k:.1f}K (short liq)"
-                    })
-                elif long_price:
-                    price_k = long_price / 1000
-                    reasons. append({
-                        "icon": "💧",
-                        "name": "Магнит",
-                        "value":  f"${price_k:.1f}K (long liq)"
-                    })
-
-        # 4. Wyckoff Phase (если есть в signal_data)
-        wyckoff_phase = signal_data.get("wyckoff_phase")
+            liquidation_levels = deep_derivatives_data.get('liquidation_levels', {})
+            if liquidation_levels:
+                formatter_enhancer_data['liquidation_zones'] = {
+                    'nearest_short': liquidation_levels.get('nearest_short_liq'),
+                    'nearest_long': liquidation_levels.get('nearest_long_liq')
+                }
+        
+        # Добавляем Wyckoff phase из signal_data если есть
+        wyckoff_phase = signal_data.get('wyckoff_phase')
         if wyckoff_phase:
-            phase_ru = {
-                "accumulation": "Накопление",
-                "markup": "Разгон",
-                "distribution": "Распределение",
-                "markdown": "Падение"
-            }.get(wyckoff_phase.lower(), wyckoff_phase.title())
-            reasons.append({
-                "icon": "🌊",
-                "name": "Wyckoff",
-                "value": phase_ru
-            })
+            formatter_enhancer_data['wyckoff'] = {
+                'phase': wyckoff_phase,
+                'confidence': signal_data.get('wyckoff_confidence', 0.5)
+            }
         
         # Используем CompactMessageFormatter
         message = self.compact_formatter.format_signal(
@@ -6750,7 +6720,7 @@ class AISignalAnalyzer:
             confidence=probability,
             timeframe="4H",
             levels=levels if levels else None,
-            reasons=reasons if reasons else None
+            enhancer_data=formatter_enhancer_data
         )
         
         return message

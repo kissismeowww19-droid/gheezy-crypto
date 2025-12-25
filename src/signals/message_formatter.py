@@ -102,36 +102,51 @@ class CompactMessageFormatter:
         lines.append(f"📊 *Уверенность:* {confidence:.0f}%")
         lines.append("")  # Пустая строка
         
-        # Ключевые уровни
+        # Ключевые уровни (новый компактный формат)
         if levels:
-            lines.append("📍 *Ключевые уровни:*")
-            poc = levels.get("poc")
             resistance = levels.get("resistance")
+            resistance2 = levels.get("resistance2")
             support = levels.get("support")
+            support2 = levels.get("support2")
             
-            if poc is not None:
-                lines.append(f"├ POC: {self._format_price(poc)}")
-            if resistance is not None:
-                lines.append(f"├ Сопротивление: {self._format_price(resistance)}")
-            if support is not None:
-                lines.append(f"└ Поддержка: {self._format_price(support)}")
+            # Проверяем, есть ли хотя бы один уровень
+            has_levels = resistance or support
             
-            lines.append("")  # Пустая строка
+            if has_levels:
+                lines.append("📍 *Уровни:*")
+                
+                # Сопротивления (если есть)
+                if resistance or resistance2:
+                    resistances_str = " | ".join(filter(None, [
+                        self._format_price(resistance) if resistance else None,
+                        self._format_price(resistance2) if resistance2 else None
+                    ]))
+                    lines.append(f"├ 🔴 Сопр: {resistances_str}")
+                
+                # Поддержки (если есть)
+                if support or support2:
+                    supports_str = " | ".join(filter(None, [
+                        self._format_price(support) if support else None,
+                        self._format_price(support2) if support2 else None
+                    ]))
+                    lines.append(f"└ 🟢 Подд: {supports_str}")
+                
+                lines.append("")  # Пустая строка
         
         # Причины для входа
         # Используем переданные reasons или извлекаем из enhancer_data
         if reasons is None and enhancer_data is not None:
-            reasons = self._get_top_reasons(enhancer_data)
+            reasons = self._get_top_reasons(enhancer_data, limit=6)  # Увеличиваем до 6
         
         if reasons:
-            lines.append("🔥 *Почему вход:*")
-            for i, reason in enumerate(reasons[:4]):  # Максимум 4 причины
+            lines.append("🔥 *Сигналы:*")
+            for i, reason in enumerate(reasons[:6]):  # Максимум 6 причин
                 icon = reason.get("icon", "•")
                 name = reason.get("name", "")
                 value = reason.get("value", "")
                 
                 # Используем правильный символ для дерева
-                if i < len(reasons) - 1 and i < 3:  # Не последний элемент
+                if i < len(reasons) - 1 and i < 5:  # Не последний элемент
                     lines.append(f"├ {icon} *{name}:* {value}")
                 else:  # Последний элемент
                     lines.append(f"└ {icon} *{name}:* {value}")
@@ -189,7 +204,7 @@ class CompactMessageFormatter:
     
     def _get_top_reasons(self, enhancer_data: Dict, limit: int = 4) -> List[Dict]:
         """
-        Выбирает топ-4 самых важных фактора для отображения.
+        Выбирает топ самых важных факторов для отображения.
         
         Приоритет факторов:
         1. Wyckoff фаза (если определена)
@@ -197,9 +212,13 @@ class CompactMessageFormatter:
         3. Магнит ликвидации (ближайшая зона)
         4. Funding rate (если значимый)
         5. SMC Order Block (если есть)
+        6. Fear & Greed Index
+        7. RSI значение
+        8. MACD направление (bullish/bearish)
+        9. TradingView рейтинг
         
         Args:
-            enhancer_data: Данные от EnhancerManager
+            enhancer_data: Данные от EnhancerManager и technical indicators
             limit: Максимальное количество причин (по умолчанию 4)
             
         Returns:
@@ -267,12 +286,19 @@ class CompactMessageFormatter:
         
         if nearest:
             price = nearest.get("price", 0)
-            # Форматируем в тысячах
-            price_k = price / 1000
+            # Умный формат цены вместо всегда делить на 1000
+            if price >= 1000:
+                price_k = price / 1000
+                price_formatted = f"${price_k:.1f}K"
+            elif price >= 1:
+                price_formatted = f"${price:.2f}"
+            else:
+                price_formatted = f"${price:.4f}"
+            
             reasons.append({
                 "icon": "💧",
                 "name": "Магнит",
-                "value": f"${price_k:.1f}K ({zone_type})"
+                "value": f"{price_formatted} ({zone_type})"
             })
         
         # 4. Funding Rate
@@ -306,6 +332,74 @@ class CompactMessageFormatter:
                 "icon": "🧠",
                 "name": "SMC",
                 "value": f"{ob_type} OB {self._format_price(ob_low)}"
+            })
+        
+        # 6. Fear & Greed Index
+        fear_greed = enhancer_data.get("fear_greed", {})
+        if fear_greed.get("value") is not None:
+            fg_value = fear_greed["value"]
+            fg_classification = fear_greed.get("value_classification", "")
+            
+            # Определяем эмодзи на основе значения
+            if fg_value < 25:
+                emoji = "😱"
+            elif fg_value < 50:
+                emoji = "😰"
+            elif fg_value < 75:
+                emoji = "😊"
+            else:
+                emoji = "🤑"
+            
+            reasons.append({
+                "icon": emoji,
+                "name": "F&G",
+                "value": f"{fg_value} ({fg_classification})"
+            })
+        
+        # 7. RSI значение
+        rsi = enhancer_data.get("rsi", {})
+        if rsi.get("value") is not None:
+            rsi_value = rsi["value"]
+            reasons.append({
+                "icon": "📊",
+                "name": "RSI",
+                "value": f"{rsi_value:.1f}"
+            })
+        
+        # 8. MACD направление
+        macd = enhancer_data.get("macd", {})
+        if macd.get("signal"):
+            macd_signal = macd["signal"]
+            # Determine direction text based on signal
+            if macd_signal in ["bullish", "buy"]:
+                direction_text = "bullish"
+            elif macd_signal in ["bearish", "sell"]:
+                direction_text = "bearish"
+            else:
+                direction_text = "neutral"
+            
+            reasons.append({
+                "icon": "📈",
+                "name": "MACD",
+                "value": direction_text
+            })
+        
+        # 9. TradingView рейтинг
+        tradingview = enhancer_data.get("tradingview", {})
+        if tradingview.get("summary", {}).get("RECOMMENDATION"):
+            tv_rating = tradingview["summary"]["RECOMMENDATION"]
+            # Упрощаем рейтинг для краткости
+            if tv_rating in ["STRONG_BUY", "BUY"]:
+                rating_text = "BUY"
+            elif tv_rating in ["STRONG_SELL", "SELL"]:
+                rating_text = "SELL"
+            else:
+                rating_text = "NEUTRAL"
+            
+            reasons.append({
+                "icon": "📺",
+                "name": "TV",
+                "value": rating_text
             })
         
         # Возвращаем только топ N причин
