@@ -543,6 +543,79 @@ class MultiAPIManager:
             }
         
         return stats_report
+    
+    async def get_historical_prices(
+        self,
+        symbol: str,
+        from_timestamp: int,
+        to_timestamp: int
+    ) -> Optional[Dict]:
+        """
+        Получить исторические цены за период (для проверки сигналов).
+        
+        Args:
+            symbol: Символ монеты (BTC, ETH, и т.д.)
+            from_timestamp: Unix timestamp начала периода
+            to_timestamp: Unix timestamp конца периода
+            
+        Returns:
+            Dict с min_price, max_price, prices список или None при ошибке
+        """
+        coin_info = self.get_coin_info(symbol)
+        coin_id = coin_info.get("id", symbol.lower())
+        
+        logger.info(f"Получаю исторические цены {symbol} с {from_timestamp} по {to_timestamp}...")
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart/range"
+                params = {
+                    "vs_currency": "usd",
+                    "from": from_timestamp,
+                    "to": to_timestamp
+                }
+                timeout = aiohttp.ClientTimeout(total=15)
+                
+                async with session.get(url, params=params, timeout=timeout) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        prices = data.get("prices", [])
+                        
+                        if not prices:
+                            logger.warning(f"Нет исторических данных для {symbol}")
+                            return None
+                        
+                        # Извлекаем только значения цен (игнорируем временные метки)
+                        price_values = [p[1] for p in prices]
+                        min_price = min(price_values)
+                        max_price = max(price_values)
+                        
+                        logger.info(
+                            f"Исторические цены {symbol}: "
+                            f"min=${min_price:.2f}, max=${max_price:.2f}, "
+                            f"точек={len(prices)}"
+                        )
+                        
+                        return {
+                            "success": True,
+                            "min_price": min_price,
+                            "max_price": max_price,
+                            "prices": price_values,
+                            "data_points": len(prices)
+                        }
+                    elif response.status == 429:
+                        logger.warning("CoinGecko: лимит запросов для исторических данных")
+                    else:
+                        logger.warning(
+                            f"CoinGecko исторические данные: статус {response.status}"
+                        )
+                        
+        except asyncio.TimeoutError:
+            logger.warning(f"CoinGecko timeout для исторических данных: {symbol}")
+        except Exception as e:
+            logger.error(f"Ошибка получения исторических данных: {e}")
+        
+        return None
 
 
 api_manager = MultiAPIManager()
@@ -561,6 +634,18 @@ async def get_multiple_prices(symbols: list) -> dict:
 def get_api_stats() -> dict:
     """Получить статистику работы API"""
     return api_manager.get_stats()
+
+
+async def get_historical_prices(symbol: str, from_timestamp: int, to_timestamp: int) -> dict:
+    """Получить исторические цены монеты за период"""
+    result = await api_manager.get_historical_prices(symbol, from_timestamp, to_timestamp)
+    if result is None:
+        return {
+            "success": False,
+            "error": "failed_to_fetch_historical_data",
+            "message": "Не удалось получить исторические данные"
+        }
+    return result
 
 
 if __name__ == "__main__":
