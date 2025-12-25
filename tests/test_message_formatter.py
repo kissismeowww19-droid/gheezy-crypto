@@ -440,3 +440,74 @@ class TestCompactMessageFormatter:
         # Both should produce similar output
         assert "LONG BTC" in message_upper
         assert "LONG BTC" in message_lower
+    
+    def test_format_price_none(self, formatter):
+        """Test that _format_price handles None values correctly."""
+        result = formatter._format_price(None)
+        assert result == "N/A"
+    
+    def test_format_signal_with_none_targets(self, formatter):
+        """Test formatting a signal with None values in targets."""
+        message = formatter.format_signal(
+            coin="BTC",
+            direction="long",
+            entry_price=88021.0,
+            targets={
+                "tp1": None,
+                "tp2": 91200.0,
+                "sl": None,
+                "rr": 2.3
+            },
+            confidence=75.0,
+            timeframe="4H"
+        )
+        
+        # Check that message contains N/A for None values
+        assert "N/A" in message
+        assert "LONG BTC" in message
+        assert "$88,021" in message
+        # tp2 should still be formatted correctly
+        assert "$91,200" in message
+    
+    def test_format_sideways_signal_with_none(self, formatter):
+        """Test formatting a sideways signal with None values."""
+        message = formatter.format_signal(
+            coin="TON",
+            direction="sideways",
+            entry_price=5.0,
+            targets={
+                "tp1": None,
+                "tp2": None,
+                "sl": None,
+                "rr": None
+            },
+            confidence=52.0,
+            timeframe="4H"
+        )
+        
+        # Should handle None gracefully
+        assert "SIDEWAYS TON" in message
+        assert "$5.00" in message
+        assert "N/A" in message
+    
+    def test_format_signal_with_partial_none_targets(self, formatter):
+        """Test formatting with only some targets as None."""
+        message = formatter.format_signal(
+            coin="ETH",
+            direction="short",
+            entry_price=3200.0,
+            targets={
+                "tp1": 3100.0,
+                "tp2": None,  # Only tp2 is None
+                "sl": 3250.0,
+                "rr": 2.0
+            },
+            confidence=68.0,
+            timeframe="4H"
+        )
+        
+        assert "SHORT ETH" in message
+        assert "$3,200" in message
+        assert "$3,100" in message  # tp1 should be formatted
+        assert "N/A" in message  # tp2 should be N/A
+        assert "$3,250" in message  # sl should be formatted
