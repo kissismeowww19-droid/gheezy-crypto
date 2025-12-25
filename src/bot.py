@@ -445,7 +445,28 @@ def get_signals_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="💧 XRP", callback_data="signal_xrp"),
         ],
         [
+            InlineKeyboardButton(text="📊 Статистика", callback_data="signal_stats"),
+        ],
+        [
             InlineKeyboardButton(text="🔙 Назад", callback_data="menu_signals"),
+        ],
+    ])
+
+
+def get_stats_coins_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура для выбора монеты для статистики."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="₿ BTC", callback_data="stats_coin_btc"),
+            InlineKeyboardButton(text="⟠ ETH", callback_data="stats_coin_eth"),
+            InlineKeyboardButton(text="💎 TON", callback_data="stats_coin_ton"),
+        ],
+        [
+            InlineKeyboardButton(text="🟣 SOL", callback_data="stats_coin_sol"),
+            InlineKeyboardButton(text="💧 XRP", callback_data="stats_coin_xrp"),
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Назад", callback_data="stats_back"),
         ],
     ])
 
@@ -1533,6 +1554,128 @@ async def callback_signal_coin(callback: CallbackQuery):
     except Exception as e:
         logger.error(f"Error sending signal: {e}", exc_info=True)
         await callback.answer("❌ Ошибка при отправке сигнала", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data == "signal_stats")
+async def callback_signal_stats(callback: CallbackQuery):
+    """Показать меню выбора монеты для статистики."""
+    await callback.message.delete()
+    
+    text = "📊 *Статистика по монете*\n"
+    text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    text += "Выберите монету:\n"
+    
+    new_msg = await callback.message.answer(
+        text,
+        reply_markup=get_stats_coins_keyboard(),
+        parse_mode=ParseMode.MARKDOWN
+    )
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("stats_coin_"))
+async def callback_stats_coin(callback: CallbackQuery):
+    """Показать статистику по выбранной монете."""
+    await callback.message.delete()
+    
+    symbol = callback.data.replace("stats_coin_", "").upper()
+    user_id = callback.from_user.id
+    
+    # Показываем индикатор загрузки
+    loading_msg = await callback.message.answer(
+        "⏳ *Загружаю статистику...*",
+        parse_mode=ParseMode.MARKDOWN
+    )
+    
+    try:
+        # Получаем статистику по монете
+        stats = await signal_tracker.get_coin_stats(user_id, symbol)
+        
+        if stats['total'] == 0:
+            text = f"📊 *СТАТИСТИКА {symbol}*\n"
+            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            text += "_У вас пока нет сигналов по этой монете._\n\n"
+            text += "Нажмите на монету в разделе Сигналы, чтобы начать отслеживание!"
+        else:
+            # Прогресс-бар для win rate
+            filled = int(stats['win_rate'] / 10)
+            bar = "█" * filled + "░" * (10 - filled)
+            
+            # Эмодзи для P/L
+            pnl_emoji = "📈" if stats['total_pl'] >= 0 else "📉"
+            pnl_sign = "+" if stats['total_pl'] >= 0 else ""
+            
+            # Форматирование времени последнего сигнала
+            if stats['last_signal_time']:
+                from datetime import datetime
+                time_diff = datetime.now() - stats['last_signal_time']
+                hours = int(time_diff.total_seconds() // 3600)
+                if hours < 1:
+                    minutes = int(time_diff.total_seconds() // 60)
+                    last_signal_str = f"{minutes}мин назад"
+                elif hours < 24:
+                    last_signal_str = f"{hours}ч назад"
+                else:
+                    days = hours // 24
+                    last_signal_str = f"{days}д назад"
+            else:
+                last_signal_str = "N/A"
+            
+            text = f"📊 *СТАТИСТИКА {symbol}*\n"
+            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            text += f"📈 Всего сигналов: *{stats['total']}*\n"
+            text += f"✅ Успешных: *{stats['wins']}*\n"
+            text += f"❌ Убыточных: *{stats['losses']}*\n"
+            text += f"⏳ В ожидании: *{stats['pending']}*\n\n"
+            text += f"🎯 Win Rate: *{stats['win_rate']:.1f}%*\n"
+            text += f"{bar}\n\n"
+            text += f"{pnl_emoji} Общий P/L: *{pnl_sign}{stats['total_pl']:.1f}%*\n\n"
+            text += f"📅 Последний сигнал: {last_signal_str}\n"
+            text += f"🎯 Лучший сигнал: *+{stats['best_signal']:.1f}%*\n"
+            text += f"💀 Худший сигнал: *{stats['worst_signal']:.1f}%*\n"
+            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="signal_stats")],
+        ])
+        
+        await loading_msg.edit_text(text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+        
+    except Exception as e:
+        logger.error(f"Error getting coin stats for {symbol}: {e}", exc_info=True)
+        
+        text = f"❌ *Ошибка*\n\n"
+        text += f"Не удалось загрузить статистику для {symbol}."
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="signal_stats")],
+        ])
+        
+        await loading_msg.edit_text(text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+    
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "stats_back")
+async def callback_stats_back(callback: CallbackQuery):
+    """Вернуться в меню сигналов из статистики."""
+    await callback.message.delete()
+    
+    text = "🎯 *Торговые сигналы*\n\n"
+    text += "Анализ на основе:\n\n"
+    text += "• Данные трекера китов\n"
+    text += "• Депозиты vs выводы с бирж\n"
+    text += "• Рыночные данные\n"
+    text += "• Объём торгов\n\n"
+    text += "🔮 _Прогноз на ближайший час_\n\n"
+    text += "👇 Выбери монету:"
+    
+    new_msg = await callback.message.answer(
+        text,
+        reply_markup=get_signals_keyboard(),
+        parse_mode=ParseMode.MARKDOWN
+    )
+    await callback.answer()
 
 
 @router.callback_query(lambda c: c.data == "menu_market")

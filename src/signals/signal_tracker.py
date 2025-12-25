@@ -589,3 +589,103 @@ class SignalTracker:
                 "best_symbol": best_symbol,
                 "worst_symbol": worst_symbol
             }
+    
+    async def get_coin_stats(self, user_id: int, symbol: str) -> Dict:
+        """
+        Получить статистику по конкретной монете для пользователя.
+        
+        Args:
+            user_id: ID пользователя
+            symbol: Символ монеты (BTC, ETH, TON, SOL, XRP)
+        
+        Returns:
+            Dictionary with coin statistics including:
+            - total: общее количество сигналов
+            - wins: успешных сигналов
+            - losses: убыточных сигналов
+            - pending: сигналов в ожидании
+            - win_rate: процент успешных сигналов
+            - total_pl: общий P/L в процентах
+            - best_signal: лучший сигнал (% прибыли)
+            - worst_signal: худший сигнал (% убытка)
+            - last_signal_time: время последнего сигнала
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            # Получить все сигналы для данной монеты
+            cursor = conn.execute('''
+                SELECT 
+                    result,
+                    direction,
+                    entry_price,
+                    exit_price,
+                    timestamp
+                FROM signals
+                WHERE user_id = ? AND symbol = ?
+                ORDER BY timestamp DESC
+            ''', (user_id, symbol.upper()))
+            
+            signals = cursor.fetchall()
+            
+            if not signals:
+                return {
+                    'total': 0,
+                    'wins': 0,
+                    'losses': 0,
+                    'pending': 0,
+                    'win_rate': 0.0,
+                    'total_pl': 0.0,
+                    'best_signal': 0.0,
+                    'worst_signal': 0.0,
+                    'last_signal_time': None
+                }
+            
+            total = len(signals)
+            wins = 0
+            losses = 0
+            pending = 0
+            pnl_list = []
+            
+            for result, direction, entry_price, exit_price, timestamp_str in signals:
+                if result == 'win':
+                    wins += 1
+                elif result == 'loss':
+                    losses += 1
+                elif result == 'pending':
+                    pending += 1
+                
+                # Рассчитать P/L для завершенных сигналов
+                if result in ['win', 'loss'] and exit_price is not None and entry_price > 0:
+                    if direction == 'long':
+                        pnl = ((exit_price - entry_price) / entry_price) * 100
+                    elif direction == 'short':
+                        pnl = ((entry_price - exit_price) / entry_price) * 100
+                    elif direction == 'sideways':
+                        pnl = 0.5 if result == 'win' else -0.5
+                    else:
+                        pnl = 0.0
+                    pnl_list.append(pnl)
+            
+            # Расчёт метрик
+            completed = wins + losses
+            win_rate = (wins / completed * 100) if completed > 0 else 0.0
+            total_pl = sum(pnl_list) if pnl_list else 0.0
+            best_signal = max(pnl_list) if pnl_list else 0.0
+            worst_signal = min(pnl_list) if pnl_list else 0.0
+            
+            # Время последнего сигнала
+            last_signal_time = None
+            if signals:
+                last_timestamp_str = signals[0][4]  # timestamp из первой записи (ORDER BY DESC)
+                last_signal_time = self._parse_datetime(last_timestamp_str)
+            
+            return {
+                'total': total,
+                'wins': wins,
+                'losses': losses,
+                'pending': pending,
+                'win_rate': win_rate,
+                'total_pl': total_pl,
+                'best_signal': best_signal,
+                'worst_signal': worst_signal,
+                'last_signal_time': last_signal_time
+            }
