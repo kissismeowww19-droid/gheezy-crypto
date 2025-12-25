@@ -10,7 +10,7 @@ from typing import Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
-def _get_fear_greed_label(value: int) -> str:
+def get_fear_greed_label(value: int) -> str:
     """
     Get Fear & Greed label based on value.
     
@@ -384,7 +384,7 @@ class CompactMessageFormatter:
             
             # If no classification provided, calculate it
             if not fg_classification:
-                fg_classification = _get_fear_greed_label(fg_value)
+                fg_classification = get_fear_greed_label(fg_value)
             
             # Определяем эмодзи на основе значения
             if fg_value < 25:

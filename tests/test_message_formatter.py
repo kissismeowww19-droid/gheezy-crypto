@@ -11,35 +11,35 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 # Import directly to avoid dependency issues
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'signals'))
-from message_formatter import CompactMessageFormatter, _get_fear_greed_label
+from message_formatter import CompactMessageFormatter, get_fear_greed_label
 
 
 def test_get_fear_greed_label():
-    """Test the _get_fear_greed_label helper function."""
+    """Test the get_fear_greed_label helper function."""
     # Test Extreme Fear (0-25)
-    assert _get_fear_greed_label(0) == "Extreme Fear"
-    assert _get_fear_greed_label(25) == "Extreme Fear"
-    assert _get_fear_greed_label(23) == "Extreme Fear"
+    assert get_fear_greed_label(0) == "Extreme Fear"
+    assert get_fear_greed_label(25) == "Extreme Fear"
+    assert get_fear_greed_label(23) == "Extreme Fear"
     
     # Test Fear (26-45)
-    assert _get_fear_greed_label(26) == "Fear"
-    assert _get_fear_greed_label(45) == "Fear"
-    assert _get_fear_greed_label(35) == "Fear"
+    assert get_fear_greed_label(26) == "Fear"
+    assert get_fear_greed_label(45) == "Fear"
+    assert get_fear_greed_label(35) == "Fear"
     
     # Test Neutral (46-55)
-    assert _get_fear_greed_label(46) == "Neutral"
-    assert _get_fear_greed_label(55) == "Neutral"
-    assert _get_fear_greed_label(50) == "Neutral"
+    assert get_fear_greed_label(46) == "Neutral"
+    assert get_fear_greed_label(55) == "Neutral"
+    assert get_fear_greed_label(50) == "Neutral"
     
     # Test Greed (56-75)
-    assert _get_fear_greed_label(56) == "Greed"
-    assert _get_fear_greed_label(75) == "Greed"
-    assert _get_fear_greed_label(65) == "Greed"
+    assert get_fear_greed_label(56) == "Greed"
+    assert get_fear_greed_label(75) == "Greed"
+    assert get_fear_greed_label(65) == "Greed"
     
     # Test Extreme Greed (76-100)
-    assert _get_fear_greed_label(76) == "Extreme Greed"
-    assert _get_fear_greed_label(100) == "Extreme Greed"
-    assert _get_fear_greed_label(90) == "Extreme Greed"
+    assert get_fear_greed_label(76) == "Extreme Greed"
+    assert get_fear_greed_label(100) == "Extreme Greed"
+    assert get_fear_greed_label(90) == "Extreme Greed"
 
 
 class TestCompactMessageFormatter:
