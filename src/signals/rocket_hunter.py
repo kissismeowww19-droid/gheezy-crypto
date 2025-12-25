@@ -28,9 +28,9 @@ class RocketHunterAnalyzer:
     
     # Настройки сканирования
     SCAN_LIMIT = 3000  # Сканировать 2000-3000 монет
-    MIN_SCORE = 7.7  # Минимальный score для показа
+    MIN_SCORE = 7.0  # Минимальный score для показа
     MIN_VOLUME_USD = 100_000  # Минимальный объём 24h (без жёстких ограничений)
-    MIN_POTENTIAL = 20.0  # Минимальный потенциал +20%
+    MIN_POTENTIAL = 10.0  # Минимальный потенциал +10%
     MAX_SPREAD_PCT = 1.0  # Максимальный спред 1%
     MAX_ANALYZE = 200  # Максимум монет для детального анализа
     
@@ -173,8 +173,8 @@ class RocketHunterAnalyzer:
                         if retries > max_retries:
                             logger.warning(f"Max retries reached, stopping at {len(all_coins)} coins")
                             break
-                        logger.warning(f"CoinGecko rate limit ({resp.status}), retry {retries}/{max_retries}, waiting 15 sec...")
-                        await asyncio.sleep(15)
+                        logger.warning(f"CoinGecko rate limit ({resp.status}), retry {retries}/{max_retries}, waiting 20 sec...")
+                        await asyncio.sleep(20)
                         continue
                     else:
                         logger.warning(f"CoinGecko API error: {resp.status}")
@@ -184,7 +184,7 @@ class RocketHunterAnalyzer:
                 
                 # Задержка между запросами
                 if page <= total_pages:
-                    await asyncio.sleep(3)
+                    await asyncio.sleep(6)
             
             logger.info(f"Rocket Hunter scanned {len(all_coins)} coins from CoinGecko")
             return all_coins
