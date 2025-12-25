@@ -11,6 +11,9 @@ from pathlib import Path
 import logging
 import asyncio
 
+# Import module for historical price checking (allows for easier mocking in tests)
+import api_manager
+
 logger = logging.getLogger(__name__)
 
 
@@ -183,7 +186,7 @@ class SignalTracker:
             # Получить последний pending сигнал для этого user+symbol
             cursor = conn.execute('''
                 SELECT id, direction, entry_price, target1_price, target2_price, 
-                       stop_loss_price, probability, timestamp, result, checked_at
+                       stop_loss_price, probability, timestamp, result, checked_at, exit_price
                 FROM signals
                 WHERE user_id = ? AND symbol = ?
                 ORDER BY timestamp DESC
@@ -196,16 +199,18 @@ class SignalTracker:
                 return None
             
             signal_id, direction, entry_price, target1_price, target2_price, \
-                stop_loss_price, probability, timestamp_str, result, checked_at_str = row
+                stop_loss_price, probability, timestamp_str, result, checked_at_str, exit_price = row
             
             timestamp = datetime.fromisoformat(timestamp_str)
             checked_at = self._parse_datetime(checked_at_str)
             
             # Если сигнал уже проверен (не pending), возвращаем закэшированный результат
             if result != 'pending' and checked_at:
+                # Используем сохранённую exit_price из БД, или entry_price если exit_price None
+                cached_exit_price = exit_price if exit_price is not None else entry_price
                 return self._format_signal_result(
                     direction, entry_price, target1_price, target2_price,
-                    stop_loss_price, result, timestamp, entry_price  # используем entry как exit для отображения
+                    stop_loss_price, result, timestamp, cached_exit_price
                 )
             
             # Проверяем, созрел ли сигнал (прошло ли 4 часа)
@@ -222,9 +227,6 @@ class SignalTracker:
             # Сигнал созрел (>4 часов) - проверяем по историческим ценам
             logger.info(f"Сигнал {signal_id} созрел, проверяем по историческим ценам")
             
-            # Импортируем здесь, чтобы избежать циклических зависимостей
-            from api_manager import get_historical_prices
-            
             # Рассчитываем временной диапазон: created_at → created_at + 4 часа
             signal_start = timestamp
             signal_end = timestamp + timedelta(hours=4)
@@ -235,7 +237,7 @@ class SignalTracker:
             # Получаем исторические цены
             try:
                 historical_data = asyncio.run(
-                    get_historical_prices(symbol, from_ts, to_ts)
+                    api_manager.get_historical_prices(symbol, from_ts, to_ts)
                 )
             except Exception as e:
                 logger.error(f"Ошибка получения исторических цен: {e}")

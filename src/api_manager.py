@@ -562,7 +562,8 @@ class MultiAPIManager:
             Dict с min_price, max_price, prices список или None при ошибке
         """
         coin_info = self.get_coin_info(symbol)
-        coin_id = coin_info.get("id", symbol.lower())
+        # Add null-checking to handle case where coin_info might be None
+        coin_id = (coin_info or {}).get("id", symbol.lower())
         
         logger.info(f"Получаю исторические цены {symbol} с {from_timestamp} по {to_timestamp}...")
         
@@ -631,15 +632,15 @@ async def get_multiple_prices(symbols: list) -> dict:
     return await api_manager.get_multiple_prices(symbols)
 
 
-def get_api_stats() -> dict:
+def get_api_stats() -> Dict:
     """Получить статистику работы API"""
     return api_manager.get_stats()
 
 
-async def get_historical_prices(symbol: str, from_timestamp: int, to_timestamp: int) -> dict:
+async def get_historical_prices(symbol: str, from_timestamp: int, to_timestamp: int) -> Dict:
     """Получить исторические цены монеты за период"""
     result = await api_manager.get_historical_prices(symbol, from_timestamp, to_timestamp)
-    if result is None:
+    if result is None or not result.get("success", False):
         return {
             "success": False,
             "error": "failed_to_fetch_historical_data",
