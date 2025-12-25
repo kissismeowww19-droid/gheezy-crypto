@@ -132,6 +132,9 @@ class RocketHunterAnalyzer:
         
         try:
             page = 1
+            retries = 0
+            max_retries = 3
+            
             while page <= total_pages:
                 url = "https://api.coingecko.com/api/v3/coins/markets"
                 
@@ -157,16 +160,21 @@ class RocketHunterAnalyzer:
                     timeout=aiohttp.ClientTimeout(total=30)
                 ) as resp:
                     if resp.status == 200:
+                        retries = 0  # Reset retries on success
                         coins = await resp.json()
                         all_coins.extend(coins)
-                        logger.info(f"Rocket Hunter page {page}: {len(coins)} coins (total: {len(all_coins)})")
+                        logger.info(f"Rocket Hunter page {page}/{total_pages}: {len(coins)} coins (total: {len(all_coins)})")
                         
                         if len(coins) < per_page:
                             break
                         
-                    elif resp.status == 429:
-                        logger.warning("CoinGecko rate limit, waiting...")
-                        await asyncio.sleep(10)
+                    elif resp.status in [401, 429]:
+                        retries += 1
+                        if retries > max_retries:
+                            logger.warning(f"Max retries reached, stopping at {len(all_coins)} coins")
+                            break
+                        logger.warning(f"CoinGecko rate limit ({resp.status}), retry {retries}/{max_retries}, waiting 15 sec...")
+                        await asyncio.sleep(15)
                         continue
                     else:
                         logger.warning(f"CoinGecko API error: {resp.status}")
@@ -176,7 +184,7 @@ class RocketHunterAnalyzer:
                 
                 # Задержка между запросами
                 if page <= total_pages:
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(3)
             
             logger.info(f"Rocket Hunter scanned {len(all_coins)} coins from CoinGecko")
             return all_coins

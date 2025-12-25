@@ -237,5 +237,101 @@ async def test_format_message_with_rockets():
     await analyzer.close()
 
 
+@pytest.mark.asyncio
+async def test_scan_all_coins_retry_logic():
+    """Test scan_all_coins retry logic with 401/429 errors."""
+    analyzer = RocketHunterAnalyzer()
+    
+    # Mock response that simulates 401 error then success
+    mock_responses = []
+    
+    # First call: 401 error
+    mock_401_resp = AsyncMock()
+    mock_401_resp.status = 401
+    mock_401_resp.__aenter__ = AsyncMock(return_value=mock_401_resp)
+    mock_401_resp.__aexit__ = AsyncMock(return_value=None)
+    
+    # Second call: success with coins
+    mock_200_resp = AsyncMock()
+    mock_200_resp.status = 200
+    mock_200_resp.json = AsyncMock(return_value=[
+        {"symbol": "btc", "total_volume": 50000000000, "price_change_percentage_24h": 5.0, "current_price": 50000}
+    ])
+    mock_200_resp.__aenter__ = AsyncMock(return_value=mock_200_resp)
+    mock_200_resp.__aexit__ = AsyncMock(return_value=None)
+    
+    # Track which call we're on
+    call_count = [0]
+    
+    def mock_get(*args, **kwargs):
+        call_count[0] += 1
+        if call_count[0] == 1:
+            return mock_401_resp
+        return mock_200_resp
+    
+    # Mock the session to limit to 1 page for testing
+    with patch.object(analyzer, '_ensure_session', new_callable=AsyncMock):
+        analyzer.session = AsyncMock()
+        analyzer.session.get = mock_get
+        analyzer.session.closed = False
+        
+        # Temporarily reduce SCAN_LIMIT for faster test
+        original_limit = analyzer.SCAN_LIMIT
+        analyzer.SCAN_LIMIT = 250
+        
+        # Mock asyncio.sleep to speed up test
+        with patch('asyncio.sleep', new_callable=AsyncMock):
+            coins = await analyzer.scan_all_coins()
+        
+        analyzer.SCAN_LIMIT = original_limit
+    
+    # Should have retried once after 401 and got coins on second attempt
+    assert len(coins) == 1
+    assert coins[0]["symbol"] == "btc"
+    assert call_count[0] == 2  # One failed, one success
+    
+    await analyzer.close()
+
+
+@pytest.mark.asyncio
+async def test_scan_all_coins_max_retries():
+    """Test scan_all_coins stops after max retries."""
+    analyzer = RocketHunterAnalyzer()
+    
+    # Mock response that always returns 401
+    mock_401_resp = AsyncMock()
+    mock_401_resp.status = 401
+    mock_401_resp.__aenter__ = AsyncMock(return_value=mock_401_resp)
+    mock_401_resp.__aexit__ = AsyncMock(return_value=None)
+    
+    call_count = [0]
+    
+    def mock_get(*args, **kwargs):
+        call_count[0] += 1
+        return mock_401_resp
+    
+    # Mock the session
+    with patch.object(analyzer, '_ensure_session', new_callable=AsyncMock):
+        analyzer.session = AsyncMock()
+        analyzer.session.get = mock_get
+        analyzer.session.closed = False
+        
+        # Temporarily reduce SCAN_LIMIT for faster test
+        original_limit = analyzer.SCAN_LIMIT
+        analyzer.SCAN_LIMIT = 250
+        
+        # Mock asyncio.sleep to speed up test
+        with patch('asyncio.sleep', new_callable=AsyncMock):
+            coins = await analyzer.scan_all_coins()
+        
+        analyzer.SCAN_LIMIT = original_limit
+    
+    # Should have tried max 3 times (initial + 3 retries)
+    assert call_count[0] == 4  # 1 initial + 3 retries
+    assert len(coins) == 0  # No coins fetched
+    
+    await analyzer.close()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
