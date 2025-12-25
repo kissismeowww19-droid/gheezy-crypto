@@ -32,6 +32,7 @@ from signals.technical_analysis import (
 from signals.whale_analysis import DeepWhaleAnalyzer
 from signals.derivatives_analysis import DeepDerivativesAnalyzer
 from signals.signal_stability import SignalStabilityManager
+from signals.message_formatter import CompactMessageFormatter
 
 try:
     from signals.phase3 import MacroAnalyzer, OptionsAnalyzer, SocialSentimentAnalyzer
@@ -266,6 +267,9 @@ class AISignalAnalyzer:
         
         # Signal stability manager для предотвращения частых изменений
         self.stability_manager = SignalStabilityManager()
+        
+        # Compact message formatter для компактных сообщений (15-20 строк)
+        self.compact_formatter = CompactMessageFormatter()
         
         # Маппинг символов для whale tracker
         self.blockchain_mapping = {
@@ -6548,6 +6552,194 @@ class AISignalAnalyzer:
         
         return text
     
+    def format_signal_message_compact(
+        self,
+        symbol: str,
+        signal_data: Dict,
+        market_data: Dict,
+        technical_data: Optional[Dict] = None,
+        fear_greed: Optional[Dict] = None,
+        funding_rate: Optional[Dict] = None,
+        deep_derivatives_data: Optional[Dict] = None,
+    ) -> str:
+        """
+        Компактное форматирование сообщения с AI сигналом (15-20 строк).
+        
+        Использует CompactMessageFormatter для создания краткого и информативного сообщения.
+        
+        Args:
+            symbol: Символ монеты
+            signal_data: Результаты анализа сигнала
+            market_data: Рыночные данные
+            technical_data: Технические индикаторы (для S/R уровней)
+            fear_greed: Fear & Greed Index
+            funding_rate: Funding Rate
+            deep_derivatives_data: Данные деривативов (для ликвидаций)
+            
+        Returns:
+            Компактное форматированное сообщение для Telegram (Markdown)
+        """
+        # Получаем направление и вероятность
+        raw_direction = signal_data.get('raw_direction', 'sideways')
+        probability = signal_data.get('probability', 50.0)
+        current_price = market_data['price_usd']
+        
+        # Рассчитываем TP и SL
+        if raw_direction == "sideways":
+            # Для боковика показываем диапазон
+            tp1 = current_price * (1 + self.SIDEWAYS_RANGE_PERCENT / 100)
+            tp2 = current_price * (1 + self.SIDEWAYS_RANGE_PERCENT / 100)
+            sl = current_price * (1 - self.SIDEWAYS_RANGE_PERCENT / 100)
+            tp1_label = f"+{self.SIDEWAYS_RANGE_PERCENT}%"
+            tp2_label = f"+{self.SIDEWAYS_RANGE_PERCENT}%"
+            sl_label = f"-{self.SIDEWAYS_RANGE_PERCENT}%"
+            rr = None
+        elif raw_direction == "long":
+            tp1 = current_price * (1 + 1.5 / 100)  # +1.5%
+            tp2 = current_price * (1 + 2.0 / 100)  # +2.0%
+            sl = current_price * (1 - 0.6 / 100)   # -0.6%
+            tp1_label = "+1.5%"
+            tp2_label = "+2.0%"
+            sl_label = "-0.6%"
+            # R:R = profit / risk
+            profit = abs(tp1 - current_price)
+            risk = abs(current_price - sl)
+            rr = profit / risk if risk > 0 else 0
+        else:  # short
+            tp1 = current_price * (1 - 1.5 / 100)  # -1.5%
+            tp2 = current_price * (1 - 2.0 / 100)  # -2.0%
+            sl = current_price * (1 + 0.6 / 100)   # +0.6%
+            tp1_label = "-1.5%"
+            tp2_label = "-2.0%"
+            sl_label = "+0.6%"
+            profit = abs(current_price - tp1)
+            risk = abs(sl - current_price)
+            rr = profit / risk if risk > 0 else 0
+        
+        # Подготовка targets для компактного формата
+        targets = {
+            "tp1": tp1,
+            "tp1_label": tp1_label,
+            "tp2": tp2,
+            "tp2_label": tp2_label,
+            "sl": sl,
+            "sl_label": sl_label,
+            "rr": rr
+        }
+        
+        # Подготовка ключевых уровней
+        levels = {}
+        if technical_data:
+            # POC из volume profile если есть
+            volume_profile = technical_data.get("volume_profile")
+            if volume_profile and "poc" in volume_profile:
+                levels["poc"] = volume_profile["poc"]
+            
+            # Support и Resistance
+            pivots = technical_data.get("pivot_points")
+            if pivots:
+                levels["resistance"] = pivots.get("R1")
+                levels["support"] = pivots.get("S1")
+        
+        # Подготовка причин для входа
+        reasons = []
+        
+        # 1. Fear & Greed
+        if fear_greed and fear_greed.get("value") is not None:
+            fg_value = fear_greed["value"]
+            fg_classification = fear_greed.get("value_classification", "Neutral")
+            reasons.append({
+                "icon": "😱" if fg_value < 30 else "😊" if fg_value > 70 else "😐",
+                "name": "Fear & Greed",
+                "value": f"{fg_value} ({fg_classification})"
+            })
+        
+        # 2. Funding Rate
+        if funding_rate and funding_rate.get("funding_rate") is not None:
+            rate = funding_rate["funding_rate"] * 100
+            if abs(rate) < 0.01:
+                status = "норма"
+            elif rate > 0.05:
+                status = "высокий"
+            elif rate < -0.05:
+                status = "отрицательный"
+            else:
+                status = "норма"
+            reasons.append({
+                "icon": "📊",
+                "name": "Funding",
+                "value": f"{rate:.3f}% ({status})"
+            })
+        
+        # 3. Liquidation Magnet (если есть данные)
+        if deep_derivatives_data:
+            liquidation_levels = deep_derivatives_data.get("liquidation_levels")
+            if liquidation_levels:
+                nearest_short = liquidation_levels.get("nearest_short_liq")
+                nearest_long = liquidation_levels.get("nearest_long_liq")
+                
+                # Выбираем ближайшую зону
+                if nearest_short and nearest_long:
+                    dist_short = abs(nearest_short.get("price", 0) - current_price)
+                    dist_long = abs(nearest_long.get("price", 0) - current_price)
+                    if dist_short < dist_long and nearest_short.get("price"):
+                        price_k = nearest_short["price"] / 1000
+                        reasons.append({
+                            "icon": "💧",
+                            "name": "Магнит",
+                            "value": f"${price_k:.1f}K (short liq)"
+                        })
+                    elif nearest_long.get("price"):
+                        price_k = nearest_long["price"] / 1000
+                        reasons.append({
+                            "icon": "💧",
+                            "name": "Магнит",
+                            "value": f"${price_k:.1f}K (long liq)"
+                        })
+                elif nearest_short and nearest_short.get("price"):
+                    price_k = nearest_short["price"] / 1000
+                    reasons.append({
+                        "icon": "💧",
+                        "name": "Магнит",
+                        "value": f"${price_k:.1f}K (short liq)"
+                    })
+                elif nearest_long and nearest_long.get("price"):
+                    price_k = nearest_long["price"] / 1000
+                    reasons.append({
+                        "icon": "💧",
+                        "name": "Магнит",
+                        "value": f"${price_k:.1f}K (long liq)"
+                    })
+        
+        # 4. Wyckoff Phase (если есть в signal_data)
+        wyckoff_phase = signal_data.get("wyckoff_phase")
+        if wyckoff_phase:
+            phase_ru = {
+                "accumulation": "Накопление",
+                "markup": "Разгон",
+                "distribution": "Распределение",
+                "markdown": "Падение"
+            }.get(wyckoff_phase.lower(), wyckoff_phase.title())
+            reasons.append({
+                "icon": "🌊",
+                "name": "Wyckoff",
+                "value": phase_ru
+            })
+        
+        # Используем CompactMessageFormatter
+        message = self.compact_formatter.format_signal(
+            coin=symbol,
+            direction=raw_direction,
+            entry_price=current_price,
+            targets=targets,
+            confidence=probability,
+            timeframe="4H",
+            levels=levels if levels else None,
+            reasons=reasons if reasons else None
+        )
+        
+        return message
+    
     async def analyze_coin(self, symbol: str) -> str:
         """
         Полный анализ монеты и генерация сигнала с 10-факторной системой.
@@ -6862,36 +7054,14 @@ class AISignalAnalyzer:
                 sentiment_data=sentiment_data
             )
             
-            # Format message with all data (including short-term)
-            message = self.format_signal_message(
+            # Format message with COMPACT formatter (15-20 lines)
+            message = self.format_signal_message_compact(
                 symbol=symbol,
                 signal_data=signal_data,
-                whale_data=whale_data,
                 market_data=market_data,
                 technical_data=technical_data,
                 fear_greed=fear_greed,
                 funding_rate=funding_rate,
-                order_book=order_book,
-                futures_data=futures_data,
-                onchain_data=onchain_data,
-                exchange_flows=exchange_flows,
-                # Short-term data
-                short_term_data=short_term_data,
-                trades_flow=trades_flow,
-                liquidations=liquidations,
-                orderbook_delta=orderbook_delta,
-                # New data sources
-                coinglass_data=coinglass_data,
-                news_sentiment=news_sentiment,
-                tradingview_rating=tradingview_rating,
-                whale_alert=whale_alert,
-                social_data=social_data,
-                is_cross_conflict=signal_data.get("is_cross_conflict", False),
-                # NEW: Multi-timeframe and advanced indicators
-                multi_timeframe_data=multi_timeframe_data,
-                advanced_indicators=advanced_indicators,
-                # Deep analysis (Phase 2)
-                deep_whale_data=deep_whale_data,
                 deep_derivatives_data=deep_derivatives_data
             )
             

@@ -1604,10 +1604,7 @@ async def callback_signal_coin(callback: CallbackQuery):
             pass
         return
     
-    # Добавляем информацию о предыдущем сигнале если есть
-    if previous_result and previous_result.get("had_signal"):
-        previous_text = format_previous_result(previous_result)
-        signal_text = previous_text + "\n" + signal_text
+    # Note: Previous signal information is now tracked in statistics, not displayed in each message
     
     # Сохраняем новый сигнал
     try:
