@@ -153,15 +153,15 @@ class CompactMessageFormatter:
         
         return "\n".join(lines)
     
-    def _format_price(self, price: float) -> str:
+    def _format_price(self, price: Optional[float]) -> str:
         """
         Форматирует цену с правильной точностью.
         
         Args:
-            price: Цена для форматирования
+            price: Цена для форматирования (может быть None)
             
         Returns:
-            Отформатированная строка цены
+            Отформатированная строка цены или "N/A" если price is None
         """
         if price is None:
             return "N/A"
