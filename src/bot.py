@@ -213,6 +213,13 @@ def format_number(num: float) -> str:
         return "$" + str(round(num, 2))
 
 
+def generate_progress_bar(percentage: float, length: int = 10) -> str:
+    """Генерирует прогресс-бар для отображения процентов."""
+    filled = int(percentage / 100 * length)
+    empty = length - filled
+    return "█" * filled + "░" * empty
+
+
 def format_previous_result(result: dict) -> str:
     """Форматирует результат предыдущего сигнала."""
     direction_emoji = "📈" if result["direction"] == "long" else "📉" if result["direction"] == "short" else "➡️"
@@ -445,7 +452,7 @@ def get_signals_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="💧 XRP", callback_data="signal_xrp"),
         ],
         [
-            InlineKeyboardButton(text="📊 Статистика", callback_data="signal_stats"),
+            InlineKeyboardButton(text="📊 Статистика", callback_data="show_stats_menu"),
         ],
         [
             InlineKeyboardButton(text="🔙 Назад", callback_data="menu_signals"),
@@ -457,16 +464,16 @@ def get_stats_coins_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура для выбора монеты для статистики."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="₿ BTC", callback_data="stats_coin_btc"),
-            InlineKeyboardButton(text="⟠ ETH", callback_data="stats_coin_eth"),
-            InlineKeyboardButton(text="💎 TON", callback_data="stats_coin_ton"),
+            InlineKeyboardButton(text="₿ BTC", callback_data="stats_BTC"),
+            InlineKeyboardButton(text="⟠ ETH", callback_data="stats_ETH"),
+            InlineKeyboardButton(text="💎 TON", callback_data="stats_TON"),
         ],
         [
-            InlineKeyboardButton(text="🟣 SOL", callback_data="stats_coin_sol"),
-            InlineKeyboardButton(text="💧 XRP", callback_data="stats_coin_xrp"),
+            InlineKeyboardButton(text="🟣 SOL", callback_data="stats_SOL"),
+            InlineKeyboardButton(text="💧 XRP", callback_data="stats_XRP"),
         ],
         [
-            InlineKeyboardButton(text="🔙 Назад", callback_data="stats_back"),
+            InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_signals"),
         ],
     ])
 
@@ -1556,14 +1563,14 @@ async def callback_signal_coin(callback: CallbackQuery):
         await callback.answer("❌ Ошибка при отправке сигнала", show_alert=True)
 
 
-@router.callback_query(lambda c: c.data == "signal_stats")
-async def callback_signal_stats(callback: CallbackQuery):
+@router.callback_query(lambda c: c.data == "show_stats_menu")
+async def show_stats_menu(callback: CallbackQuery):
     """Показать меню выбора монеты для статистики."""
     await callback.message.delete()
     
-    text = "📊 *Статистика по монете*\n"
+    text = "📊 Статистика по монете\n"
     text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-    text += "Выберите монету:\n"
+    text += "Выберите монету:"
     
     new_msg = await callback.message.answer(
         text,
@@ -1573,81 +1580,70 @@ async def callback_signal_stats(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.callback_query(lambda c: c.data.startswith("stats_coin_"))
-async def callback_stats_coin(callback: CallbackQuery):
+@router.callback_query(lambda c: c.data.startswith("stats_"))
+async def show_coin_statistics(callback: CallbackQuery):
     """Показать статистику по выбранной монете."""
-    await callback.message.delete()
-    
-    symbol = callback.data.replace("stats_coin_", "").upper()
+    coin = callback.data.replace("stats_", "")
     user_id = callback.from_user.id
+    
+    await callback.message.delete()
     
     # Показываем индикатор загрузки
     loading_msg = await callback.message.answer(
-        "⏳ *Загружаю статистику...*",
+        "⏳ Загружаю статистику...",
         parse_mode=ParseMode.MARKDOWN
     )
     
     try:
         # Получаем статистику по монете
-        stats = signal_tracker.get_coin_stats(user_id, symbol)
+        stats = signal_tracker.get_coin_stats(user_id, coin)
         
         if stats['total'] == 0:
-            text = f"📊 *СТАТИСТИКА {symbol}*\n"
-            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            text += "_У вас пока нет сигналов по этой монете._\n\n"
-            text += "Нажмите на монету в разделе Сигналы, чтобы начать отслеживание!"
+            text = f"""
+📊 СТАТИСТИКА {coin}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+_У вас пока нет сигналов по этой монете._
+
+Нажмите на монету в разделе Сигналы, чтобы начать отслеживание!
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
         else:
-            # Прогресс-бар для win rate
-            filled = int(stats['win_rate'] / 10)
-            bar = "█" * filled + "░" * (10 - filled)
+            # Используем новую функцию generate_progress_bar
+            progress_bar = generate_progress_bar(stats['win_rate'])
             
-            # Эмодзи для P/L
-            pnl_emoji = "📈" if stats['total_pl'] >= 0 else "📉"
-            pnl_sign = "+" if stats['total_pl'] >= 0 else ""
-            
-            # Форматирование времени последнего сигнала
-            if stats['last_signal_time']:
-                time_diff = datetime.now() - stats['last_signal_time']
-                hours = int(time_diff.total_seconds() // 3600)
-                if hours < 1:
-                    minutes = int(time_diff.total_seconds() // 60)
-                    last_signal_str = f"{minutes}мин назад"
-                elif hours < 24:
-                    last_signal_str = f"{hours}ч назад"
-                else:
-                    days = hours // 24
-                    last_signal_str = f"{days}д назад"
-            else:
-                last_signal_str = "N/A"
-            
-            text = f"📊 *СТАТИСТИКА {symbol}*\n"
-            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            text += f"📈 Всего сигналов: *{stats['total']}*\n"
-            text += f"✅ Успешных: *{stats['wins']}*\n"
-            text += f"❌ Убыточных: *{stats['losses']}*\n"
-            text += f"⏳ В ожидании: *{stats['pending']}*\n\n"
-            text += f"🎯 Win Rate: *{stats['win_rate']:.1f}%*\n"
-            text += f"{bar}\n\n"
-            text += f"{pnl_emoji} Общий P/L: *{pnl_sign}{stats['total_pl']:.1f}%*\n\n"
-            text += f"📅 Последний сигнал: {last_signal_str}\n"
-            text += f"🎯 Лучший сигнал: *+{stats['best_signal']:.1f}%*\n"
-            text += f"💀 Худший сигнал: *{stats['worst_signal']:.1f}%*\n"
-            text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            text = f"""
+📊 СТАТИСТИКА {coin}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📈 Всего сигналов: {stats['total']}
+✅ Успешных: {stats['wins']}
+❌ Убыточных: {stats['losses']}
+⏳ В ожидании: {stats['pending']}
+
+🎯 Win Rate: {stats['win_rate']:.1f}%
+{progress_bar}
+
+📈 Общий P/L: {stats['total_pl']:+.1f}%
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Назад", callback_data="signal_stats")],
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="show_stats_menu")]
         ])
         
         await loading_msg.edit_text(text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
         
     except Exception as e:
-        logger.error(f"Error getting coin stats for {symbol}: {e}", exc_info=True)
+        logger.error(f"Error getting coin stats for {coin}: {e}", exc_info=True)
         
-        text = f"❌ *Ошибка*\n\n"
-        text += f"Не удалось загрузить статистику для {symbol}."
+        text = f"""
+❌ Ошибка
+
+Не удалось загрузить статистику для {coin}.
+"""
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Назад", callback_data="signal_stats")],
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="show_stats_menu")]
         ])
         
         await loading_msg.edit_text(text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
@@ -1655,19 +1651,14 @@ async def callback_stats_coin(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.callback_query(lambda c: c.data == "stats_back")
-async def callback_stats_back(callback: CallbackQuery):
+@router.callback_query(lambda c: c.data == "back_to_signals")
+async def back_to_signals(callback: CallbackQuery):
     """Вернуться в меню сигналов из статистики."""
     await callback.message.delete()
     
-    text = "🎯 *Торговые сигналы*\n\n"
-    text += "Анализ на основе:\n\n"
-    text += "• Данные трекера китов\n"
-    text += "• Депозиты vs выводы с бирж\n"
-    text += "• Рыночные данные\n"
-    text += "• Объём торгов\n\n"
-    text += "🔮 _Прогноз на ближайший час_\n\n"
-    text += "👇 Выбери монету:"
+    text = "🤖 AI Сигналы\n"
+    text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    text += "Выберите монету:"
     
     new_msg = await callback.message.answer(
         text,
