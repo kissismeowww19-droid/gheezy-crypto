@@ -209,7 +209,9 @@ def test_funding_rate_is_not_called():
     source = inspect.getsource(ss.deep_analyze)
     
     # Should not contain the loop that calls funding rate
-    assert "for exch_name in" not in source or "okx" not in source or "# TODO" in source
+    # (the loop would have "for exch_name in" with "okx" somewhere)
+    has_funding_loop = "for exch_name in" in source and "okx" in source
+    assert not has_funding_loop, "Funding rate loop should be removed"
     
     # Should contain the TODO comment about future implementation
     assert "TODO" in source and "funding" in source.lower()
