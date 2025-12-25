@@ -70,6 +70,16 @@ class RocketHunterAnalyzer:
         }
         self.session: Optional[aiohttp.ClientSession] = None
         self.invalid_symbols_cache: Dict[str, float] = {}  # {symbol: timestamp}
+        
+        # Кэш торгуемых пар на биржах
+        self.exchange_pairs: Dict[str, set] = {
+            'binance': set(),
+            'bybit': set(),
+            'mexc': set(),
+            'gateio': set(),
+            'kucoin': set()
+        }
+        self.pairs_loaded = False
     
     async def _ensure_session(self):
         """Ensure aiohttp session exists."""
@@ -109,6 +119,125 @@ class RocketHunterAnalyzer:
             return False
         
         return True
+    
+    async def load_exchange_pairs(self):
+        """Загружает списки торгуемых пар со всех бирж"""
+        if self.pairs_loaded:
+            return
+        
+        await asyncio.gather(
+            self._load_binance_pairs(),
+            self._load_bybit_pairs(),
+            self._load_mexc_pairs(),
+            self._load_gateio_pairs(),
+            self._load_kucoin_pairs(),
+            return_exceptions=True
+        )
+        
+        self.pairs_loaded = True
+        logger.info(f"Exchange pairs loaded: Binance={len(self.exchange_pairs['binance'])}, "
+                   f"Bybit={len(self.exchange_pairs['bybit'])}, "
+                   f"MEXC={len(self.exchange_pairs['mexc'])}, "
+                   f"Gate.io={len(self.exchange_pairs['gateio'])}, "
+                   f"KuCoin={len(self.exchange_pairs['kucoin'])}")
+    
+    async def _load_binance_pairs(self):
+        """Binance - список всех USDT пар"""
+        await self._ensure_session()
+        url = "https://api.binance.com/api/v3/exchangeInfo"
+        try:
+            async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    for symbol in data.get('symbols', []):
+                        if symbol.get('quoteAsset') == 'USDT' and symbol.get('status') == 'TRADING':
+                            base = symbol.get('baseAsset', '').upper()
+                            self.exchange_pairs['binance'].add(base)
+        except Exception as e:
+            logger.warning(f"Failed to load Binance pairs: {e}")
+    
+    async def _load_bybit_pairs(self):
+        """Bybit - список всех spot пар"""
+        await self._ensure_session()
+        url = "https://api.bybit.com/v5/market/tickers?category=spot"
+        try:
+            async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    for item in data.get('result', {}).get('list', []):
+                        symbol = item.get('symbol', '')
+                        if symbol.endswith('USDT'):
+                            base = symbol.replace('USDT', '').upper()
+                            self.exchange_pairs['bybit'].add(base)
+        except Exception as e:
+            logger.warning(f"Failed to load Bybit pairs: {e}")
+    
+    async def _load_mexc_pairs(self):
+        """MEXC - список всех пар"""
+        await self._ensure_session()
+        url = "https://api.mexc.com/api/v3/ticker/24hr"
+        try:
+            async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    for ticker in data:
+                        symbol = ticker.get('symbol', '')
+                        if symbol.endswith('USDT'):
+                            base = symbol.replace('USDT', '').upper()
+                            self.exchange_pairs['mexc'].add(base)
+        except Exception as e:
+            logger.warning(f"Failed to load MEXC pairs: {e}")
+    
+    async def _load_gateio_pairs(self):
+        """Gate.io - список всех пар"""
+        await self._ensure_session()
+        url = "https://api.gateio.ws/api/v4/spot/tickers"
+        try:
+            async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    for ticker in data:
+                        pair = ticker.get('currency_pair', '')
+                        if pair.endswith('_USDT'):
+                            base = pair.replace('_USDT', '').upper()
+                            self.exchange_pairs['gateio'].add(base)
+        except Exception as e:
+            logger.warning(f"Failed to load Gate.io pairs: {e}")
+    
+    async def _load_kucoin_pairs(self):
+        """KuCoin - список всех пар"""
+        await self._ensure_session()
+        url = "https://api.kucoin.com/api/v1/market/allTickers"
+        try:
+            async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    for ticker in data.get('data', {}).get('ticker', []):
+                        symbol = ticker.get('symbol', '')
+                        if symbol.endswith('-USDT'):
+                            base = symbol.replace('-USDT', '').upper()
+                            self.exchange_pairs['kucoin'].add(base)
+        except Exception as e:
+            logger.warning(f"Failed to load KuCoin pairs: {e}")
+    
+    def get_available_exchanges(self, symbol: str) -> List[str]:
+        """Возвращает список бирж где торгуется монета"""
+        symbol = symbol.upper()
+        available = []
+        
+        exchange_names = {
+            'binance': 'Binance',
+            'bybit': 'Bybit',
+            'mexc': 'MEXC',
+            'gateio': 'Gate.io',
+            'kucoin': 'KuCoin'
+        }
+        
+        for exchange_key, display_name in exchange_names.items():
+            if symbol in self.exchange_pairs[exchange_key]:
+                available.append(display_name)
+        
+        return available
     
     async def fetch_binance_gainers(self) -> List[Dict]:
         """
@@ -307,6 +436,9 @@ class RocketHunterAnalyzer:
         Returns:
             Список монет с базовой информацией
         """
+        # Сначала загружаем списки пар с бирж
+        await self.load_exchange_pairs()
+        
         logger.info("Rocket Hunter: scanning from 4 sources (Binance + CoinLore + CoinPaprika + CoinGecko)")
         
         # Параллельно загружаем из всех источников
@@ -657,6 +789,9 @@ class RocketHunterAnalyzer:
             potential_min = int(abs_change_24h * 0.5)
             potential_max = int(abs_change_24h * 1.0)
             
+            # Получаем список бирж где торгуется монета
+            available_exchanges = self.get_available_exchanges(symbol)
+            
             return {
                 "symbol": symbol,
                 "name": coin.get('name', symbol),
@@ -675,6 +810,7 @@ class RocketHunterAnalyzer:
                 "potential_max": potential_max,
                 "exchange": exchange_name,
                 "source": coin.get('source', 'unknown'),
+                "exchanges": available_exchanges,  # НОВОЕ ПОЛЕ
             }
             
         except Exception as e:
@@ -811,6 +947,16 @@ class RocketHunterAnalyzer:
             
             # Потенциал
             text += f"⚡ Потенциал: \\+{rocket['potential_min']}\\-{rocket['potential_max']}%\n\n"
+            
+            # Биржи где торгуется
+            exchanges = rocket.get('exchanges', [])
+            if exchanges:
+                text += "🏦 *Где торговать:*\n"
+                for ex in exchanges:
+                    text += f"• {ex} ✅\n"
+                text += "\n"
+            else:
+                text += "⚠️ Биржи не найдены\n\n"
             
             # Факторы
             if rocket.get('factors'):
