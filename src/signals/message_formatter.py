@@ -205,6 +205,22 @@ class CompactMessageFormatter:
         rr = profit / risk
         return rr
     
+    def _normalize_liquidation_zone(self, zone):
+        """
+        Нормализует зону ликвидации к формату словаря.
+        
+        Args:
+            zone: Зона ликвидации - может быть dict {"price": 90372.0} или float 90372.0
+            
+        Returns:
+            Dict с ключом "price" или None
+        """
+        if zone is None:
+            return None
+        if isinstance(zone, (int, float)):
+            return {"price": zone}
+        return zone
+    
     def _get_top_reasons(self, enhancer_data: Dict, limit: int = 4) -> List[Dict]:
         """
         Выбирает топ самых важных факторов для отображения.
@@ -262,15 +278,8 @@ class CompactMessageFormatter:
         
         # 3. Liquidation Magnet
         liq = enhancer_data.get("liquidation_zones", {})
-        nearest_short = liq.get("nearest_short")
-        nearest_long = liq.get("nearest_long")
-        
-        # Обрабатываем разные форматы данных
-        # Может быть dict {"price": 90372.0} или просто float 90372.0
-        if isinstance(nearest_short, (int, float)):
-            nearest_short = {"price": nearest_short}
-        if isinstance(nearest_long, (int, float)):
-            nearest_long = {"price": nearest_long}
+        nearest_short = self._normalize_liquidation_zone(liq.get("nearest_short"))
+        nearest_long = self._normalize_liquidation_zone(liq.get("nearest_long"))
         
         # Выбираем ближайшую зону
         if nearest_short and nearest_long:

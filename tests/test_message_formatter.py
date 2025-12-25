@@ -262,6 +262,24 @@ class TestCompactMessageFormatter:
         assert "90.7K" in liq_reason["value"]
         assert "short liq" in liq_reason["value"]
     
+    def test_normalize_liquidation_zone(self, formatter):
+        """Test the _normalize_liquidation_zone helper method."""
+        # Test float input
+        result = formatter._normalize_liquidation_zone(90372.0)
+        assert result == {"price": 90372.0}
+        
+        # Test int input
+        result = formatter._normalize_liquidation_zone(90000)
+        assert result == {"price": 90000}
+        
+        # Test dict input (should return as-is)
+        result = formatter._normalize_liquidation_zone({"price": 90372.0})
+        assert result == {"price": 90372.0}
+        
+        # Test None input
+        result = formatter._normalize_liquidation_zone(None)
+        assert result is None
+    
     def test_get_top_reasons_funding(self, formatter):
         """Test extracting funding rate reason."""
         enhancer_data = {
