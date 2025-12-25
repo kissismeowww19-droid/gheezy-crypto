@@ -6885,7 +6885,11 @@ class AISignalAnalyzer:
             }
             
             # Получаем OHLCV для технического анализа
-            ohlcv_data = await self.get_ohlcv_data(symbol, interval="1h", limit=100)
+            try:
+                ohlcv_data = await self.data_source_manager.get_ohlcv_data(symbol, limit=100)
+            except Exception as e:
+                logger.warning(f"Failed to get OHLCV data for {symbol}: {e}")
+                ohlcv_data = None
             technical_data = await self.calculate_technical_indicators(symbol, ohlcv_data)
             
             # Рассчитываем сигнал (упрощенный)
