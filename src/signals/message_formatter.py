@@ -265,6 +265,13 @@ class CompactMessageFormatter:
         nearest_short = liq.get("nearest_short")
         nearest_long = liq.get("nearest_long")
         
+        # Обрабатываем разные форматы данных
+        # Может быть dict {"price": 90372.0} или просто float 90372.0
+        if isinstance(nearest_short, (int, float)):
+            nearest_short = {"price": nearest_short}
+        if isinstance(nearest_long, (int, float)):
+            nearest_long = {"price": nearest_long}
+        
         # Выбираем ближайшую зону
         if nearest_short and nearest_long:
             # Берём ту что ближе
