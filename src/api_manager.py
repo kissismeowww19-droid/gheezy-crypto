@@ -620,8 +620,8 @@ class MultiAPIManager:
             params = {
                 "instId": f"{symbol}-USDT",
                 "bar": "5m",
-                "before": str(start_time * 1000),
-                "after": str(end_time * 1000),
+                "after": str(start_time * 1000),  # after = start time (older)
+                "before": str(end_time * 1000),   # before = end time (more recent)
                 "limit": "300"
             }
             async with aiohttp.ClientSession() as session:
