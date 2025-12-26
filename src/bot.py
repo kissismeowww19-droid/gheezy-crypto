@@ -27,6 +27,7 @@ from signals.ai_signals import AISignalAnalyzer
 from signals.signal_tracker import SignalTracker
 from signals.super_signals import SuperSignals
 from signals.gem_scanner import GemScanner
+from ml.data_collector import ml_collector
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -2361,6 +2362,10 @@ def create_bot() -> Tuple[Bot, Dispatcher]:
 
 async def on_startup(bot: Bot):
     logger.info("Gheezy Crypto Bot запущен с 5 API")
+    
+    # Initialize ML data collector (creates data/ml directory)
+    logger.info(f"ML data collector initialized: {ml_collector.csv_path}")
+    
     for admin_id in settings.telegram_admin_ids:
         try:
             text = "🚀 *Gheezy Crypto* запущен!"
