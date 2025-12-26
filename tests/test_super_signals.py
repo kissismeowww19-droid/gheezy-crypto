@@ -265,7 +265,7 @@ def test_calculate_probability_movement_helps_reach_threshold():
 
 
 def test_calculate_real_levels_long():
-    """Test real levels calculation for LONG."""
+    """Test real levels calculation for LONG with ATR-based approach."""
     from signals.super_signals import SuperSignals
     
     ss = SuperSignals()
@@ -273,9 +273,7 @@ def test_calculate_real_levels_long():
     analysis = {
         "direction": "long",
         "current_price": 50000,
-        "support": 49000,
-        "resistance": 52000,
-        "atr": 500,
+        "atr": 1000,  # ATR is 1000, so 1.5x = 1500 stop distance
     }
     
     levels = ss.calculate_real_levels(analysis)
@@ -287,23 +285,28 @@ def test_calculate_real_levels_long():
     assert "tp2" in levels
     assert "rr_ratio" in levels
     
-    # Entry should be around current price
-    assert levels["entry_low"] < 50000
-    assert levels["entry_high"] > 50000
+    # Entry should be around current price (±1%)
+    assert levels["entry_low"] == 50000 * 0.99  # 49500
+    assert levels["entry_high"] == 50000 * 1.01  # 50500
     
-    # Stop should be below support
-    assert levels["stop_loss"] < 49000
+    # Stop should be 1.5 ATR below current price
+    # 1.5 * 1000 = 1500, so stop = 50000 - 1500 = 48500
+    assert levels["stop_loss"] == 48500
     
-    # TP1 should be near resistance
-    assert levels["tp1"] < 52000
-    assert levels["tp1"] > 50000
+    # TP1 should be 2x stop distance above current price (R:R 1:2)
+    # 50000 + (1500 * 2) = 53000
+    assert levels["tp1"] == 53000
     
-    # TP2 should be above resistance
-    assert levels["tp2"] > 52000
+    # TP2 should be 3x stop distance above current price (R:R 1:3)
+    # 50000 + (1500 * 3) = 54500
+    assert levels["tp2"] == 54500
+    
+    # R:R ratio should be 2.0
+    assert levels["rr_ratio"] == 2.0
 
 
 def test_calculate_real_levels_short():
-    """Test real levels calculation for SHORT."""
+    """Test real levels calculation for SHORT with ATR-based approach."""
     from signals.super_signals import SuperSignals
     
     ss = SuperSignals()
@@ -311,22 +314,29 @@ def test_calculate_real_levels_short():
     analysis = {
         "direction": "short",
         "current_price": 50000,
-        "support": 48000,
-        "resistance": 51000,
-        "atr": 500,
+        "atr": 1000,  # ATR is 1000, so 1.5x = 1500 stop distance
     }
     
     levels = ss.calculate_real_levels(analysis)
     
-    # Stop should be above resistance
-    assert levels["stop_loss"] > 51000
+    # Entry should be around current price (±1%)
+    assert levels["entry_low"] == 50000 * 0.99  # 49500
+    assert levels["entry_high"] == 50000 * 1.01  # 50500
     
-    # TP1 should be near support
-    assert levels["tp1"] > 48000
-    assert levels["tp1"] < 50000
+    # Stop should be 1.5 ATR above current price
+    # 1.5 * 1000 = 1500, so stop = 50000 + 1500 = 51500
+    assert levels["stop_loss"] == 51500
     
-    # TP2 should be below support
-    assert levels["tp2"] < 48000
+    # TP1 should be 2x stop distance below current price (R:R 1:2)
+    # 50000 - (1500 * 2) = 47000
+    assert levels["tp1"] == 47000
+    
+    # TP2 should be 3x stop distance below current price (R:R 1:3)
+    # 50000 - (1500 * 3) = 45500
+    assert levels["tp2"] == 45500
+    
+    # R:R ratio should be 2.0
+    assert levels["rr_ratio"] == 2.0
 
 
 def test_score_to_probability():
@@ -348,6 +358,44 @@ def test_score_to_probability():
     assert ss.score_to_probability(5) == 50
     assert ss.score_to_probability(3) == 45
     assert ss.score_to_probability(0) == 45
+
+
+@pytest.mark.asyncio
+async def test_fetch_binance_funding():
+    """Test that fetch_binance_funding method exists and returns None or a float."""
+    from signals.super_signals import SuperSignals
+    
+    ss = SuperSignals()
+    
+    # Test with a symbol that doesn't exist - should return None gracefully
+    result = await ss.fetch_binance_funding("NONEXISTENT")
+    assert result is None or isinstance(result, float)
+    
+    await ss.close()
+
+
+def test_calculate_real_levels_atr_max_cap():
+    """Test that stop loss is capped at 10% even with large ATR."""
+    from signals.super_signals import SuperSignals
+    
+    ss = SuperSignals()
+    
+    # Test with very large ATR (1.5x = 15000, which is 30% of price)
+    analysis = {
+        "direction": "long",
+        "current_price": 50000,
+        "atr": 10000,  # Very large ATR
+    }
+    
+    levels = ss.calculate_real_levels(analysis)
+    
+    # Stop distance should be capped at 10% = 5000
+    # So stop = 50000 - 5000 = 45000
+    assert levels["stop_loss"] == 45000
+    
+    # TP1 should be 2x the capped stop distance
+    # 50000 + (5000 * 2) = 60000
+    assert levels["tp1"] == 60000
 
 
 def test_format_message_empty():
