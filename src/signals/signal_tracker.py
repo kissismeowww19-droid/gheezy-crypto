@@ -73,6 +73,8 @@ class SignalTracker:
                 )
             ''')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_user_symbol ON signals(user_id, symbol)')
+            # Index for fast pending signal lookups
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_user_pending ON signals(user_id, result) WHERE result = \'pending\'')
             conn.commit()
     
     def _parse_datetime(self, datetime_str: Optional[str]) -> Optional[datetime]:
@@ -690,13 +692,14 @@ class SignalTracker:
                 'last_signal_time': last_signal_time
             }
     
-    def get_pending_signals(self, user_id: int, symbol: Optional[str] = None) -> List[TrackedSignal]:
+    def get_pending_signals(self, user_id: int, symbol: Optional[str] = None, limit: int = 20) -> List[TrackedSignal]:
         """
-        Get all pending signals for a user, optionally filtered by symbol.
+        Get pending signals for a user, optionally filtered by symbol.
         
         Args:
             user_id: ID of the user
             symbol: Optional symbol to filter by (e.g., "BTC", "ETH")
+            limit: Maximum number of signals to return (default: 20)
         
         Returns:
             List of TrackedSignal objects with pending status
@@ -708,16 +711,18 @@ class SignalTracker:
                            stop_loss_price, probability, timestamp
                     FROM signals
                     WHERE user_id = ? AND symbol = ? AND result = 'pending'
-                    ORDER BY timestamp DESC
-                ''', (user_id, symbol.upper()))
+                    ORDER BY timestamp ASC
+                    LIMIT ?
+                ''', (user_id, symbol.upper(), limit))
             else:
                 cursor = conn.execute('''
                     SELECT id, symbol, direction, entry_price, target1_price, target2_price,
                            stop_loss_price, probability, timestamp
                     FROM signals
                     WHERE user_id = ? AND result = 'pending'
-                    ORDER BY timestamp DESC
-                ''', (user_id,))
+                    ORDER BY timestamp ASC
+                    LIMIT ?
+                ''', (user_id, limit))
             
             signals = []
             for row in cursor.fetchall():
@@ -749,15 +754,36 @@ class SignalTracker:
         This method checks signals that are older than 4 hours using historical
         price data to determine if they hit their targets or stop losses.
         
+        Now optimized to check only a batch of oldest signals (limit=20) per call
+        to avoid rate limiting and reduce API load.
+        
         Args:
             user_id: ID of the user
         
         Returns:
-            Dict with counts: {'checked': 5, 'wins': 3, 'losses': 2, 'still_pending': 1}
+            Dict with counts: {
+                'checked': 5, 
+                'wins': 3, 
+                'losses': 2, 
+                'still_pending': 1,
+                'total_pending': 25,
+                'checked_batch': 20
+            }
         """
-        pending_signals = self.get_pending_signals(user_id)
+        # Get total pending count first
+        total_pending = len(self.get_pending_signals(user_id, limit=1000))  # Get real count
         
-        results = {'checked': 0, 'wins': 0, 'losses': 0, 'still_pending': 0}
+        # Check max 20 oldest signals
+        pending_signals = self.get_pending_signals(user_id, limit=20)
+        
+        results = {
+            'checked': 0, 
+            'wins': 0, 
+            'losses': 0, 
+            'still_pending': 0,
+            'total_pending': total_pending,
+            'checked_batch': len(pending_signals)
+        }
         
         for signal in pending_signals:
             # Calculate age of signal
@@ -808,14 +834,16 @@ class SignalTracker:
             else:
                 results['still_pending'] += 1
             
-            # Small delay between signals to be nice to APIs
-            await asyncio.sleep(0.5)
+            # Add delay between API calls to be nice to APIs
+            await asyncio.sleep(0.3)
         
         return results
     
     async def check_pending_signals_for_symbol(self, user_id: int, symbol: str) -> Dict:
         """
         Check pending signals for a specific symbol using historical prices.
+        
+        Now optimized to check only a batch of oldest signals (limit=20) per call.
         
         Args:
             user_id: ID of the user
@@ -824,7 +852,7 @@ class SignalTracker:
         Returns:
             Dict with counts: {'checked': 3, 'wins': 2, 'losses': 1, 'still_pending': 0}
         """
-        pending_signals = self.get_pending_signals(user_id, symbol)
+        pending_signals = self.get_pending_signals(user_id, symbol, limit=20)
         
         results = {'checked': 0, 'wins': 0, 'losses': 0, 'still_pending': 0}
         
@@ -877,8 +905,8 @@ class SignalTracker:
             else:
                 results['still_pending'] += 1
             
-            # Small delay between signals to be nice to APIs
-            await asyncio.sleep(0.5)
+            # Add delay between API calls to be nice to APIs
+            await asyncio.sleep(0.3)
         
         return results
     
