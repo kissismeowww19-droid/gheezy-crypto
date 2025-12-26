@@ -1,1 +1,1 @@
-worker: cd src && python main.py
+worker: python src/main.py
