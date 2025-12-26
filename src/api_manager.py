@@ -590,6 +590,8 @@ class MultiAPIManager:
                         prices = [float(candle[4]) for candle in data]  # close prices
                         highs = [float(candle[2]) for candle in data]
                         lows = [float(candle[3]) for candle in data]
+                        if not prices or not highs or not lows:
+                            return None
                         return {
                             "success": True,
                             "min_price": min(lows),
@@ -634,6 +636,8 @@ class MultiAPIManager:
                             prices = [float(c[4]) for c in candles]  # close
                             highs = [float(c[2]) for c in candles]
                             lows = [float(c[3]) for c in candles]
+                            if not prices or not highs or not lows:
+                                return None
                             return {
                                 "success": True,
                                 "min_price": min(lows),
@@ -679,6 +683,8 @@ class MultiAPIManager:
                             prices = [float(c[4]) for c in candles]  # close
                             highs = [float(c[2]) for c in candles]
                             lows = [float(c[3]) for c in candles]
+                            if not prices or not highs or not lows:
+                                return None
                             return {
                                 "success": True,
                                 "min_price": min(lows),
