@@ -124,7 +124,7 @@ def predict(symbol: str, features: Dict) -> Dict:
         elif ml_confidence < thresholds['low_confidence']:
             recommendation = "low_confidence"
             should_cancel = False
-        elif ml_confidence < thresholds['normal']:
+        elif ml_confidence <= thresholds['normal']:
             recommendation = "normal"
             should_cancel = False
         else:

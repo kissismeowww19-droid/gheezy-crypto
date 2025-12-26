@@ -150,7 +150,7 @@ def calculate_indicators_for_training(df: pd.DataFrame) -> pd.DataFrame:
     df['volume_sma'] = df['volume'].rolling(window=20).mean()
     
     # Fill NaN values
-    df = df.fillna(method='bfill').fillna(0)
+    df = df.bfill().fillna(0)
     
     return df
 

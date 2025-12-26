@@ -71,7 +71,7 @@ def combine_scores(rules_score: float, ml_prediction: Dict) -> Dict:
         elif final_conf_normalized < thresholds['low_confidence']:
             recommendation = "low_confidence"
             should_cancel = False
-        elif final_conf_normalized < thresholds['normal']:
+        elif final_conf_normalized <= thresholds['normal']:
             recommendation = "normal"
             should_cancel = False
         else:
