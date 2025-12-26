@@ -1024,7 +1024,11 @@ class SignalTracker:
                     min_price_4h=min_price,
                     max_price_4h=max_price,
                     result=final_result,
-                    timestamp=signal.timestamp.isoformat() if isinstance(signal.timestamp, datetime) else signal.timestamp,
+                    timestamp=(
+                        signal.timestamp.isoformat()
+                        if isinstance(signal.timestamp, datetime)
+                        else signal.timestamp
+                    ),
                     volume_24h=0.0,  # TODO: получить из API
                     change_24h=0.0,  # TODO: получить из API
                     whale_activity=0.0  # TODO: получить из whale tracker

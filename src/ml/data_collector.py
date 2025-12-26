@@ -6,10 +6,9 @@ and collects training data from verified signals.
 import aiohttp
 import asyncio
 import pandas as pd
-import numpy as np
 import csv
 from datetime import datetime, timedelta
-from typing import Tuple, List, Dict, Optional
+from typing import Tuple, Dict
 import logging
 import sys
 import os
