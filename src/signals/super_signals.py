@@ -29,7 +29,7 @@ class SuperSignals:
     """
 
     # Настройки
-    MIN_PROBABILITY = 50  # Минимальная вероятность для вывода (снижено с 60 для теста)
+    MIN_PROBABILITY = 45  # Минимальная вероятность для вывода (снижено с 50 для учета сильного движения)
     TOP_CANDIDATES = 30   # Сколько анализировать глубоко
     TOP_SIGNALS = 5       # Сколько выводить
 
@@ -1002,21 +1002,41 @@ class SuperSignals:
         bb_position = analysis["bb_position"]
         price_to_support = analysis["price_to_support"]
         price_to_resistance = analysis["price_to_resistance"]
+        # Use abs() to reward magnitude regardless of direction
+        # Direction is already captured in analysis["direction"]
+        change_24h = abs(analysis.get("change_24h", 0))
+
+        # === НОВОЕ: Баллы за сильное движение 24h ===
+        movement_points = 0
+        if change_24h > 50:
+            movement_points = 3  # Очень сильное движение (>50%)
+        elif change_24h > 30:
+            movement_points = 2  # Сильное движение (30-50%)
+        elif change_24h > 15:
+            movement_points = 1  # Среднее движение (15-30%)
+        score += movement_points
+        
+        # Лог для отладки
+        logger.debug(f"  {analysis['symbol']}: change_24h={change_24h:.1f}% → +{movement_points} points")
 
         if direction == "long":
             # RSI перепродан
+            rsi_points = 0
             if rsi < 25:
-                score += 3
+                rsi_points = 3
             elif rsi < 30:
-                score += 2
+                rsi_points = 2
             elif rsi < 40:
-                score += 1
+                rsi_points = 1
+            score += rsi_points
 
             # MACD бычий
+            macd_points = 0
             if macd["crossover"] == "bullish":
-                score += 3
+                macd_points = 3
             elif macd["histogram"] > 0 and macd["histogram"] > macd.get("prev_histogram", 0):
-                score += 2
+                macd_points = 2
+            score += macd_points
 
             # Funding отрицательный (шорты платят)
             if funding < -0.01:
@@ -1033,21 +1053,27 @@ class SuperSignals:
             # BB у нижней границы
             if bb_position < 0.2:
                 score += 1
+                
+            logger.debug(f"  {analysis['symbol']}: LONG RSI={rsi:.1f}(+{rsi_points}), MACD(+{macd_points}), BB={bb_position:.2f}")
 
         else:  # short
             # RSI перекуплен
+            rsi_points = 0
             if rsi > 75:
-                score += 3
+                rsi_points = 3
             elif rsi > 70:
-                score += 2
+                rsi_points = 2
             elif rsi > 60:
-                score += 1
+                rsi_points = 1
+            score += rsi_points
 
             # MACD медвежий
+            macd_points = 0
             if macd["crossover"] == "bearish":
-                score += 3
+                macd_points = 3
             elif macd["histogram"] < 0 and macd["histogram"] < macd.get("prev_histogram", 0):
-                score += 2
+                macd_points = 2
+            score += macd_points
 
             # Funding положительный (лонги платят)
             if funding > 0.01:
@@ -1064,12 +1090,18 @@ class SuperSignals:
             # BB у верхней границы
             if bb_position > 0.8:
                 score += 1
+                
+            logger.debug(f"  {analysis['symbol']}: SHORT RSI={rsi:.1f}(+{rsi_points}), MACD(+{macd_points}), BB={bb_position:.2f}")
 
         # Volume spike (для обоих направлений)
+        volume_points = 0
         if volume_ratio > 2.5:
-            score += 2
+            volume_points = 2
         elif volume_ratio > 1.5:
-            score += 1
+            volume_points = 1
+        score += volume_points
+        
+        logger.debug(f"  {analysis['symbol']}: Volume={volume_ratio:.2f}x(+{volume_points}), Total score={score}")
 
         score = min(score, 15)
 
@@ -1081,13 +1113,15 @@ class SuperSignals:
     def score_to_probability(self, score: int) -> int:
         """Конвертирует баллы в процент вероятности."""
         if score >= 12:
-            return 85
+            return 90
         elif score >= 10:
-            return 75
+            return 80
         elif score >= 8:
-            return 65
+            return 70
         elif score >= 6:
-            return 55
+            return 60
+        elif score >= 4:
+            return 50
         else:
             return 45
 

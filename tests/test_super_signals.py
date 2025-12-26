@@ -19,7 +19,7 @@ def test_super_signals_constants():
     
     # Check filtering constants
     assert hasattr(SuperSignals, 'MIN_PROBABILITY')
-    assert SuperSignals.MIN_PROBABILITY == 50  # Updated to 50
+    assert SuperSignals.MIN_PROBABILITY == 45  # Updated to 45
     
     assert hasattr(SuperSignals, 'TOP_CANDIDATES')
     assert SuperSignals.TOP_CANDIDATES == 30
@@ -139,21 +139,22 @@ def test_calculate_probability_long():
     
     # Perfect LONG conditions
     analysis = {
+        "symbol": "TEST",
         "direction": "long",
-        "rsi": 25,  # Oversold
-        "macd": {"crossover": "bullish", "histogram": 0.5, "prev_histogram": 0.3},
-        "funding_rate": -0.02,  # Negative funding
-        "volume_ratio": 3.0,  # High volume
-        "bb_position": 0.1,  # Near lower BB
-        "price_to_support": 1.5,  # Close to support
+        "rsi": 25,  # Oversold (+3)
+        "macd": {"crossover": "bullish", "histogram": 0.5, "prev_histogram": 0.3},  # (+3)
+        "funding_rate": -0.02,  # Negative funding (+2)
+        "volume_ratio": 3.0,  # High volume (+2)
+        "bb_position": 0.1,  # Near lower BB (+1)
+        "price_to_support": 1.5,  # Close to support (+2)
         "price_to_resistance": 10.0,
+        "change_24h": 55.0,  # Strong movement (+3)
     }
     
     probability = ss.calculate_probability(analysis)
     
-    # Should be high probability (>= 65%)
-    assert probability >= 65
-    assert probability <= 85
+    # Should be high probability (score = 3+3+2+2+1+2+3 = 15+ -> capped at 15 = 90%)
+    assert probability == 90
 
 
 def test_calculate_probability_short():
@@ -164,21 +165,103 @@ def test_calculate_probability_short():
     
     # Perfect SHORT conditions
     analysis = {
+        "symbol": "TEST",
         "direction": "short",
-        "rsi": 78,  # Overbought
-        "macd": {"crossover": "bearish", "histogram": -0.5, "prev_histogram": -0.3},
-        "funding_rate": 0.03,  # Positive funding
-        "volume_ratio": 2.8,  # High volume
-        "bb_position": 0.9,  # Near upper BB
+        "rsi": 78,  # Overbought (+3)
+        "macd": {"crossover": "bearish", "histogram": -0.5, "prev_histogram": -0.3},  # (+3)
+        "funding_rate": 0.03,  # Positive funding (+2)
+        "volume_ratio": 2.8,  # High volume (+2)
+        "bb_position": 0.9,  # Near upper BB (+1)
         "price_to_support": 10.0,
-        "price_to_resistance": 1.2,  # Close to resistance
+        "price_to_resistance": 1.2,  # Close to resistance (+2)
+        "change_24h": 100.0,  # Very strong movement (+3)
     }
     
     probability = ss.calculate_probability(analysis)
     
-    # Should be high probability (>= 65%)
-    assert probability >= 65
-    assert probability <= 85
+    # Should be high probability (score = 3+3+2+2+1+2+3 = 15+ -> capped at 15 = 90%)
+    assert probability == 90
+
+
+def test_calculate_probability_with_strong_movement():
+    """Test that strong 24h movement adds appropriate scoring points."""
+    from signals.super_signals import SuperSignals
+    
+    ss = SuperSignals()
+    
+    # Base analysis with minimal score (only movement)
+    base_analysis = {
+        "symbol": "TEST",
+        "direction": "long",
+        "rsi": 50,  # Neutral (0 points)
+        "macd": {"crossover": None, "histogram": 0, "prev_histogram": 0},  # (0 points)
+        "funding_rate": 0,  # (0 points)
+        "volume_ratio": 1.0,  # (0 points)
+        "bb_position": 0.5,  # (0 points)
+        "price_to_support": 10.0,  # (0 points)
+        "price_to_resistance": 10.0,  # (0 points)
+    }
+    
+    # Test very strong movement (>50%)
+    analysis_very_strong = base_analysis.copy()
+    analysis_very_strong["change_24h"] = 58.6
+    prob_very_strong = ss.calculate_probability(analysis_very_strong)
+    # Score = 3 (movement) -> 45%
+    assert prob_very_strong == 45
+    
+    # Test strong movement (30-50%)
+    analysis_strong = base_analysis.copy()
+    analysis_strong["change_24h"] = 40.0
+    prob_strong = ss.calculate_probability(analysis_strong)
+    # Score = 2 (movement) -> 45%
+    assert prob_strong == 45
+    
+    # Test medium movement (15-30%)
+    analysis_medium = base_analysis.copy()
+    analysis_medium["change_24h"] = 20.0
+    prob_medium = ss.calculate_probability(analysis_medium)
+    # Score = 1 (movement) -> 45%
+    assert prob_medium == 45
+    
+    # Test weak movement (<15%)
+    analysis_weak = base_analysis.copy()
+    analysis_weak["change_24h"] = 10.0
+    prob_weak = ss.calculate_probability(analysis_weak)
+    # Score = 0 (no movement bonus) -> 45%
+    assert prob_weak == 45
+
+
+def test_calculate_probability_movement_helps_reach_threshold():
+    """Test that movement scoring helps signals reach the MIN_PROBABILITY threshold."""
+    from signals.super_signals import SuperSignals
+    
+    ss = SuperSignals()
+    
+    # FST-like signal: strong RSI but weak on other indicators
+    analysis_fst = {
+        "symbol": "FST",
+        "direction": "long",
+        "rsi": 12.6,  # Very oversold (+3)
+        "macd": {"crossover": None, "histogram": 0, "prev_histogram": 0},  # (0 points)
+        "funding_rate": 0,  # (0 points)
+        "volume_ratio": 1.8,  # Slightly elevated (+1)
+        "bb_position": 0.15,  # Near lower BB (+1)
+        "price_to_support": 3.0,  # < 5 (+1)
+        "price_to_resistance": 10.0,  # (0 points)
+        "change_24h": 58.6,  # Very strong drop (+3)
+    }
+    
+    prob = ss.calculate_probability(analysis_fst)
+    # Score = 3 (movement) + 3 (RSI) + 0 (MACD) + 0 (funding) + 1 (support) + 1 (BB) + 1 (volume) = 9 -> 70%
+    assert prob == 70
+    assert prob >= 45  # Should pass MIN_PROBABILITY
+    
+    # Same signal WITHOUT movement bonus
+    analysis_without_movement = analysis_fst.copy()
+    analysis_without_movement["change_24h"] = 0
+    prob_without = ss.calculate_probability(analysis_without_movement)
+    # Score = 0 (movement) + 3 (RSI) + 0 (MACD) + 0 (funding) + 1 (support) + 1 (BB) + 1 (volume) = 6 -> 60%
+    assert prob_without == 60
 
 
 def test_calculate_real_levels_long():
@@ -253,15 +336,17 @@ def test_score_to_probability():
     ss = SuperSignals()
     
     # Test different score levels
-    assert ss.score_to_probability(12) == 85
-    assert ss.score_to_probability(13) == 85
-    assert ss.score_to_probability(10) == 75
-    assert ss.score_to_probability(11) == 75
-    assert ss.score_to_probability(8) == 65
-    assert ss.score_to_probability(9) == 65
-    assert ss.score_to_probability(6) == 55
-    assert ss.score_to_probability(7) == 55
-    assert ss.score_to_probability(5) == 45
+    assert ss.score_to_probability(12) == 90
+    assert ss.score_to_probability(13) == 90
+    assert ss.score_to_probability(10) == 80
+    assert ss.score_to_probability(11) == 80
+    assert ss.score_to_probability(8) == 70
+    assert ss.score_to_probability(9) == 70
+    assert ss.score_to_probability(6) == 60
+    assert ss.score_to_probability(7) == 60
+    assert ss.score_to_probability(4) == 50
+    assert ss.score_to_probability(5) == 50
+    assert ss.score_to_probability(3) == 45
     assert ss.score_to_probability(0) == 45
 
 
