@@ -73,8 +73,8 @@ class SignalTracker:
                 )
             ''')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_user_symbol ON signals(user_id, symbol)')
-            # Index for fast pending signal lookups
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_user_pending ON signals(user_id, result) WHERE result = \'pending\'')
+            # Composite index for fast pending signal lookups
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_user_pending ON signals(user_id, result)')
             conn.commit()
     
     def _parse_datetime(self, datetime_str: Optional[str]) -> Optional[datetime]:
@@ -770,8 +770,13 @@ class SignalTracker:
                 'checked_batch': 20
             }
         """
-        # Get total pending count first
-        total_pending = len(self.get_pending_signals(user_id, limit=1000))  # Get real count
+        # Get total pending count using SQL COUNT query
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                'SELECT COUNT(*) FROM signals WHERE user_id = ? AND result = ?',
+                (user_id, 'pending')
+            )
+            total_pending = cursor.fetchone()[0]
         
         # Check max 20 oldest signals
         pending_signals = self.get_pending_signals(user_id, limit=20)
