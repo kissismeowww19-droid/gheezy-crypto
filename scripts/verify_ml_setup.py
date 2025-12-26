@@ -60,6 +60,7 @@ def verify_ml_directory_setup():
         print(f"   ✅ Directory creation works (test_dir: {test_dir})")
         
         # Simulate _ensure_csv_header()
+        # Note: Headers must match MLDataCollector._ensure_csv_header() in src/ml/data_collector.py
         import csv
         csv_path = os.path.join(test_dir, 'training_data.csv')
         with open(csv_path, 'w', newline='', encoding='utf-8') as f:

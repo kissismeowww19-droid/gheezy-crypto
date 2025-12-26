@@ -26,6 +26,7 @@ def test_ml_directory_creation():
         assert os.path.exists(data_dir), "Directory should be created"
         
         # 2. _ensure_csv_header() - creates CSV with headers
+        # Note: Headers must match MLDataCollector._ensure_csv_header() in src/ml/data_collector.py
         if not os.path.exists(csv_path):
             with open(csv_path, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
