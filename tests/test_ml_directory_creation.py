@@ -82,9 +82,3 @@ def test_directory_exists_ok():
         assert os.path.exists(data_dir)
         
         print("✅ Multiple directory creation test passed!")
-
-
-if __name__ == "__main__":
-    test_ml_directory_creation()
-    test_directory_exists_ok()
-    print("\n✅ All ML directory creation tests passed!")

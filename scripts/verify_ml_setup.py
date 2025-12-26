@@ -90,10 +90,20 @@ def verify_ml_directory_setup():
     if os.path.exists(bot_py_path):
         with open(bot_py_path, 'r') as f:
             bot_content = f.read()
+            # Check for specific import statement
             has_import = 'from ml.data_collector import ml_collector' in bot_content
-            has_init = 'ml_collector.csv_path' in bot_content
+            # Check for initialization in on_startup (looking for the log line)
+            has_init = 'ml_collector.csv_path' in bot_content and 'on_startup' in bot_content
             print(f"   Has ml_collector import: {has_import}")
             print(f"   Initializes in on_startup: {has_init}")
+            
+            if not has_import:
+                print("   ⚠️  Warning: ml_collector import not found in bot.py")
+            if not has_init:
+                print("   ⚠️  Warning: ml_collector initialization not found in on_startup")
+    else:
+        print("   ❌ bot.py not found!")
+        return False
     
     print("\n" + "=" * 60)
     print("✅ Verification complete!")
