@@ -5349,6 +5349,63 @@ class AISignalAnalyzer:
                     atr=atr_value
                 )
         
+        # ====== NEW: ML VALIDATION ======
+        ml_prediction = None
+        ml_confidence_pct = None
+        ml_recommendation = None
+        
+        # Check if ML is available for this symbol
+        try:
+            from ml.config import ML_CONFIG
+            if symbol in ML_CONFIG['coins']:
+                logger.info(f"Running ML validation for {symbol}...")
+                
+                # Extract features for ML
+                from ml.features import extract_features_from_signal_data
+                
+                # Prepare data for feature extraction
+                signal_features_data = {
+                    'price_change_1h': market_data.get('price_change_1h', 0),
+                    'price_change_4h': market_data.get('price_change_4h', 0),
+                    'price_change_24h': market_data.get('price_change_24h', 0),
+                    'funding_rate': funding_rate.get('rate', 0) if funding_rate else 0,
+                    'fear_greed': fear_greed.get('value', 50) if fear_greed else 50,
+                    'enhancer_data': {
+                        'order_flow': enhancer_extra_data.get('order_flow_cvd', 0) if enhancer_extra_data else 0,
+                        'volume_profile': enhancer_score * 0.1,  # Approximate
+                        'multi_exchange': 0,
+                        'liquidations': 0,
+                        'smart_money': 0,
+                        'wyckoff': 0,
+                        'on_chain': 0,
+                        'whale_tracker': 0,
+                        'funding_advanced': 0,
+                        'volatility': 0,
+                    }
+                }
+                
+                features = extract_features_from_signal_data(
+                    signal_features_data,
+                    technical_data or {},
+                    market_data
+                )
+                
+                # Make ML prediction
+                from ml.predictor import predict
+                ml_prediction = predict(symbol, features)
+                
+                ml_confidence_pct = ml_prediction.get('ml_confidence', 0.5) * 100
+                ml_recommendation = ml_prediction.get('recommendation', 'normal')
+                
+                logger.info(f"ML prediction for {symbol}: confidence={ml_confidence_pct:.1f}%, recommendation={ml_recommendation}")
+                
+                # Adjust final confidence based on ML if needed
+                if ml_prediction.get('should_cancel', False):
+                    logger.warning(f"ML recommends canceling signal for {symbol}")
+                    # We don't override the signal here, but we'll indicate it in the data
+        except Exception as e:
+            logger.error(f"Error during ML validation for {symbol}: {e}")
+        
         return {
             "symbol": symbol,
             "direction": direction,
@@ -5422,6 +5479,10 @@ class AISignalAnalyzer:
             "price_prediction": price_prediction,
             # NEW: Real TP/SL targets based on S/R levels
             "real_targets": real_targets,
+            # NEW: ML Validation
+            "ml_prediction": ml_prediction,
+            "ml_confidence": ml_confidence_pct,
+            "ml_recommendation": ml_recommendation,
         }
     
     @staticmethod
@@ -6728,7 +6789,8 @@ class AISignalAnalyzer:
             confidence=probability,
             timeframe="4H",
             levels=levels if levels else None,
-            enhancer_data=formatter_enhancer_data
+            enhancer_data=formatter_enhancer_data,
+            ml_data=signal_data  # Pass full signal data for ML info
         )
         
         return message
