@@ -13,6 +13,11 @@ logger = logging.getLogger(__name__)
 class GemScanner:
     """Сканер для поиска новых токенов (гемов) на DEX."""
 
+    # Константы
+    UNKNOWN_TOKEN_AGE_HOURS = (
+        999  # Значение по умолчанию для токенов с неизвестным возрастом
+    )
+
     # Фильтры для гемов
     DEFAULT_FILTERS = {
         "max_market_cap": 2_000_000,  # Макс. капитализация < $2M
@@ -101,7 +106,8 @@ class GemScanner:
         """
         Получает новые пары с DEX Screener API.
 
-        API: https://api.dexscreener.com/latest/dex/tokens/{network}
+        API: https://api.dexscreener.com/token-profiles/latest/v1
+        Note: This endpoint returns the latest token profiles across all chains.
         """
         chain = self.NETWORKS.get(network.lower(), network)
 
@@ -122,14 +128,13 @@ class GemScanner:
                         )
                         return []
 
-                    # Фильтруем по сети
-                    pairs = []
-                    for item in data:
-                        if (
-                            isinstance(item, dict)
-                            and item.get("chainId", "").lower() == chain.lower()
-                        ):
-                            pairs.append(item)
+                    # Фильтруем по сети - используем list comprehension для производительности
+                    pairs = [
+                        item
+                        for item in data
+                        if isinstance(item, dict)
+                        and item.get("chainId", "").lower() == chain.lower()
+                    ]
 
                     return pairs
                 else:
@@ -174,7 +179,7 @@ class GemScanner:
                         1000 * 60 * 60
                     )
                 else:
-                    age_hours = 999  # Неизвестный возраст
+                    age_hours = self.UNKNOWN_TOKEN_AGE_HOURS
 
                 # Применяем фильтры
                 if market_cap > self.filters["max_market_cap"]:
@@ -223,7 +228,7 @@ class GemScanner:
                 1000 * 60 * 60
             )
         else:
-            age_hours = 999
+            age_hours = self.UNKNOWN_TOKEN_AGE_HOURS
 
         # === ВОЗРАСТ (max 25) ===
         if age_hours < 24:

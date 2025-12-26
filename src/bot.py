@@ -2297,10 +2297,10 @@ async def gems_network(callback: CallbackQuery):
         message = scanner.format_gems_message(gems, network)
         await scanner.close()
 
-        # Используем HTML вместо MarkdownV2 для простоты
+        # Отправляем без форматирования для избежания проблем с экранированием
         await callback.message.edit_text(
             message,
-            parse_mode=None,  # Без форматирования для избежания проблем
+            parse_mode=None,  # Без форматирования для стабильности
         )
     except Exception as e:
         logger.error(f"Gems scan error: {e}")
