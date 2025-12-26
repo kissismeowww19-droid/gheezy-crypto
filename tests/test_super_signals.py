@@ -42,6 +42,9 @@ def test_super_signals_constants():
     
     assert hasattr(SuperSignals, 'MAX_STOP_LOSS_PERCENT')
     assert SuperSignals.MAX_STOP_LOSS_PERCENT == 0.10
+    
+    assert hasattr(SuperSignals, 'DEFAULT_ATR_PERCENT')
+    assert SuperSignals.DEFAULT_ATR_PERCENT == 0.03
 
 
 def test_super_signals_methods_exist():

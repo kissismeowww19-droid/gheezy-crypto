@@ -41,6 +41,7 @@ class SuperSignals:
     # Уровни и риск-менеджмент
     ATR_MULTIPLIER = 1.5  # Множитель ATR для расчёта стоп-лосса
     MAX_STOP_LOSS_PERCENT = 0.10  # Максимальный стоп-лосс (10%)
+    DEFAULT_ATR_PERCENT = 0.03  # Fallback ATR (3% от цены)
 
     # Исключенные символы
     EXCLUDED_SYMBOLS = {
@@ -1178,7 +1179,7 @@ class SuperSignals:
         на основе ATR и текущей волатильности.
         """
         current_price = analysis["current_price"]
-        atr = analysis.get("atr", current_price * 0.03)  # Fallback 3%
+        atr = analysis.get("atr", current_price * self.DEFAULT_ATR_PERCENT)
         direction = analysis["direction"]
         
         if direction == "long":
@@ -1216,10 +1217,16 @@ class SuperSignals:
         tp1_percent = ((tp1 - current_price) / current_price) * 100
         tp2_percent = ((tp2 - current_price) / current_price) * 100
         
-        # R:R ratio
+        # R:R ratio - должен быть всегда 2.0 при правильном расчёте
         risk = abs(current_price - stop_loss)
         reward = abs(tp1 - current_price)
-        rr_ratio = round(reward / risk, 1) if risk > 0 else 2.0
+        # Risk не может быть 0 при правильных данных, но защитимся на всякий случай
+        if risk > 0:
+            rr_ratio = round(reward / risk, 1)
+        else:
+            # Это не должно произойти, но если ATR = 0, устанавливаем базовое значение
+            logger.warning(f"Risk is 0 for {analysis.get('symbol', 'unknown')}, using fallback R:R")
+            rr_ratio = 2.0
         
         return {
             "entry_low": entry_low,
