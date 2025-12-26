@@ -857,6 +857,13 @@ class SuperSignals:
                 f"Volume={analysis['volume_ratio']:.2f}x"
             )
 
+            # Определяем накопление (accumulation)
+            accumulation = self.detect_accumulation(candles_1h, analysis['volume_ratio'], price_change_1h)
+            analysis["accumulation"] = accumulation
+            
+            if accumulation["detected"]:
+                logger.debug(f"{symbol}: Accumulation detected - {accumulation['strength']}")
+
             # Расчёт вероятности
             probability = self.calculate_probability(analysis)
             if probability < self.MIN_PROBABILITY:
@@ -1078,6 +1085,61 @@ class SuperSignals:
             resistance = current_price * 1.03
 
         return support, resistance
+
+    def detect_accumulation(self, candles_1h: List[Dict], volume_ratio: float, price_change_1h: float) -> Dict:
+        """
+        Определяет паттерн накопления (accumulation).
+        
+        Накопление = высокий объём при минимальном изменении цены
+        Это значит что крупный игрок скупает/продаёт, не двигая цену
+        
+        Args:
+            candles_1h: Свечи 1h для дополнительного анализа
+            volume_ratio: Отношение текущего объёма к среднему
+            price_change_1h: Изменение цены за 1h в %
+        
+        Returns:
+            {
+                "detected": True/False,
+                "strength": "strong" / "moderate" / "weak" / None,
+                "signal": "🟢 Сильное накопление" / "🟡 Накопление" / None,
+                "volume_increase": 300,  # %
+                "price_change": 2,  # %
+            }
+        """
+        result = {
+            "detected": False,
+            "strength": None,
+            "signal": None,
+            "volume_increase": volume_ratio * 100 if volume_ratio else 0,
+            "price_change": abs(price_change_1h) if price_change_1h else 0
+        }
+        
+        if volume_ratio is None or price_change_1h is None:
+            return result
+        
+        volume_pct = volume_ratio * 100  # Конвертируем в проценты (x2.5 = 250%)
+        price_pct = abs(price_change_1h)  # Абсолютное изменение цены
+        
+        # Сильное накопление: объём > 300%, цена < 5%
+        if volume_pct > 300 and price_pct < 5:
+            result["detected"] = True
+            result["strength"] = "strong"
+            result["signal"] = "🟢 Сильное накопление"
+        
+        # Умеренное накопление: объём > 200%, цена < 10%
+        elif volume_pct > 200 and price_pct < 10:
+            result["detected"] = True
+            result["strength"] = "moderate"
+            result["signal"] = "🟢 Накопление"
+        
+        # Слабое накопление: объём > 150%, цена < 15%
+        elif volume_pct > 150 and price_pct < 15:
+            result["detected"] = True
+            result["strength"] = "weak"
+            result["signal"] = "🟡 Слабое накопление"
+        
+        return result
 
     def _calculate_ema(self, candles: List[Dict], period: int) -> float:
         """Рассчитывает EMA."""
@@ -1316,6 +1378,20 @@ class SuperSignals:
             volume_points = 1
         score += volume_points
         
+        # Accumulation (для обоих направлений)
+        accumulation = analysis.get("accumulation", {})
+        accumulation_points = 0
+        if accumulation.get("detected"):
+            strength = accumulation.get("strength")
+            if strength == "strong":
+                accumulation_points = 4  # Сильное накопление = очень хороший знак
+            elif strength == "moderate":
+                accumulation_points = 3
+            elif strength == "weak":
+                accumulation_points = 1
+            score += accumulation_points
+            logger.debug(f"  {analysis['symbol']}: Accumulation {strength} = +{accumulation_points} points")
+        
         logger.debug(f"  {analysis['symbol']}: Volume={volume_ratio:.2f}x(+{volume_points}), Total score={score}")
 
         score = min(score, 15)
@@ -1339,6 +1415,162 @@ class SuperSignals:
             return 50
         else:
             return 45
+
+    def calculate_probability_with_breakdown(self, analysis: Dict, direction: str) -> Dict:
+        """
+        Рассчитывает вероятность с детальным breakdown по категориям.
+        
+        Args:
+            analysis: Данные анализа монеты
+            direction: Направление сигнала ("long" или "short")
+        
+        Returns:
+            {
+                "probability": 85,
+                "breakdown": {
+                    "technical": {"score": 30, "max": 40, "details": "RSI=17, MACD бычий"},
+                    "volume": {"score": 25, "max": 30, "details": "x2.5 всплеск, накопление"},
+                    "funding": {"score": 15, "max": 20, "details": "-0.02% сквиз шортов"},
+                    "trend": {"score": 15, "max": 20, "details": "1h+4h совпадают"},
+                },
+                "total_score": 85,
+                "max_score": 110
+            }
+        """
+        breakdown = {
+            "technical": {"score": 0, "max": 40, "details": []},
+            "volume": {"score": 0, "max": 30, "details": []},
+            "funding": {"score": 0, "max": 20, "details": []},
+            "trend": {"score": 0, "max": 20, "details": []},
+        }
+        
+        # === TECHNICAL (max 40) ===
+        rsi = analysis.get("rsi")
+        if rsi:
+            if direction == "long" and rsi < 30:
+                breakdown["technical"]["score"] += 15
+                breakdown["technical"]["details"].append(f"RSI={rsi:.0f} перепродан")
+            elif direction == "long" and rsi < 40:
+                breakdown["technical"]["score"] += 8
+                breakdown["technical"]["details"].append(f"RSI={rsi:.0f}")
+            elif direction == "short" and rsi > 70:
+                breakdown["technical"]["score"] += 15
+                breakdown["technical"]["details"].append(f"RSI={rsi:.0f} перекуплен")
+            elif direction == "short" and rsi > 60:
+                breakdown["technical"]["score"] += 8
+                breakdown["technical"]["details"].append(f"RSI={rsi:.0f}")
+        
+        # MACD
+        macd_signal = analysis.get("macd", {})
+        if macd_signal:
+            crossover = macd_signal.get("crossover")
+            if (direction == "long" and crossover == "bullish") or \
+               (direction == "short" and crossover == "bearish"):
+                breakdown["technical"]["score"] += 10
+                breakdown["technical"]["details"].append(f"MACD {crossover}")
+        
+        # EMA
+        ema_trend = analysis.get("ema_trend")
+        if ema_trend:
+            if (direction == "long" and ema_trend == "bullish") or \
+               (direction == "short" and ema_trend == "bearish"):
+                breakdown["technical"]["score"] += 8
+                breakdown["technical"]["details"].append(f"EMA {ema_trend}")
+        
+        # StochRSI
+        stoch_rsi = analysis.get("stoch_rsi", {})
+        stoch_k = stoch_rsi.get("k", 50)
+        if direction == "long" and stoch_k < 20:
+            breakdown["technical"]["score"] += 7
+            breakdown["technical"]["details"].append(f"StochRSI={stoch_k:.0f}")
+        elif direction == "short" and stoch_k > 80:
+            breakdown["technical"]["score"] += 7
+            breakdown["technical"]["details"].append(f"StochRSI={stoch_k:.0f}")
+        
+        # === VOLUME (max 30) ===
+        volume_ratio = analysis.get("volume_ratio", 1)
+        if volume_ratio > 3:
+            breakdown["volume"]["score"] += 15
+            breakdown["volume"]["details"].append(f"x{volume_ratio:.1f} всплеск")
+        elif volume_ratio > 2:
+            breakdown["volume"]["score"] += 10
+            breakdown["volume"]["details"].append(f"x{volume_ratio:.1f} рост")
+        elif volume_ratio > 1.5:
+            breakdown["volume"]["score"] += 5
+            breakdown["volume"]["details"].append(f"x{volume_ratio:.1f}")
+        
+        # Accumulation
+        accumulation = analysis.get("accumulation", {})
+        if accumulation.get("detected"):
+            strength = accumulation.get("strength")
+            if strength == "strong":
+                breakdown["volume"]["score"] += 15
+                breakdown["volume"]["details"].append("сильное накопление")
+            elif strength == "moderate":
+                breakdown["volume"]["score"] += 10
+                breakdown["volume"]["details"].append("накопление")
+            elif strength == "weak":
+                breakdown["volume"]["score"] += 5
+                breakdown["volume"]["details"].append("слабое накопление")
+        
+        # === FUNDING (max 20) ===
+        funding = analysis.get("funding_rate")
+        if funding is not None:
+            if direction == "long" and funding < -0.01:
+                breakdown["funding"]["score"] += 15
+                breakdown["funding"]["details"].append(f"{funding:.3f}% сквиз шортов")
+            elif direction == "long" and funding < 0:
+                breakdown["funding"]["score"] += 8
+                breakdown["funding"]["details"].append(f"{funding:.3f}%")
+            elif direction == "short" and funding > 0.01:
+                breakdown["funding"]["score"] += 15
+                breakdown["funding"]["details"].append(f"{funding:.3f}% давление лонгов")
+            elif direction == "short" and funding > 0:
+                breakdown["funding"]["score"] += 8
+                breakdown["funding"]["details"].append(f"{funding:.3f}%")
+        
+        # === TREND (max 20) ===
+        rsi_4h = analysis.get("rsi_4h")
+        if rsi_4h:
+            if direction == "long" and rsi_4h < 30:
+                breakdown["trend"]["score"] += 12
+                breakdown["trend"]["details"].append(f"RSI_4h={rsi_4h:.0f} перепродан")
+            elif direction == "long" and rsi_4h < 40:
+                breakdown["trend"]["score"] += 6
+                breakdown["trend"]["details"].append(f"RSI_4h={rsi_4h:.0f}")
+            elif direction == "short" and rsi_4h > 70:
+                breakdown["trend"]["score"] += 12
+                breakdown["trend"]["details"].append(f"RSI_4h={rsi_4h:.0f} перекуплен")
+            elif direction == "short" and rsi_4h > 60:
+                breakdown["trend"]["score"] += 6
+                breakdown["trend"]["details"].append(f"RSI_4h={rsi_4h:.0f}")
+        
+        # Совпадение 1h и 4h
+        if rsi and rsi_4h:
+            if direction == "long" and rsi < 35 and rsi_4h < 40:
+                breakdown["trend"]["score"] += 8
+                breakdown["trend"]["details"].append("1h+4h совпадают")
+            elif direction == "short" and rsi > 65 and rsi_4h > 60:
+                breakdown["trend"]["score"] += 8
+                breakdown["trend"]["details"].append("1h+4h совпадают")
+        
+        # Calculate total
+        total_score = sum(cat["score"] for cat in breakdown.values())
+        max_score = sum(cat["max"] for cat in breakdown.values())
+        
+        # Normalize to 0-100 probability
+        probability = min(95, max(30, int((total_score / max_score) * 100)))
+        
+        # Format details as strings
+        for cat in breakdown.values():
+            cat["details"] = ", ".join(cat["details"]) if cat["details"] else "—"
+        
+        return {
+            "probability": probability,
+            "breakdown": breakdown,
+            "total_score": total_score,
+            "max_score": max_score
+        }
 
     def calculate_real_levels(self, analysis: Dict) -> Dict:
         """
@@ -1607,6 +1839,37 @@ class SuperSignals:
                 else:
                     return f"${p:.8f}"
 
+            # Accumulation
+            accumulation = signal.get("accumulation", {})
+            accumulation_line = ""
+            if accumulation.get("detected"):
+                accum_signal = accumulation.get("signal", "")
+                vol_inc = accumulation.get("volume_increase", 0)
+                price_ch = accumulation.get("price_change", 0)
+                accumulation_line = f"• Накопление: {accum_signal} \\(объём \\+{vol_inc:.0f}%, цена {price_ch:.1f}%\\)\n"
+
+            # Breakdown (если есть)
+            breakdown = signal.get("breakdown")
+            breakdown_text = ""
+            if breakdown:
+                breakdown_text = "\n📊 Breakdown:\n"
+                
+                tech = breakdown.get("technical", {})
+                if tech.get("score", 0) > 0:
+                    breakdown_text += f"• Технический: \\+{tech['score']}/{tech['max']} \\({tech['details']}\\)\n"
+                
+                vol = breakdown.get("volume", {})
+                if vol.get("score", 0) > 0:
+                    breakdown_text += f"• Объём: \\+{vol['score']}/{vol['max']} \\({vol['details']}\\)\n"
+                
+                fund = breakdown.get("funding", {})
+                if fund.get("score", 0) > 0:
+                    breakdown_text += f"• Funding: \\+{fund['score']}/{fund['max']} \\({fund['details']}\\)\n"
+                
+                trend = breakdown.get("trend", {})
+                if trend.get("score", 0) > 0:
+                    breakdown_text += f"• Тренд: \\+{trend['score']}/{trend['max']} \\({trend['details']}\\)\n"
+
             msg = f"""
 ⚡ \\#{i} {signal['symbol']}/USDT \\| {direction}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1618,7 +1881,7 @@ class SuperSignals:
 {rsi_4h_line}• MACD: {macd_status}
 • Funding: {funding_status}
 {ema_line}{stoch_line}• Объём: {vol_status}
-
+{accumulation_line}{breakdown_text}
 ⏰ Ожидание: 1\\-4 часа
 
 📍 Уровни:
