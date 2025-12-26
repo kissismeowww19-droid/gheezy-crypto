@@ -221,17 +221,35 @@ def extract_features_from_signal_data(
     features["close"] = current_price
     features["volume"] = market_data.get("volume_24h", 0)
 
-    # Price changes (from signal_data if available)
-    features["price_change_1"] = signal_data.get("price_change_1h", 0) / 100
-    features["price_change_4"] = signal_data.get("price_change_4h", 0) / 100
-    features["price_change_24"] = signal_data.get("price_change_24h", 0) / 100
+    # Price changes (from signal_data if available) - handle None values
+    price_change_1h = signal_data.get("price_change_1h", 0)
+    features["price_change_1"] = (price_change_1h / 100) if price_change_1h is not None else 0.0
+    
+    price_change_4h = signal_data.get("price_change_4h", 0)
+    features["price_change_4"] = (price_change_4h / 100) if price_change_4h is not None else 0.0
+    
+    price_change_24h = signal_data.get("price_change_24h", 0)
+    features["price_change_24"] = (price_change_24h / 100) if price_change_24h is not None else 0.0
 
-    # Technical indicators
+    # Technical indicators - handle nested dictionaries from calculate_technical_indicators
     if technical_data:
-        features["rsi"] = technical_data.get("rsi", 50.0)
-        features["macd"] = technical_data.get("macd", 0.0)
-        features["macd_signal"] = technical_data.get("macd_signal", 0.0)
-        features["macd_diff"] = technical_data.get("macd_diff", 0.0)
+        # RSI - can be nested dict with 'value' key or direct value
+        rsi_data = technical_data.get("rsi", 50.0)
+        if isinstance(rsi_data, dict):
+            features["rsi"] = rsi_data.get("value", 50.0)
+        else:
+            features["rsi"] = rsi_data
+        
+        # MACD - can be nested dict or direct values
+        macd_data = technical_data.get("macd", 0.0)
+        if isinstance(macd_data, dict):
+            features["macd"] = macd_data.get("macd_line", 0.0)
+            features["macd_signal"] = macd_data.get("signal_line", 0.0)
+            features["macd_diff"] = macd_data.get("histogram", 0.0)
+        else:
+            features["macd"] = macd_data
+            features["macd_signal"] = technical_data.get("macd_signal", 0.0)
+            features["macd_diff"] = technical_data.get("macd_diff", 0.0)
 
         bb_data = technical_data.get("bollinger_bands", {})
         features["bb_upper"] = bb_data.get("upper", current_price * 1.02)
@@ -257,20 +275,43 @@ def extract_features_from_signal_data(
                 else 0.5
             )
 
-        features["ma_50"] = technical_data.get("ma_50", current_price)
-        features["ma_200"] = technical_data.get("ma_200", current_price)
+        # Moving averages
+        ma_cross_data = technical_data.get("ma_crossover", {})
+        if isinstance(ma_cross_data, dict):
+            features["ma_50"] = ma_cross_data.get("ma_short", current_price)
+            features["ma_200"] = ma_cross_data.get("ma_long", current_price)
+        else:
+            features["ma_50"] = technical_data.get("ma_50", current_price)
+            features["ma_200"] = technical_data.get("ma_200", current_price)
+        
         features["ma_crossover"] = (features["ma_50"] - features["ma_200"]) / features[
             "ma_200"
-        ]
+        ] if features["ma_200"] != 0 else 0.0
 
-        features["stoch_rsi"] = technical_data.get("stoch_rsi", 50.0)
-        features["mfi"] = technical_data.get("mfi", 50.0)
-        features["roc"] = technical_data.get("roc", 0.0)
-        features["williams_r"] = technical_data.get("williams_r", -50.0)
-        features["atr"] = technical_data.get("atr", 0.0)
-        features["adx"] = technical_data.get("adx", 0.0)
-        features["obv"] = technical_data.get("obv", 0.0)
-        features["vwap"] = technical_data.get("vwap", current_price)
+        # Additional indicators - handle nested dicts
+        stoch_rsi_data = technical_data.get("stoch_rsi", 50.0)
+        features["stoch_rsi"] = stoch_rsi_data.get("k", 50.0) if isinstance(stoch_rsi_data, dict) else stoch_rsi_data
+        
+        mfi_data = technical_data.get("mfi", 50.0)
+        features["mfi"] = mfi_data.get("value", 50.0) if isinstance(mfi_data, dict) else mfi_data
+        
+        roc_data = technical_data.get("roc", 0.0)
+        features["roc"] = roc_data.get("value", 0.0) if isinstance(roc_data, dict) else roc_data
+        
+        williams_data = technical_data.get("williams_r", -50.0)
+        features["williams_r"] = williams_data.get("value", -50.0) if isinstance(williams_data, dict) else williams_data
+        
+        atr_data = technical_data.get("atr", 0.0)
+        features["atr"] = atr_data.get("value", 0.0) if isinstance(atr_data, dict) else atr_data
+        
+        adx_data = technical_data.get("adx", 0.0)
+        features["adx"] = adx_data.get("value", 0.0) if isinstance(adx_data, dict) else adx_data
+        
+        obv_data = technical_data.get("obv", 0.0)
+        features["obv"] = obv_data.get("value", 0.0) if isinstance(obv_data, dict) else obv_data
+        
+        vwap_data = technical_data.get("vwap", current_price)
+        features["vwap"] = vwap_data.get("value", current_price) if isinstance(vwap_data, dict) else vwap_data
 
     # Market data
     features["funding_rate"] = signal_data.get("funding_rate", 0.0)
@@ -289,5 +330,28 @@ def extract_features_from_signal_data(
     features["whale_tracker"] = enhancer_data.get("whale_tracker", 0.0)
     features["funding_advanced"] = enhancer_data.get("funding_advanced", 0.0)
     features["volatility_score"] = enhancer_data.get("volatility", 0.0)
+
+    # Convert all values to float to avoid dtype errors in ML models
+    for key, value in features.items():
+        try:
+            if isinstance(value, (list, np.ndarray)):
+                # Take last value if array
+                features[key] = float(value[-1]) if len(value) > 0 else 0.0
+            elif isinstance(value, str):
+                # Try to parse string as float, handle special cases
+                value_lower = value.lower()
+                if value_lower == 'bullish':
+                    features[key] = 1.0
+                elif value_lower == 'bearish':
+                    features[key] = -1.0
+                else:
+                    # Try to parse as number
+                    features[key] = float(value) if value else 0.0
+            elif value is None:
+                features[key] = 0.0
+            else:
+                features[key] = float(value)
+        except (ValueError, TypeError, IndexError):
+            features[key] = 0.0
 
     return features

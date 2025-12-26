@@ -168,6 +168,169 @@ class TestFeatureExtraction:
         assert "rsi" in features
         assert features["rsi"] == 60.0
 
+    def test_extract_features_from_signal_data_with_nested_dicts(self):
+        """Test feature extraction from signal data with nested indicator dicts."""
+        signal_data = {
+            "price_change_1h": 1.5,
+            "price_change_4h": 2.5,
+            "price_change_24h": 5.0,
+            "funding_rate": 0.0001,
+            "fear_greed": 65,
+            "enhancer_data": {
+                "order_flow": 2.0,
+                "volume_profile": 1.5,
+            },
+        }
+
+        # Technical data as returned by calculate_technical_indicators (nested dicts)
+        technical_data = {
+            "rsi": {"value": 65.5, "signal": "neutral", "period": 14},
+            "macd": {
+                "macd_line": 0.5,
+                "signal_line": 0.3,
+                "histogram": 0.2,
+                "signal": "bullish",
+            },
+            "bollinger_bands": {
+                "upper": 51000,
+                "middle": 50000,
+                "lower": 49000,
+                "position": 0.5,
+            },
+            "stoch_rsi": {"k": 60.0, "d": 55.0, "signal": "neutral"},
+            "mfi": {"value": 70.0, "signal": "overbought"},
+            "roc": {"value": 2.5, "momentum": "positive"},
+            "williams_r": {"value": -30.0, "signal": "neutral"},
+        }
+
+        market_data = {
+            "price_usd": 50000,
+            "volume_24h": 1000000,
+        }
+
+        features = extract_features_from_signal_data(
+            signal_data, technical_data, market_data
+        )
+
+        # Check that nested dicts are properly extracted
+        assert features["rsi"] == 65.5
+        assert features["macd"] == 0.5
+        assert features["macd_signal"] == 0.3
+        assert features["macd_diff"] == 0.2
+        assert features["bb_upper"] == 51000
+        assert features["stoch_rsi"] == 60.0
+        assert features["mfi"] == 70.0
+        assert features["roc"] == 2.5
+        assert features["williams_r"] == -30.0
+
+        # Ensure all values are float (not strings or objects)
+        for key, value in features.items():
+            assert isinstance(value, (int, float)), f"{key} is {type(value)}, not numeric"
+
+    def test_extract_features_from_signal_data_with_string_values(self):
+        """Test feature extraction handles string values properly."""
+        signal_data = {
+            "price_change_1h": 1.5,
+            "price_change_4h": 2.5,
+            "price_change_24h": 5.0,
+            "funding_rate": 0.0001,
+            "fear_greed": 65,
+            "enhancer_data": {
+                "order_flow": "2.0",  # String instead of float
+                "volume_profile": "1.5",
+            },
+        }
+
+        technical_data = {
+            "rsi": "60.0",  # String
+            "macd": "bullish",  # String signal
+        }
+
+        market_data = {
+            "price_usd": 50000,
+            "volume_24h": 1000000,
+        }
+
+        features = extract_features_from_signal_data(
+            signal_data, technical_data, market_data
+        )
+
+        # Check that strings are converted
+        assert isinstance(features["rsi"], float)
+        assert features["rsi"] == 60.0
+        assert isinstance(features["order_flow"], float)
+        assert features["order_flow"] == 2.0
+        
+        # "bullish" should convert to 1.0
+        assert isinstance(features["macd"], float)
+        assert features["macd"] == 1.0
+
+    def test_extract_features_from_signal_data_with_arrays(self):
+        """Test feature extraction handles array values properly."""
+        signal_data = {
+            "price_change_1h": 1.5,
+            "price_change_4h": 2.5,
+            "price_change_24h": 5.0,
+            "funding_rate": 0.0001,
+            "fear_greed": 65,
+            "enhancer_data": {
+                "order_flow": [1.0, 1.5, 2.0],  # Array - should take last value
+                "volume_profile": [1.0, 1.2, 1.5],
+            },
+        }
+
+        technical_data = {
+            "rsi": [55.0, 58.0, 60.0],  # Array
+            "macd": 0.5,
+        }
+
+        market_data = {
+            "price_usd": 50000,
+            "volume_24h": 1000000,
+        }
+
+        features = extract_features_from_signal_data(
+            signal_data, technical_data, market_data
+        )
+
+        # Check that arrays are converted to last value
+        assert isinstance(features["rsi"], float)
+        assert features["rsi"] == 60.0  # Last value
+        assert isinstance(features["order_flow"], float)
+        assert features["order_flow"] == 2.0  # Last value
+
+    def test_extract_features_from_signal_data_with_none_values(self):
+        """Test feature extraction handles None values properly."""
+        signal_data = {
+            "price_change_1h": None,
+            "price_change_4h": 2.5,
+            "price_change_24h": 5.0,
+            "funding_rate": None,
+            "fear_greed": 65,
+            "enhancer_data": {
+                "order_flow": None,
+                "volume_profile": 1.5,
+            },
+        }
+
+        technical_data = {
+            "rsi": None,
+            "macd": 0.5,
+        }
+
+        market_data = {
+            "price_usd": 50000,
+            "volume_24h": 1000000,
+        }
+
+        features = extract_features_from_signal_data(
+            signal_data, technical_data, market_data
+        )
+
+        # Check that None values are converted to 0.0
+        assert features["rsi"] == 0.0
+        assert features["order_flow"] == 0.0
+
 
 class TestEnsemble:
     """Tests for ensemble system."""
@@ -221,6 +384,44 @@ class TestEnsemble:
 
         assert result["should_cancel"] is True
         assert result["recommendation"] == "wait"
+
+
+class TestPredictor:
+    """Tests for ML predictor."""
+
+    def test_predictor_dtype_conversion_with_pandas(self):
+        """Test that DataFrame dtype conversion works correctly."""
+        # Test the DataFrame conversion logic directly without predictor
+        
+        # Create features with mixed types (strings, objects)
+        features = {
+            "close": "50000",  # String
+            "rsi": 60.0,
+            "macd": "0.5",  # String
+            "volume": 1000000,
+            "price_change_1": "0.01",  # String
+            "bb_position": 0.5,
+        }
+        
+        # Convert to DataFrame (simulating what predictor does)
+        df = pd.DataFrame([features])
+        
+        # Check initial types - some should be objects
+        assert df["close"].dtype == object or df["close"].dtype == float
+        
+        # Apply the same conversion as in predictor
+        for col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
+        
+        # Verify all columns are now numeric
+        for col in df.columns:
+            assert pd.api.types.is_numeric_dtype(df[col]), f"{col} is not numeric: {df[col].dtype}"
+        
+        # Verify values are correct
+        assert df["close"].iloc[0] == 50000.0
+        assert df["rsi"].iloc[0] == 60.0
+        assert df["macd"].iloc[0] == 0.5
+        assert df["price_change_1"].iloc[0] == 0.01
 
 
 class TestDataCollector:
