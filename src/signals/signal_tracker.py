@@ -807,6 +807,9 @@ class SignalTracker:
                     results['still_pending'] += 1
             else:
                 results['still_pending'] += 1
+            
+            # Small delay between signals to be nice to APIs
+            await asyncio.sleep(0.5)
         
         return results
     
@@ -873,6 +876,9 @@ class SignalTracker:
                     results['still_pending'] += 1
             else:
                 results['still_pending'] += 1
+            
+            # Small delay between signals to be nice to APIs
+            await asyncio.sleep(0.5)
         
         return results
     
