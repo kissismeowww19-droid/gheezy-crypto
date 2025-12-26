@@ -440,6 +440,19 @@ def get_signals_menu_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def get_super_signals_mode_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура выбора режима сканирования для супер сигналов."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📊 Все монеты", callback_data="signals_all"),
+            InlineKeyboardButton(text="📈 Фьючерсы", callback_data="signals_futures"),
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Назад", callback_data="menu_signals"),
+        ],
+    ])
+
+
 def get_signals_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура для AI-сигналов по 5 монетам: BTC, ETH, TON, SOL, XRP."""
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -1241,74 +1254,23 @@ async def callback_signals_normal(callback: CallbackQuery):
 
 @router.callback_query(lambda c: c.data == "super_signals")
 async def callback_super_signals(callback: CallbackQuery):
-    """Handler for super signals - scan 3000+ coins and show TOP-5 with probability."""
-    # Show loading message
-    await callback.answer("⏳ Сканирую монеты...")
-    await callback.message.edit_text(
-        "⏳ *Сканирование супер сигналов\\.\\.\\.*\n\n"
-        "Анализирую 3000\\+ монет\\.\\.\\.\\.\n"
-        "Это может занять 30\\-60 секунд",
-        parse_mode=ParseMode.MARKDOWN
-    )
-    
+    """Handler for super signals - show mode selection."""
+    text = "⚡ *Супер Сигналы*\n\n"
+    text = text + "Выберите режим сканирования:\n\n"
+    text = text + "📊 *Все монеты* — сканирование 3000\\+ монет всех типов\n\n"
+    text = text + "📈 *Фьючерсы* — только монеты с фьючерсными контрактами на Binance\n\n"
+    text = text + "👇 Выберите:"
     try:
-        # Initialize SuperSignals
-        analyzer = SuperSignals()
-        
-        # Get TOP-5 signals
-        top5 = await analyzer.scan()
-        
-        # Get counts for message
-        # Note: scan() doesn't return counts, we'll use approximate values
-        scanned_count = 3000  # Approximate
-        filtered_count = 30   # TOP_CANDIDATES
-        
-        # Format message
-        message_text = analyzer.format_message(top5, scanned_count, filtered_count)
-        
-        # Close analyzer
-        await analyzer.close()
-        
-        # Send result
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="🔄 Обновить", callback_data="super_signals"),
-            ],
-            [
-                InlineKeyboardButton(text="🔙 Назад", callback_data="menu_signals"),
-                InlineKeyboardButton(text="🏠 Меню", callback_data="menu_back"),
-            ],
-        ])
-        
-        await callback.message.edit_text(
-            message_text,
-            reply_markup=keyboard,
+        await safe_send_message(
+            callback.message.edit_text,
+            text,
+            reply_markup=get_super_signals_mode_keyboard(),
             parse_mode=ParseMode.MARKDOWN
         )
-    except Exception as e:
-        logger.error(f"Error in super signals: {e}", exc_info=True)
-        
-        error_text = (
-            "❌ *Ошибка супер сигналов*\n\n"
-            "Произошла ошибка при сканировании монет\\.\n"
-            "Попробуйте позже или используйте обычные сигналы\\.\n\n"
-            f"_Ошибка: {str(e).replace('.', '\\.').replace('-', '\\-')}_"
-        )
-        
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="🔙 Назад", callback_data="menu_signals"),
-            ],
-        ])
-        
-        try:
-            await callback.message.edit_text(
-                error_text,
-                reply_markup=keyboard,
-                parse_mode=ParseMode.MARKDOWN
-            )
-        except Exception:
-            pass
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            logger.error(f"Error editing message: {e}")
+    await callback.answer()
 
 
 # ============================================

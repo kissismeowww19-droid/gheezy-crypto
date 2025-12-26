@@ -89,6 +89,34 @@ class SuperSignals:
         if self.session and not self.session.closed:
             await self.session.close()
 
+    async def fetch_futures_symbols(self) -> Set[str]:
+        """Получает список всех фьючерсных пар с Binance Futures."""
+        await self._ensure_session()
+        
+        url = "https://fapi.binance.com/fapi/v1/exchangeInfo"
+        futures_symbols = set()
+        
+        try:
+            async with self.session.get(
+                url,
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    for symbol_info in data.get("symbols", []):
+                        if symbol_info.get("status") == "TRADING":
+                            # Убираем USDT из конца чтобы получить базовый символ
+                            symbol = symbol_info.get("symbol", "")
+                            if symbol.endswith("USDT"):
+                                base = symbol[:-4]  # BTC, ETH, BIFI и т.д.
+                                futures_symbols.add(base)
+                    
+                    logger.info(f"Binance Futures: loaded {len(futures_symbols)} symbols")
+        except Exception as e:
+            logger.warning(f"Failed to fetch Binance Futures symbols: {e}")
+        
+        return futures_symbols
+
     async def fetch_binance_funding(self, symbol: str) -> Optional[float]:
         """Получает funding rate с Binance Futures."""
         await self._ensure_session()
@@ -1379,17 +1407,37 @@ class SuperSignals:
             "rr_ratio": rr_ratio,
         }
 
-    async def scan(self) -> List[Dict]:
+    async def scan(self, mode: str = "all") -> List[Dict]:
         """
         Главный метод сканирования.
         Возвращает ТОП-5 сигналов с вероятностью ≥50%
+        
+        Args:
+            mode: "all" - все монеты (спот), "futures" - только фьючерсы
         """
         start_time = time.time()
 
-        logger.info("SuperSignals: Starting scan")
+        logger.info(f"SuperSignals: Starting scan (mode={mode})")
+
+        # Загружаем список фьючерсных пар если нужно
+        futures_symbols = set()
+        if mode == "futures":
+            futures_symbols = await self.fetch_futures_symbols()
+            if not futures_symbols:
+                logger.warning("No futures symbols loaded, falling back to all mode")
+                mode = "all"
+            else:
+                logger.info(f"Futures mode: filtering by {len(futures_symbols)} symbols")
 
         # Этап 1: Скринер
         all_coins = await self.fetch_all_coins()
+        
+        # После получения всех монет, фильтруем по режиму
+        if mode == "futures" and futures_symbols:
+            coins_before = len(all_coins)
+            all_coins = [c for c in all_coins if c.get("symbol", "").upper() in futures_symbols]
+            logger.info(f"Futures filter: {coins_before} → {len(all_coins)} coins")
+        
         filtered = self.apply_filters(all_coins)
 
         # Сортируем по движению и берём ТОП-30
@@ -1426,13 +1474,20 @@ class SuperSignals:
 
         return top_signals
 
-    def format_message(self, signals: List[Dict], scanned_count: int, filtered_count: int) -> str:
+    def format_message(self, signals: List[Dict], scanned_count: int, filtered_count: int, mode: str = "all") -> str:
         """Форматирует супер сигналы для вывода."""
         now = datetime.now().strftime("%H:%M:%S")
 
-        header = f"""⚡ *СУПЕР СИГНАЛЫ \\(ТОП\\-{len(signals)}\\)*
+        if mode == "futures":
+            title = "⚡ *ФЬЮЧЕРСЫ ТОП\\-5*"
+            scan_text = f"📊 Просканировано: {scanned_count:,}\\+ фьючерсных пар"
+        else:
+            title = f"⚡ *СУПЕР СИГНАЛЫ \\(ТОП\\-{len(signals)}\\)*"
+            scan_text = f"📊 Просканировано: {scanned_count:,} монет"
+
+        header = f"""{title}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📊 Просканировано: {scanned_count:,} монет
+{scan_text}
 🔬 Глубокий анализ: 30 монет
 ⏰ Обновлено: {now}
 """
