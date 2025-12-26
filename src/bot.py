@@ -1712,7 +1712,7 @@ async def callback_signals_futures(callback: CallbackQuery):
             "❌ *Ошибка супер сигналов*\n\n"
             "Произошла ошибка при сканировании фьючерсных пар\\.\n"
             "Попробуйте позже или используйте режим всех монет\\.\n\n"
-            f"_Ошибка: {str(e).replace('.', '\\.').replace('-', '\\-')}_"
+            f"_Ошибка: {str(e).replace('.', '.').replace('-', '-')}_"
         )
 
         keyboard = InlineKeyboardMarkup(
