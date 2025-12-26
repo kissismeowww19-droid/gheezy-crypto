@@ -123,7 +123,16 @@ class CompactMessageFormatter:
         
         # Прогноз и уверенность
         lines.append(f"⏱️ *Прогноз:* {timeframe}")
-        lines.append(f"📊 *Уверенность:* {confidence:.0f}%")
+        
+        # Probability display with ML adjustment
+        ml_adjustment = ml_data.get('ml_adjustment', 0) if ml_data else 0
+        original_probability = ml_data.get('original_probability') if ml_data else None
+        
+        if ml_adjustment != 0 and original_probability is not None:
+            # Show adjusted probability with ML adjustment annotation
+            lines.append(f"📊 *Уверенность:* {confidence:.0f}% ({ml_adjustment:+d}% от ML)")
+        else:
+            lines.append(f"📊 *Уверенность:* {confidence:.0f}%")
         
         # ML Confidence (if available)
         if ml_data:
