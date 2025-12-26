@@ -758,5 +758,70 @@ class TestSOLAndXRPSignals:
         assert result["verdict"] == "neutral"
 
 
+class TestMLAdjustment:
+    """Tests for ML confidence adjustment function."""
+    
+    def test_ml_adjustment_very_confident(self):
+        """Test ML adjustment when confidence is > 70%."""
+        from signals.ai_signals import calculate_ml_adjustment
+        
+        # ML confidence > 70% → +5% boost
+        assert calculate_ml_adjustment(0.75) == 5
+        assert calculate_ml_adjustment(0.80) == 5
+        assert calculate_ml_adjustment(0.90) == 5
+        assert calculate_ml_adjustment(1.0) == 5
+    
+    def test_ml_adjustment_neutral(self):
+        """Test ML adjustment when confidence is 50-70%."""
+        from signals.ai_signals import calculate_ml_adjustment
+        
+        # ML confidence 50-70% → no change
+        assert calculate_ml_adjustment(0.50) == 0
+        assert calculate_ml_adjustment(0.60) == 0
+        assert calculate_ml_adjustment(0.70) == 0
+    
+    def test_ml_adjustment_slightly_uncertain(self):
+        """Test ML adjustment when confidence is 40-50%."""
+        from signals.ai_signals import calculate_ml_adjustment
+        
+        # ML confidence 40-50% → -5% penalty
+        assert calculate_ml_adjustment(0.40) == -5
+        assert calculate_ml_adjustment(0.45) == -5
+        assert calculate_ml_adjustment(0.49) == -5
+    
+    def test_ml_adjustment_uncertain(self):
+        """Test ML adjustment when confidence is 30-40%."""
+        from signals.ai_signals import calculate_ml_adjustment
+        
+        # ML confidence 30-40% → -10% penalty
+        assert calculate_ml_adjustment(0.30) == -10
+        assert calculate_ml_adjustment(0.35) == -10
+        assert calculate_ml_adjustment(0.39) == -10
+    
+    def test_ml_adjustment_very_uncertain(self):
+        """Test ML adjustment when confidence is < 30%."""
+        from signals.ai_signals import calculate_ml_adjustment
+        
+        # ML confidence < 30% → -15% penalty
+        assert calculate_ml_adjustment(0.29) == -15
+        assert calculate_ml_adjustment(0.20) == -15
+        assert calculate_ml_adjustment(0.10) == -15
+        assert calculate_ml_adjustment(0.0) == -15
+    
+    def test_ml_adjustment_boundary_values(self):
+        """Test ML adjustment at boundary values."""
+        from signals.ai_signals import calculate_ml_adjustment
+        
+        # Test exact boundaries
+        assert calculate_ml_adjustment(0.71) == 5   # Just above 70%
+        assert calculate_ml_adjustment(0.70) == 0   # Exactly 70%
+        assert calculate_ml_adjustment(0.50) == 0   # Exactly 50%
+        assert calculate_ml_adjustment(0.49) == -5  # Just below 50%
+        assert calculate_ml_adjustment(0.40) == -5  # Exactly 40%
+        assert calculate_ml_adjustment(0.39) == -10 # Just below 40%
+        assert calculate_ml_adjustment(0.30) == -10 # Exactly 30%
+        assert calculate_ml_adjustment(0.29) == -15 # Just below 30%
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -58,6 +58,30 @@ def clamp(value: float, min_val: float = -10.0, max_val: float = 10.0) -> float:
     return max(min_val, min(max_val, value))
 
 
+def calculate_ml_adjustment(ml_confidence: float) -> int:
+    """
+    Calculate probability adjustment based on ML confidence.
+    
+    Args:
+        ml_confidence: ML confidence score (0.0 - 1.0)
+        
+    Returns:
+        Adjustment in percentage points (-15 to +5)
+    """
+    ml_pct = ml_confidence * 100
+    
+    if ml_pct > 70:
+        return 5   # ML very confident → boost signal
+    elif ml_pct >= 50:
+        return 0   # ML neutral → no change
+    elif ml_pct >= 40:
+        return -5  # ML slightly uncertain → small penalty
+    elif ml_pct >= 30:
+        return -10 # ML uncertain → medium penalty
+    else:
+        return -15 # ML very uncertain → max penalty
+
+
 # DEPRECATED: Old SignalStabilizer class removed - now using SignalStabilityManager
 # See signals.signal_stability for the new implementation with improved logic:
 # - Cooldown: 1 hour minimum between direction changes
@@ -5406,6 +5430,29 @@ class AISignalAnalyzer:
         except Exception as e:
             logger.error(f"Error during ML validation for {symbol}: {e}")
         
+        # ====== APPLY ML ADJUSTMENT TO PROBABILITY ======
+        ml_adjustment = 0
+        original_probability = probability_data["probability"]
+        adjusted_probability = original_probability
+        
+        if ml_prediction and ml_confidence_pct is not None:
+            # Calculate ML adjustment based on confidence
+            ml_confidence_normalized = ml_confidence_pct / 100.0  # Convert back to 0.0-1.0
+            ml_adjustment = calculate_ml_adjustment(ml_confidence_normalized)
+            
+            # Apply adjustment to probability
+            adjusted_probability = original_probability + ml_adjustment
+            
+            # Clamp to 10-95% range
+            adjusted_probability = max(10, min(95, adjusted_probability))
+            
+            # Log the adjustment
+            logger.info(f"ML adjustment for {symbol}: {ml_adjustment:+d}% (ML: {ml_confidence_pct:.1f}%)")
+            logger.info(f"Probability: {original_probability:.1f}% → {adjusted_probability:.1f}%")
+            
+            # Update probability_data with adjusted value
+            probability_data["probability"] = adjusted_probability
+        
         return {
             "symbol": symbol,
             "direction": direction,
@@ -5483,6 +5530,8 @@ class AISignalAnalyzer:
             "ml_prediction": ml_prediction,
             "ml_confidence": ml_confidence_pct,
             "ml_recommendation": ml_recommendation,
+            "ml_adjustment": ml_adjustment,
+            "original_probability": original_probability,
         }
     
     @staticmethod
