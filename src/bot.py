@@ -1634,7 +1634,7 @@ async def callback_signals_all(callback: CallbackQuery):
             "❌ *Ошибка супер сигналов*\n\n"
             "Произошла ошибка при сканировании монет\\.\n"
             "Попробуйте позже или используйте обычные сигналы\\.\n\n"
-            f"_Ошибка: {str(e).replace('.', '\\.').replace('-', '\\-')}_"
+            f"_Ошибка: {str(e).replace('.', '.').replace('-', '-')}_"
         )
 
         keyboard = InlineKeyboardMarkup(
