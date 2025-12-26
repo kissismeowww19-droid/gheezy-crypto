@@ -210,3 +210,8 @@ __marimo__/
 data/*.db
 data/*.db-journal
 test_compact_formatter.py
+
+# ML models (trained locally)
+models/
+*.pkl
+*.model
