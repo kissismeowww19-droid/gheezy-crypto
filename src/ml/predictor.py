@@ -76,6 +76,10 @@ def predict(symbol: str, features: Dict) -> Dict:
         # Convert features dict to DataFrame
         features_df = pd.DataFrame([features])
         
+        # Ensure all columns are numeric to avoid dtype errors
+        for col in features_df.columns:
+            features_df[col] = pd.to_numeric(features_df[col], errors='coerce').fillna(0.0)
+        
         # Ensure all required features are present
         for feature_name in feature_names:
             if feature_name not in features_df.columns:
