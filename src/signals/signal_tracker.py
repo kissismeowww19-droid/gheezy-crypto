@@ -689,3 +689,275 @@ class SignalTracker:
                 'worst_signal': worst_signal,
                 'last_signal_time': last_signal_time
             }
+    
+    def get_pending_signals(self, user_id: int, symbol: Optional[str] = None) -> List[TrackedSignal]:
+        """
+        Get all pending signals for a user, optionally filtered by symbol.
+        
+        Args:
+            user_id: ID of the user
+            symbol: Optional symbol to filter by (e.g., "BTC", "ETH")
+        
+        Returns:
+            List of TrackedSignal objects with pending status
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            if symbol:
+                cursor = conn.execute('''
+                    SELECT id, symbol, direction, entry_price, target1_price, target2_price,
+                           stop_loss_price, probability, timestamp
+                    FROM signals
+                    WHERE user_id = ? AND symbol = ? AND result = 'pending'
+                    ORDER BY timestamp DESC
+                ''', (user_id, symbol.upper()))
+            else:
+                cursor = conn.execute('''
+                    SELECT id, symbol, direction, entry_price, target1_price, target2_price,
+                           stop_loss_price, probability, timestamp
+                    FROM signals
+                    WHERE user_id = ? AND result = 'pending'
+                    ORDER BY timestamp DESC
+                ''', (user_id,))
+            
+            signals = []
+            for row in cursor.fetchall():
+                signal_id, symbol, direction, entry_price, target1_price, target2_price, \
+                    stop_loss_price, probability, timestamp_str = row
+                
+                timestamp = datetime.fromisoformat(timestamp_str)
+                
+                signals.append(TrackedSignal(
+                    id=signal_id,
+                    user_id=user_id,
+                    symbol=symbol,
+                    direction=direction,
+                    entry_price=entry_price,
+                    target1_price=target1_price,
+                    target2_price=target2_price,
+                    stop_loss_price=stop_loss_price,
+                    probability=probability,
+                    timestamp=timestamp,
+                    result='pending'
+                ))
+            
+            return signals
+    
+    async def check_all_pending_signals(self, user_id: int) -> Dict:
+        """
+        Check ALL pending signals for a user using historical prices.
+        
+        This method checks signals that are older than 4 hours using historical
+        price data to determine if they hit their targets or stop losses.
+        
+        Args:
+            user_id: ID of the user
+        
+        Returns:
+            Dict with counts: {'checked': 5, 'wins': 3, 'losses': 2, 'still_pending': 1}
+        """
+        pending_signals = self.get_pending_signals(user_id)
+        
+        results = {'checked': 0, 'wins': 0, 'losses': 0, 'still_pending': 0}
+        
+        for signal in pending_signals:
+            # Calculate age of signal
+            time_elapsed = datetime.now() - signal.timestamp
+            hours_elapsed = time_elapsed.total_seconds() / 3600
+            
+            # Check if signal is older than 4 hours
+            if hours_elapsed >= 4:
+                # Get historical prices for the 4h period after signal
+                signal_start = signal.timestamp
+                signal_end = signal.timestamp + timedelta(hours=4)
+                
+                from_ts = int(signal_start.timestamp())
+                to_ts = int(signal_end.timestamp())
+                
+                try:
+                    historical_data = await api_manager.get_historical_prices(
+                        signal.symbol, from_ts, to_ts
+                    )
+                except Exception as e:
+                    logger.error(f"Error getting historical prices for signal {signal.id}: {e}")
+                    results['still_pending'] += 1
+                    continue
+                
+                if not historical_data or not historical_data.get("success"):
+                    logger.warning(
+                        f"No historical data for signal {signal.id}, keeping as pending"
+                    )
+                    results['still_pending'] += 1
+                    continue
+                
+                # Check signal result using historical prices
+                max_price = historical_data["max_price"]
+                min_price = historical_data["min_price"]
+                
+                final_result = self._evaluate_signal_result(
+                    signal, max_price, min_price
+                )
+                
+                if final_result:
+                    results['checked'] += 1
+                    if final_result == 'win':
+                        results['wins'] += 1
+                    elif final_result == 'loss':
+                        results['losses'] += 1
+                else:
+                    results['still_pending'] += 1
+            else:
+                results['still_pending'] += 1
+        
+        return results
+    
+    async def check_pending_signals_for_symbol(self, user_id: int, symbol: str) -> Dict:
+        """
+        Check pending signals for a specific symbol using historical prices.
+        
+        Args:
+            user_id: ID of the user
+            symbol: Symbol to check (e.g., "BTC", "ETH")
+        
+        Returns:
+            Dict with counts: {'checked': 3, 'wins': 2, 'losses': 1, 'still_pending': 0}
+        """
+        pending_signals = self.get_pending_signals(user_id, symbol)
+        
+        results = {'checked': 0, 'wins': 0, 'losses': 0, 'still_pending': 0}
+        
+        for signal in pending_signals:
+            # Calculate age of signal
+            time_elapsed = datetime.now() - signal.timestamp
+            hours_elapsed = time_elapsed.total_seconds() / 3600
+            
+            # Check if signal is older than 4 hours
+            if hours_elapsed >= 4:
+                # Get historical prices for the 4h period after signal
+                signal_start = signal.timestamp
+                signal_end = signal.timestamp + timedelta(hours=4)
+                
+                from_ts = int(signal_start.timestamp())
+                to_ts = int(signal_end.timestamp())
+                
+                try:
+                    historical_data = await api_manager.get_historical_prices(
+                        signal.symbol, from_ts, to_ts
+                    )
+                except Exception as e:
+                    logger.error(f"Error getting historical prices for signal {signal.id}: {e}")
+                    results['still_pending'] += 1
+                    continue
+                
+                if not historical_data or not historical_data.get("success"):
+                    logger.warning(
+                        f"No historical data for signal {signal.id}, keeping as pending"
+                    )
+                    results['still_pending'] += 1
+                    continue
+                
+                # Check signal result using historical prices
+                max_price = historical_data["max_price"]
+                min_price = historical_data["min_price"]
+                
+                final_result = self._evaluate_signal_result(
+                    signal, max_price, min_price
+                )
+                
+                if final_result:
+                    results['checked'] += 1
+                    if final_result == 'win':
+                        results['wins'] += 1
+                    elif final_result == 'loss':
+                        results['losses'] += 1
+                else:
+                    results['still_pending'] += 1
+            else:
+                results['still_pending'] += 1
+        
+        return results
+    
+    def _evaluate_signal_result(
+        self,
+        signal: TrackedSignal,
+        max_price: float,
+        min_price: float
+    ) -> Optional[str]:
+        """
+        Evaluate a signal's result based on historical min/max prices.
+        
+        Args:
+            signal: The TrackedSignal to evaluate
+            max_price: Maximum price during the period
+            min_price: Minimum price during the period
+        
+        Returns:
+            'win', 'loss', or None if result cannot be determined
+        """
+        final_result = None
+        exit_price = signal.entry_price
+        
+        if signal.direction == "long":
+            # For long: check if stop was hit FIRST
+            if min_price <= signal.stop_loss_price:
+                # Stop was hit
+                final_result = 'loss'
+                exit_price = signal.stop_loss_price
+            elif max_price >= signal.target1_price:
+                # Target reached, stop not hit
+                final_result = 'win'
+                exit_price = signal.target1_price
+                if max_price >= signal.target2_price:
+                    exit_price = signal.target2_price
+            else:
+                # Neither target nor stop reached in 4 hours
+                final_result = 'loss'
+                exit_price = max_price
+        
+        elif signal.direction == "short":
+            # For short: check if stop was hit FIRST
+            if max_price >= signal.stop_loss_price:
+                # Stop was hit
+                final_result = 'loss'
+                exit_price = signal.stop_loss_price
+            elif min_price <= signal.target1_price:
+                # Target reached, stop not hit
+                final_result = 'win'
+                exit_price = signal.target1_price
+                if min_price <= signal.target2_price:
+                    exit_price = signal.target2_price
+            else:
+                # Neither target nor stop reached in 4 hours
+                final_result = 'loss'
+                exit_price = min_price
+        
+        elif signal.direction == "sideways":
+            # For sideways - check if price stayed in range
+            range_percent = 1.0  # +/- 1%
+            upper_bound = signal.entry_price * (1 + range_percent / 100)
+            lower_bound = signal.entry_price * (1 - range_percent / 100)
+            
+            all_in_range = min_price >= lower_bound and max_price <= upper_bound
+            
+            if all_in_range:
+                final_result = 'win'
+            else:
+                final_result = 'loss'
+            
+            exit_price = (min_price + max_price) / 2
+        
+        # Update the signal in database
+        if final_result:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute('''
+                    UPDATE signals
+                    SET result = ?, exit_price = ?, checked_at = ?
+                    WHERE id = ?
+                ''', (final_result, exit_price, datetime.now(), signal.id))
+                conn.commit()
+            
+            logger.info(
+                f"Updated signal {signal.id} ({signal.symbol} {signal.direction}): "
+                f"{final_result} at ${exit_price:.2f}"
+            )
+        
+        return final_result
