@@ -320,3 +320,114 @@ class TestSignalTrackerOptimization:
         # Of the 20 checked, 15 are old (>4h) and 5 are new (<4h)
         assert results['checked'] == 15  # Only old ones get checked
         assert results['still_pending'] == 5  # New ones stay pending
+    
+    @pytest.mark.asyncio
+    async def test_evaluate_signal_result_neutral(self, tracker):
+        """Test evaluation of neutral signals (same as sideways)."""
+        signal = self._create_old_signal(
+            tracker, hours_ago=5,
+            user_id=123, symbol="BTC", direction="neutral",
+            entry_price=50000.0, target1_price=50000.0,
+            target2_price=50000.0, stop_loss_price=50000.0,
+            probability=50.0
+        )
+        
+        # Price stayed in range (win)
+        with patch('api_manager.get_historical_prices', new_callable=AsyncMock) as mock_hist:
+            mock_hist.return_value = {
+                "success": True,
+                "min_price": 49600.0,  # -0.8%
+                "max_price": 50400.0,  # +0.8%
+                "prices": [50000.0, 50200.0, 49800.0]
+            }
+            
+            results = await tracker.check_all_pending_signals(user_id=123)
+        
+        assert results['checked'] == 1
+        assert results['wins'] == 1
+        assert results['losses'] == 0
+    
+    @pytest.mark.asyncio  
+    async def test_evaluate_signal_result_neutral_loss(self, tracker):
+        """Test neutral signal that breaks out of range (loss)."""
+        signal = self._create_old_signal(
+            tracker, hours_ago=5,
+            user_id=123, symbol="BTC", direction="neutral",
+            entry_price=50000.0, target1_price=50000.0,
+            target2_price=50000.0, stop_loss_price=50000.0,
+            probability=50.0
+        )
+        
+        # Price broke out of range (loss)
+        with patch('api_manager.get_historical_prices', new_callable=AsyncMock) as mock_hist:
+            mock_hist.return_value = {
+                "success": True,
+                "min_price": 48000.0,  # -4% (out of range)
+                "max_price": 50500.0,
+                "prices": [50000.0, 49000.0, 48000.0]
+            }
+            
+            results = await tracker.check_all_pending_signals(user_id=123)
+        
+        assert results['checked'] == 1
+        assert results['wins'] == 0
+        assert results['losses'] == 1
+    
+    @pytest.mark.asyncio
+    async def test_evaluate_signal_result_neutral_within_upper_bound(self, tracker):
+        """Test neutral signal that stays within upper bound of ±1% range."""
+        signal = self._create_old_signal(
+            tracker, hours_ago=5,
+            user_id=123, symbol="ETH", direction="neutral",
+            entry_price=3000.0, target1_price=3000.0,
+            target2_price=3000.0, stop_loss_price=3000.0,
+            probability=55.0
+        )
+        
+        # Price stayed exactly at upper bound (+1%)
+        with patch('api_manager.get_historical_prices', new_callable=AsyncMock) as mock_hist:
+            mock_hist.return_value = {
+                "success": True,
+                "min_price": 2970.0,  # -1%
+                "max_price": 3030.0,  # +1%
+                "prices": [3000.0, 3030.0, 2970.0, 3000.0]
+            }
+            
+            results = await tracker.check_all_pending_signals(user_id=123)
+        
+        assert results['checked'] == 1
+        assert results['wins'] == 1
+        assert results['losses'] == 0
+    
+    @pytest.mark.asyncio
+    async def test_check_previous_signal_neutral(self, tracker):
+        """Test check_previous_signal with neutral direction."""
+        # Create a neutral signal 5 hours ago
+        signal = self._create_old_signal(
+            tracker, hours_ago=5,
+            user_id=123, symbol="SOL", direction="neutral",
+            entry_price=100.0, target1_price=100.0,
+            target2_price=100.0, stop_loss_price=100.0,
+            probability=60.0
+        )
+        
+        # Mock historical prices to show price stayed in range
+        with patch('api_manager.get_historical_prices', new_callable=AsyncMock) as mock_hist:
+            mock_hist.return_value = {
+                "success": True,
+                "min_price": 99.5,  # -0.5%
+                "max_price": 100.5,  # +0.5%
+                "prices": [100.0, 100.3, 99.7, 100.2]
+            }
+            
+            result = tracker.check_previous_signal(
+                user_id=123,
+                symbol="SOL",
+                current_price=100.2
+            )
+        
+        assert result is not None
+        assert result['had_signal'] is True
+        assert result['direction'] == "neutral"
+        assert result['result'] == 'win'
+        assert result['pnl_percent'] == 0.5

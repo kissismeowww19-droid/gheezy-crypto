@@ -320,8 +320,8 @@ class SignalTracker:
                     exit_price = min_price  # Используем минимальную цену
                     pnl_percent = ((entry_price - min_price) / entry_price) * 100
             
-            elif direction == "sideways":
-                # Для sideways - проверяем, осталась ли цена в диапазоне
+            elif direction in ("sideways", "neutral"):
+                # Для sideways/neutral - проверяем, осталась ли цена в диапазоне
                 range_percent = 1.0  # +/- 1%
                 upper_bound = entry_price * (1 + range_percent / 100)
                 lower_bound = entry_price * (1 - range_percent / 100)
@@ -400,7 +400,7 @@ class SignalTracker:
                 final_result = 'loss'
                 pnl_percent = ((entry_price - current_price) / entry_price) * 100
         
-        elif direction == "sideways":
+        elif direction in ("sideways", "neutral"):
             range_percent = 1.0
             upper_bound = entry_price * (1 + range_percent / 100)
             lower_bound = entry_price * (1 - range_percent / 100)
@@ -471,6 +471,15 @@ class SignalTracker:
                 stop_hit = exit_price >= stop_loss_price
                 if target1_reached or target2_reached or stop_hit:
                     pnl_percent = ((entry_price - exit_price) / entry_price) * 100
+            elif direction in ("sideways", "neutral"):
+                # For pending sideways/neutral signals, show if in range
+                range_percent = 1.0
+                upper_bound = entry_price * (1 + range_percent / 100)
+                lower_bound = entry_price * (1 - range_percent / 100)
+                if lower_bound <= exit_price <= upper_bound:
+                    pnl_percent = 0.5
+                else:
+                    pnl_percent = -0.5
         
         return {
             "had_signal": True,
@@ -546,7 +555,7 @@ class SignalTracker:
                     pnl = ((exit_price - entry_price) / entry_price) * 100
                 elif direction == "short":
                     pnl = ((entry_price - exit_price) / entry_price) * 100
-                elif direction == "sideways":
+                elif direction in ("sideways", "neutral"):
                     pnl = 0.5 if result == 'win' else -0.5
                 else:
                     pnl = 0.0
@@ -661,7 +670,7 @@ class SignalTracker:
                         pnl = ((exit_price - entry_price) / entry_price) * 100
                     elif direction == 'short':
                         pnl = ((entry_price - exit_price) / entry_price) * 100
-                    elif direction == 'sideways':
+                    elif direction in ('sideways', 'neutral'):
                         pnl = 0.5 if result == 'win' else -0.5
                     else:
                         pnl = 0.0
@@ -969,8 +978,8 @@ class SignalTracker:
                 final_result = 'loss'
                 exit_price = min_price
         
-        elif signal.direction == "sideways":
-            # For sideways - check if price stayed in range
+        elif signal.direction in ("sideways", "neutral"):
+            # For sideways/neutral - check if price stayed in range
             range_percent = 1.0  # +/- 1%
             upper_bound = signal.entry_price * (1 + range_percent / 100)
             lower_bound = signal.entry_price * (1 - range_percent / 100)
