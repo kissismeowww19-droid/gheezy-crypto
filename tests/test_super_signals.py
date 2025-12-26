@@ -35,6 +35,13 @@ def test_super_signals_constants():
     
     assert hasattr(SuperSignals, 'MAX_MCAP')
     assert SuperSignals.MAX_MCAP == 1000000000
+    
+    # Check risk management constants
+    assert hasattr(SuperSignals, 'ATR_MULTIPLIER')
+    assert SuperSignals.ATR_MULTIPLIER == 1.5
+    
+    assert hasattr(SuperSignals, 'MAX_STOP_LOSS_PERCENT')
+    assert SuperSignals.MAX_STOP_LOSS_PERCENT == 0.10
 
 
 def test_super_signals_methods_exist():

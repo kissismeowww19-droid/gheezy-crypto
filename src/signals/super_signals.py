@@ -37,6 +37,10 @@ class SuperSignals:
     MIN_CHANGE_24H = 15   # Минимальное движение %
     MIN_VOLUME = 500000   # Минимальный объём $
     MAX_MCAP = 1000000000 # Максимальная капа $1B
+    
+    # Уровни и риск-менеджмент
+    ATR_MULTIPLIER = 1.5  # Множитель ATR для расчёта стоп-лосса
+    MAX_STOP_LOSS_PERCENT = 0.10  # Максимальный стоп-лосс (10%)
 
     # Исключенные символы
     EXCLUDED_SYMBOLS = {
@@ -780,19 +784,22 @@ class SuperSignals:
             # Логика: ищем РАЗВОРОТ, а не продолжение тренда
             rsi = analysis["rsi"]
             
+            # Приоритет 1: Сильное движение + подтверждение RSI (более мягкие пороги 40/60)
             # После падения + перепродан = ЛОНГ (ожидаем отскок)
             if price_change_24h < -15 and rsi < 40:
                 direction = "long"
             # После роста + перекуплен = ШОРТ (ожидаем откат)
             elif price_change_24h > 15 and rsi > 60:
                 direction = "short"
-            # Нейтральная зона - определяем по RSI
+            
+            # Приоритет 2: Экстремальный RSI (стандартные пороги 30/70)
             elif rsi < 30:
                 direction = "long"  # Сильно перепродан
             elif rsi > 70:
                 direction = "short"  # Сильно перекуплен
+            
+            # Приоритет 3: Нейтральный RSI - смотрим на экстремальное движение
             else:
-                # Нейтральный RSI - смотрим на движение
                 if price_change_24h > 30:
                     direction = "short"  # Сильный рост - ждём откат
                 elif price_change_24h < -30:
@@ -1174,16 +1181,13 @@ class SuperSignals:
         atr = analysis.get("atr", current_price * 0.03)  # Fallback 3%
         direction = analysis["direction"]
         
-        # ATR-based расчёты (более реалистичные)
-        atr_multiplier = 1.5  # Стоп = 1.5 ATR
-        
         if direction == "long":
             # Вход: текущая цена с небольшим диапазоном
             entry_low = current_price * 0.99
             entry_high = current_price * 1.01
             
-            # Стоп: под текущей ценой на 1.5 ATR (обычно 3-8%)
-            stop_distance = min(atr * atr_multiplier, current_price * 0.10)  # Макс 10%
+            # Стоп: под текущей ценой на ATR_MULTIPLIER * ATR (обычно 3-8%)
+            stop_distance = min(atr * self.ATR_MULTIPLIER, current_price * self.MAX_STOP_LOSS_PERCENT)
             stop_loss = current_price - stop_distance
             
             # TP1: Risk:Reward 1:2
@@ -1197,8 +1201,8 @@ class SuperSignals:
             entry_low = current_price * 0.99
             entry_high = current_price * 1.01
             
-            # Стоп: над текущей ценой на 1.5 ATR
-            stop_distance = min(atr * atr_multiplier, current_price * 0.10)
+            # Стоп: над текущей ценой на ATR_MULTIPLIER * ATR
+            stop_distance = min(atr * self.ATR_MULTIPLIER, current_price * self.MAX_STOP_LOSS_PERCENT)
             stop_loss = current_price + stop_distance
             
             # TP1: Risk:Reward 1:2
