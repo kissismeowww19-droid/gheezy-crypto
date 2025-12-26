@@ -90,10 +90,11 @@ def extract_features(
             features['bb_lower'] = indicators['bb_lower']
             # BB position (where price is within bands)
             bb_range = indicators['bb_upper'] - indicators['bb_lower']
-            if bb_range != 0:
-                features['bb_position'] = (df['close'] - indicators['bb_lower']) / bb_range
-            else:
-                features['bb_position'] = 0.5
+            # Handle array - avoid division by zero
+            bb_range_safe = np.where(bb_range == 0, 1, bb_range)
+            features['bb_position'] = (df['close'] - indicators['bb_lower']) / bb_range_safe
+            # Set position to 0.5 where range was 0
+            features['bb_position'] = np.where(bb_range == 0, 0.5, features['bb_position'])
         else:
             features['bb_upper'] = df['close'] * 1.02
             features['bb_middle'] = df['close']
@@ -232,10 +233,15 @@ def extract_features_from_signal_data(
         features['bb_lower'] = bb_data.get('lower', current_price * 0.98)
         
         bb_range = features['bb_upper'] - features['bb_lower']
-        if bb_range != 0:
-            features['bb_position'] = (current_price - features['bb_lower']) / bb_range
+        # Safe division - handle zero range
+        if isinstance(bb_range, (np.ndarray, pd.Series)):
+            # Handle array case
+            bb_range_safe = np.where(bb_range == 0, 1, bb_range)
+            features['bb_position'] = (current_price - features['bb_lower']) / bb_range_safe
+            features['bb_position'] = np.where(bb_range == 0, 0.5, features['bb_position'])
         else:
-            features['bb_position'] = 0.5
+            # Handle scalar case
+            features['bb_position'] = (current_price - features['bb_lower']) / bb_range if bb_range != 0 else 0.5
         
         features['ma_50'] = technical_data.get('ma_50', current_price)
         features['ma_200'] = technical_data.get('ma_200', current_price)

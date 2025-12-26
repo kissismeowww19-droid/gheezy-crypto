@@ -77,6 +77,61 @@ class TestFeatureExtraction:
         assert not features.empty
         assert 'rsi' in features.columns
         assert 'macd' in features.columns
+    
+    def test_extract_features_with_bollinger_bands_array(self):
+        """Test feature extraction with Bollinger Bands as arrays (pandas Series)."""
+        candles = [
+            {'open': 100, 'high': 105, 'low': 95, 'close': 102, 'volume': 1000},
+            {'open': 102, 'high': 108, 'low': 101, 'close': 106, 'volume': 1200},
+            {'open': 106, 'high': 110, 'low': 104, 'close': 108, 'volume': 1100},
+        ]
+        
+        # Create indicators with Bollinger Bands as pandas Series (array-like)
+        indicators = {
+            'rsi': pd.Series([50.0, 55.0, 60.0]),
+            'macd': pd.Series([0.3, 0.4, 0.5]),
+            'macd_signal': pd.Series([0.2, 0.3, 0.4]),
+            'macd_diff': pd.Series([0.1, 0.1, 0.1]),
+            'bb_upper': pd.Series([110, 115, 120]),
+            'bb_middle': pd.Series([100, 105, 108]),
+            'bb_lower': pd.Series([90, 95, 96]),
+        }
+        
+        # This should not raise ValueError about ambiguous array comparison
+        features = extract_features(candles, indicators=indicators)
+        
+        assert not features.empty
+        assert 'bb_position' in features.columns
+        assert 'bb_upper' in features.columns
+        assert 'bb_lower' in features.columns
+        # Verify bb_position is calculated correctly
+        assert len(features) == 3
+        # All bb_position values should be between 0 and 1 (or slightly outside due to price movement)
+        assert all(features['bb_position'] >= -0.5)
+        assert all(features['bb_position'] <= 1.5)
+    
+    def test_extract_features_with_zero_bb_range(self):
+        """Test feature extraction with zero Bollinger Bands range."""
+        candles = [
+            {'open': 100, 'high': 105, 'low': 95, 'close': 102, 'volume': 1000},
+            {'open': 102, 'high': 108, 'low': 101, 'close': 106, 'volume': 1200},
+        ]
+        
+        # Create indicators where BB range is zero (upper == lower)
+        indicators = {
+            'rsi': pd.Series([50.0, 55.0]),
+            'bb_upper': pd.Series([100, 100]),  # Same as lower
+            'bb_middle': pd.Series([100, 100]),
+            'bb_lower': pd.Series([100, 100]),  # Same as upper
+        }
+        
+        # This should not raise division by zero error
+        features = extract_features(candles, indicators=indicators)
+        
+        assert not features.empty
+        assert 'bb_position' in features.columns
+        # When range is zero, position should be 0.5 (neutral)
+        assert all(features['bb_position'] == 0.5)
         
     def test_extract_features_empty_candles(self):
         """Test feature extraction with empty candles."""
