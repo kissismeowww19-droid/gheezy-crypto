@@ -9,6 +9,7 @@ from .config import ML_CONFIG
 from .features import extract_features
 from .predictor import predict, load_models
 from .ensemble import combine_scores
+from .data_collector import MLDataCollector, ml_collector
 
 __all__ = [
     'ML_CONFIG',
@@ -16,4 +17,6 @@ __all__ = [
     'predict',
     'load_models',
     'combine_scores',
+    'MLDataCollector',
+    'ml_collector',
 ]

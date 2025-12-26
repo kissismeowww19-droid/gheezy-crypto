@@ -1,13 +1,14 @@
 """
-Data collector for ML models - downloads historical data from Binance API.
+Data collector for ML models - downloads historical data from Binance API
+and collects training data from verified signals.
 """
 
 import aiohttp
 import asyncio
 import pandas as pd
-import numpy as np
+import csv
 from datetime import datetime, timedelta
-from typing import Tuple, List, Dict, Optional
+from typing import Tuple, Dict
 import logging
 import sys
 import os
@@ -261,3 +262,122 @@ async def prepare_training_data(symbol: str, days: int = 365) -> Tuple[pd.DataFr
     logger.info(f"Label distribution: {labels.value_counts().to_dict()}")
     
     return features_df, labels
+
+
+class MLDataCollector:
+    """Автоматический сбор данных для обучения ML модели."""
+    
+    def __init__(self, data_dir: str = "data/ml"):
+        self.data_dir = data_dir
+        self.csv_path = os.path.join(data_dir, "training_data.csv")
+        self._ensure_dir()
+        self._ensure_csv_header()
+    
+    def _ensure_dir(self):
+        """Создать директорию если не существует."""
+        os.makedirs(self.data_dir, exist_ok=True)
+    
+    def _ensure_csv_header(self):
+        """Создать CSV с заголовками если не существует."""
+        if not os.path.exists(self.csv_path):
+            with open(self.csv_path, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    'timestamp',
+                    'symbol', 
+                    'direction',
+                    'entry_price',
+                    'exit_price',
+                    'target1_price',
+                    'target2_price',
+                    'stop_loss_price',
+                    'probability',
+                    'min_price_4h',
+                    'max_price_4h',
+                    'volume_24h',
+                    'change_24h',
+                    'whale_activity',
+                    'result'  # 1 = win, 0 = loss
+                ])
+            logger.info(f"Created ML training data file: {self.csv_path}")
+    
+    async def collect_signal_result(
+        self,
+        symbol: str,
+        direction: str,
+        entry_price: float,
+        exit_price: float,
+        target1_price: float,
+        target2_price: float,
+        stop_loss_price: float,
+        probability: float,
+        min_price_4h: float,
+        max_price_4h: float,
+        result: str,  # 'win' or 'loss'
+        timestamp: str,
+        volume_24h: float = 0.0,
+        change_24h: float = 0.0,
+        whale_activity: float = 0.0
+    ):
+        """
+        Сохранить результат сигнала для ML обучения.
+        
+        Вызывается автоматически при проверке pending сигналов.
+        """
+        try:
+            result_binary = 1 if result == 'win' else 0
+            
+            with open(self.csv_path, 'a', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    timestamp,
+                    symbol,
+                    direction,
+                    entry_price,
+                    exit_price,
+                    target1_price,
+                    target2_price,
+                    stop_loss_price,
+                    probability,
+                    min_price_4h,
+                    max_price_4h,
+                    volume_24h,
+                    change_24h,
+                    whale_activity,
+                    result_binary
+                ])
+            
+            logger.info(f"ML data collected: {symbol} {direction} -> {result}")
+            
+        except Exception as e:
+            logger.error(f"Error collecting ML data: {e}")
+    
+    def get_stats(self) -> Dict:
+        """Получить статистику собранных данных."""
+        try:
+            if not os.path.exists(self.csv_path):
+                return {"total": 0, "wins": 0, "losses": 0}
+            
+            total = 0
+            wins = 0
+            
+            with open(self.csv_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    total += 1
+                    if row.get('result') == '1':
+                        wins += 1
+            
+            return {
+                "total": total,
+                "wins": wins,
+                "losses": total - wins,
+                "win_rate": (wins / total * 100) if total > 0 else 0
+            }
+        except Exception as e:
+            logger.error(f"Error getting ML stats: {e}")
+            return {"total": 0, "wins": 0, "losses": 0}
+
+
+# Глобальный экземпляр
+ml_collector = MLDataCollector()
