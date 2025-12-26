@@ -440,6 +440,19 @@ def get_signals_menu_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def get_super_signals_mode_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура выбора режима сканирования для супер сигналов."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📊 Все монеты", callback_data="signals_all"),
+            InlineKeyboardButton(text="📈 Фьючерсы", callback_data="signals_futures"),
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Назад", callback_data="menu_signals"),
+        ],
+    ])
+
+
 def get_signals_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура для AI-сигналов по 5 монетам: BTC, ETH, TON, SOL, XRP."""
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -1241,11 +1254,31 @@ async def callback_signals_normal(callback: CallbackQuery):
 
 @router.callback_query(lambda c: c.data == "super_signals")
 async def callback_super_signals(callback: CallbackQuery):
-    """Handler for super signals - scan 3000+ coins and show TOP-5 with probability."""
-    # Show loading message
-    await callback.answer("⏳ Сканирую монеты...")
+    """Handler for super signals - show mode selection."""
+    text = "⚡ *Супер Сигналы*\n\n"
+    text = text + "Выберите режим сканирования:\n\n"
+    text = text + "📊 *Все монеты* — сканирование 3000\\+ монет всех типов\n\n"
+    text = text + "📈 *Фьючерсы* — только монеты с фьючерсными контрактами на Binance\n\n"
+    text = text + "👇 Выберите:"
+    try:
+        await safe_send_message(
+            callback.message.edit_text,
+            text,
+            reply_markup=get_super_signals_mode_keyboard(),
+            parse_mode=ParseMode.MARKDOWN
+        )
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            logger.error(f"Error editing message: {e}")
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "signals_all")
+async def callback_signals_all(callback: CallbackQuery):
+    """Handler for all coins mode - scan 3000+ coins and show TOP-5."""
+    await callback.answer("⏳ Сканирую все монеты...")
     await callback.message.edit_text(
-        "⏳ *Сканирование супер сигналов\\.\\.\\.*\n\n"
+        "⏳ *Сканирование всех монет\\.\\.\\.*\n\n"
         "Анализирую 3000\\+ монет\\.\\.\\.\\.\n"
         "Это может занять 30\\-60 секунд",
         parse_mode=ParseMode.MARKDOWN
@@ -1255,16 +1288,15 @@ async def callback_super_signals(callback: CallbackQuery):
         # Initialize SuperSignals
         analyzer = SuperSignals()
         
-        # Get TOP-5 signals
-        top5 = await analyzer.scan()
+        # Get TOP-5 signals in "all" mode
+        top5 = await analyzer.scan(mode="all")
         
         # Get counts for message
-        # Note: scan() doesn't return counts, we'll use approximate values
         scanned_count = 3000  # Approximate
         filtered_count = 30   # TOP_CANDIDATES
         
         # Format message
-        message_text = analyzer.format_message(top5, scanned_count, filtered_count)
+        message_text = analyzer.format_message(top5, scanned_count, filtered_count, mode="all")
         
         # Close analyzer
         await analyzer.close()
@@ -1272,10 +1304,10 @@ async def callback_super_signals(callback: CallbackQuery):
         # Send result
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
-                InlineKeyboardButton(text="🔄 Обновить", callback_data="super_signals"),
+                InlineKeyboardButton(text="🔄 Обновить", callback_data="signals_all"),
             ],
             [
-                InlineKeyboardButton(text="🔙 Назад", callback_data="menu_signals"),
+                InlineKeyboardButton(text="🔙 К выбору", callback_data="super_signals"),
                 InlineKeyboardButton(text="🏠 Меню", callback_data="menu_back"),
             ],
         ])
@@ -1286,7 +1318,7 @@ async def callback_super_signals(callback: CallbackQuery):
             parse_mode=ParseMode.MARKDOWN
         )
     except Exception as e:
-        logger.error(f"Error in super signals: {e}", exc_info=True)
+        logger.error(f"Error in super signals (all mode): {e}", exc_info=True)
         
         error_text = (
             "❌ *Ошибка супер сигналов*\n\n"
@@ -1297,7 +1329,77 @@ async def callback_super_signals(callback: CallbackQuery):
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
-                InlineKeyboardButton(text="🔙 Назад", callback_data="menu_signals"),
+                InlineKeyboardButton(text="🔙 Назад", callback_data="super_signals"),
+            ],
+        ])
+        
+        try:
+            await callback.message.edit_text(
+                error_text,
+                reply_markup=keyboard,
+                parse_mode=ParseMode.MARKDOWN
+            )
+        except Exception:
+            pass
+
+
+@router.callback_query(lambda c: c.data == "signals_futures")
+async def callback_signals_futures(callback: CallbackQuery):
+    """Handler for futures mode - scan futures pairs and show TOP-5."""
+    await callback.answer("⏳ Сканирую фьючерсные пары...")
+    await callback.message.edit_text(
+        "⏳ *Сканирование фьючерсов\\.\\.\\.*\n\n"
+        "Анализирую фьючерсные пары на Binance\\.\\.\\.\\.\n"
+        "Это может занять 30\\-60 секунд",
+        parse_mode=ParseMode.MARKDOWN
+    )
+    
+    try:
+        # Initialize SuperSignals
+        analyzer = SuperSignals()
+        
+        # Get TOP-5 signals in "futures" mode
+        top5 = await analyzer.scan(mode="futures")
+        
+        # Get counts for message
+        scanned_count = 200  # Approximate futures pairs count
+        filtered_count = 30   # TOP_CANDIDATES
+        
+        # Format message
+        message_text = analyzer.format_message(top5, scanned_count, filtered_count, mode="futures")
+        
+        # Close analyzer
+        await analyzer.close()
+        
+        # Send result
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🔄 Обновить", callback_data="signals_futures"),
+            ],
+            [
+                InlineKeyboardButton(text="🔙 К выбору", callback_data="super_signals"),
+                InlineKeyboardButton(text="🏠 Меню", callback_data="menu_back"),
+            ],
+        ])
+        
+        await callback.message.edit_text(
+            message_text,
+            reply_markup=keyboard,
+            parse_mode=ParseMode.MARKDOWN
+        )
+    except Exception as e:
+        logger.error(f"Error in super signals (futures mode): {e}", exc_info=True)
+        
+        error_text = (
+            "❌ *Ошибка супер сигналов*\n\n"
+            "Произошла ошибка при сканировании фьючерсных пар\\.\n"
+            "Попробуйте позже или используйте режим всех монет\\.\n\n"
+            f"_Ошибка: {str(e).replace('.', '\\.').replace('-', '\\-')}_"
+        )
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🔙 Назад", callback_data="super_signals"),
             ],
         ])
         
