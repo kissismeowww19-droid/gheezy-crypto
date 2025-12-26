@@ -144,6 +144,8 @@ class MultiAPIManager:
         # Cache for historical prices (avoid duplicate requests)
         self._historical_cache: Dict[str, Dict] = {}
         self._cache_ttl = 300  # 5 minutes
+        self._cache_rounding_interval = 300  # 5 minutes (same as TTL for consistency)
+        self._coingecko_delay = 1.5  # Delay before CoinGecko fallback to avoid rate limits
         
         # Маппинг монет (34 монеты)
         self.coin_mapping = {
@@ -550,9 +552,9 @@ class MultiAPIManager:
     
     def _get_cache_key(self, symbol: str, start_time: int, end_time: int) -> str:
         """Generate cache key for historical prices."""
-        # Round to 5-minute intervals for better cache hits
-        start_rounded = (start_time // 300) * 300
-        end_rounded = (end_time // 300) * 300
+        # Round to intervals for better cache hits
+        start_rounded = (start_time // self._cache_rounding_interval) * self._cache_rounding_interval
+        end_rounded = (end_time // self._cache_rounding_interval) * self._cache_rounding_interval
         return f"{symbol}_{start_rounded}_{end_rounded}"
     
     async def get_historical_prices_binance(
@@ -810,7 +812,7 @@ class MultiAPIManager:
             return result
         
         # 4. Try CoinGecko (fallback 3 - with delay to avoid rate limit)
-        await asyncio.sleep(1.5)  # Delay before CoinGecko request
+        await asyncio.sleep(self._coingecko_delay)
         result = await self.get_historical_prices_coingecko(symbol, start_time, end_time)
         if result:
             logger.info(f"Historical prices {symbol} from CoinGecko: min=${result['min_price']:.2f}, max=${result['max_price']:.2f}")
