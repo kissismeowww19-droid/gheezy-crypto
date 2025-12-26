@@ -1491,6 +1491,19 @@ async def callback_signal_coin(callback: CallbackQuery):
     await callback.answer("⏳ Анализирую данные...")
     await callback.message.edit_text("⏳ *Анализирую данные...*\n\nПодождите несколько секунд", parse_mode=ParseMode.MARKDOWN)
     
+    # First, check pending signals for this symbol
+    try:
+        check_results = await signal_tracker.check_pending_signals_for_symbol(user_id, symbol)
+        
+        # Show notification if any signals were checked
+        if check_results['checked'] > 0:
+            update_msg = f"🔄 Проверено {check_results['checked']} сигналов: "
+            update_msg += f"✅ {check_results['wins']} win, ❌ {check_results['losses']} loss"
+            # Note: callback.answer was already called above, so we'll show this in the message
+            logger.info(f"Checked {check_results['checked']} pending signals for {symbol}: {check_results}")
+    except Exception as e:
+        logger.error(f"Error checking pending signals for {symbol}: {e}", exc_info=True)
+    
     # Получаем текущую цену для проверки предыдущего сигнала
     try:
         price_data = await get_price_multi_api(symbol)
@@ -1596,6 +1609,15 @@ async def show_coin_statistics(callback: CallbackQuery):
     )
     
     try:
+        # First, check all pending signals for this coin
+        check_results = await signal_tracker.check_pending_signals_for_symbol(user_id, coin)
+        
+        # Show alert if any signals were checked
+        if check_results['checked'] > 0:
+            update_msg = f"🔄 Проверено {check_results['checked']} сигналов: "
+            update_msg += f"✅ {check_results['wins']} win, ❌ {check_results['losses']} loss"
+            await callback.answer(update_msg, show_alert=True)
+        
         # Получаем статистику по монете
         stats = signal_tracker.get_coin_stats(user_id, coin)
         
