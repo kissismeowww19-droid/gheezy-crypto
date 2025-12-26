@@ -54,7 +54,8 @@ class CompactMessageFormatter:
         timeframe: str = "4H",
         levels: Optional[Dict] = None,
         reasons: Optional[List[Dict]] = None,
-        enhancer_data: Optional[Dict] = None
+        enhancer_data: Optional[Dict] = None,
+        ml_data: Optional[Dict] = None
     ) -> str:
         """
         Форматирует сигнал в компактное сообщение.
@@ -69,6 +70,7 @@ class CompactMessageFormatter:
             levels: Dict с ключевыми уровнями (poc, resistance, support)
             reasons: Список причин для входа [{icon, name, value}, ...]
             enhancer_data: Данные от enhancers для автоматического извлечения причин
+            ml_data: ML prediction data for displaying ML confidence
             
         Returns:
             Отформатированное сообщение для Telegram
@@ -122,6 +124,24 @@ class CompactMessageFormatter:
         # Прогноз и уверенность
         lines.append(f"⏱️ *Прогноз:* {timeframe}")
         lines.append(f"📊 *Уверенность:* {confidence:.0f}%")
+        
+        # ML Confidence (if available)
+        if ml_data:
+            ml_confidence = ml_data.get('ml_confidence')
+            ml_recommendation = ml_data.get('ml_recommendation')
+            
+            if ml_confidence is not None:
+                # Determine ML emoji based on recommendation
+                ml_emoji = "🤖"
+                if ml_recommendation == "strong":
+                    ml_emoji = "🔥"
+                elif ml_recommendation == "wait":
+                    ml_emoji = "⚠️"
+                elif ml_recommendation == "low_confidence":
+                    ml_emoji = "⚠️"
+                
+                lines.append(f"{ml_emoji} *ML Score:* {ml_confidence:.0f}%")
+        
         lines.append("")  # Пустая строка
         
         # Ключевые уровни (новый компактный формат)
@@ -159,6 +179,35 @@ class CompactMessageFormatter:
         # Используем переданные reasons или извлекаем из enhancer_data
         if reasons is None and enhancer_data is not None:
             reasons = self._get_top_reasons(enhancer_data, limit=6)  # Увеличиваем до 6
+        
+        # Add ML reason if available
+        if ml_data and reasons:
+            ml_recommendation = ml_data.get('ml_recommendation')
+            ml_confidence = ml_data.get('ml_confidence')
+            
+            if ml_recommendation and ml_confidence:
+                ml_text = ""
+                ml_icon = "🤖"
+                
+                if ml_recommendation == "strong":
+                    ml_text = "Strong signal 🔥"
+                    ml_icon = "🔥"
+                elif ml_recommendation == "normal":
+                    ml_text = "Confirmed ✅"
+                    ml_icon = "✅"
+                elif ml_recommendation == "low_confidence":
+                    ml_text = "Low confidence ⚠️"
+                    ml_icon = "⚠️"
+                elif ml_recommendation == "wait":
+                    ml_text = "Weak signal ❌"
+                    ml_icon = "❌"
+                
+                # Add ML as a reason
+                reasons.append({
+                    "icon": ml_icon,
+                    "name": "ML",
+                    "value": ml_text
+                })
         
         if reasons:
             lines.append("🔥 *Сигналы:*")
