@@ -833,7 +833,7 @@ class SignalTracker:
                 max_price = historical_data["max_price"]
                 min_price = historical_data["min_price"]
                 
-                final_result = self._evaluate_signal_result(
+                final_result = await self._evaluate_signal_result(
                     signal, max_price, min_price
                 )
                 
@@ -904,7 +904,7 @@ class SignalTracker:
                 max_price = historical_data["max_price"]
                 min_price = historical_data["min_price"]
                 
-                final_result = self._evaluate_signal_result(
+                final_result = await self._evaluate_signal_result(
                     signal, max_price, min_price
                 )
                 
@@ -924,7 +924,7 @@ class SignalTracker:
         
         return results
     
-    def _evaluate_signal_result(
+    async def _evaluate_signal_result(
         self,
         signal: TrackedSignal,
         max_price: float,
@@ -1007,5 +1007,29 @@ class SignalTracker:
                 f"Updated signal {signal.id} ({signal.symbol} {signal.direction}): "
                 f"{final_result} at ${exit_price:.2f}"
             )
+            
+            # Collect data for ML training
+            try:
+                from ml.data_collector import ml_collector
+                
+                await ml_collector.collect_signal_result(
+                    symbol=signal.symbol,
+                    direction=signal.direction,
+                    entry_price=signal.entry_price,
+                    exit_price=exit_price,
+                    target1_price=signal.target1_price,
+                    target2_price=signal.target2_price,
+                    stop_loss_price=signal.stop_loss_price,
+                    probability=signal.probability,
+                    min_price_4h=min_price,
+                    max_price_4h=max_price,
+                    result=final_result,
+                    timestamp=signal.timestamp.isoformat() if isinstance(signal.timestamp, datetime) else signal.timestamp,
+                    volume_24h=0.0,  # TODO: получить из API
+                    change_24h=0.0,  # TODO: получить из API
+                    whale_activity=0.0  # TODO: получить из whale tracker
+                )
+            except Exception as e:
+                logger.error(f"Error collecting ML data: {e}")
         
         return final_result
