@@ -115,10 +115,20 @@ class GemScanner:
                 if resp.status == 200:
                     data = await resp.json()
 
+                    # Ensure data is a list
+                    if not isinstance(data, list):
+                        logger.warning(
+                            f"DEX Screener API returned non-list data: {type(data)}"
+                        )
+                        return []
+
                     # Фильтруем по сети
                     pairs = []
                     for item in data:
-                        if item.get("chainId", "").lower() == chain.lower():
+                        if (
+                            isinstance(item, dict)
+                            and item.get("chainId", "").lower() == chain.lower()
+                        ):
                             pairs.append(item)
 
                     return pairs
