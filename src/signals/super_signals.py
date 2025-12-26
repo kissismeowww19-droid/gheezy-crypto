@@ -857,8 +857,9 @@ class SuperSignals:
         closes_1h = [float(c.get("close", 0)) for c in candles_1h]
         closes_4h = [float(c.get("close", 0)) for c in candles_4h]
 
-        # RSI
+        # RSI 1h и 4h
         rsi = self._calculate_rsi(closes_1h, period=14)
+        rsi_4h = self._calculate_rsi(closes_4h, period=14) if candles_4h else None
 
         # MACD
         macd = self._calculate_macd(closes_1h)
@@ -882,8 +883,18 @@ class SuperSignals:
         price_to_support = abs(current_price - support) / current_price * 100 if support else 100
         price_to_resistance = abs(resistance - current_price) / current_price * 100 if resistance else 100
 
+        # EMA 20/50
+        ema_20 = self._calculate_ema(candles_1h, 20)
+        ema_50 = self._calculate_ema(candles_1h, 50)
+        ema_trend = "bullish" if ema_20 > ema_50 else "bearish"
+        price_vs_ema = "above" if current_price > ema_20 else "below"
+
+        # Stochastic RSI
+        stoch_rsi = self._calculate_stoch_rsi(candles_1h)
+
         return {
             "rsi": rsi,
+            "rsi_4h": rsi_4h,
             "macd": macd,
             "bb_position": bb_position,
             "atr": atr,
@@ -892,6 +903,11 @@ class SuperSignals:
             "resistance": resistance,
             "price_to_support": price_to_support,
             "price_to_resistance": price_to_resistance,
+            "ema_20": ema_20,
+            "ema_50": ema_50,
+            "ema_trend": ema_trend,
+            "price_vs_ema": price_vs_ema,
+            "stoch_rsi": stoch_rsi,
         }
 
     def _calculate_rsi(self, prices: List[float], period: int = 14) -> float:
@@ -1035,6 +1051,77 @@ class SuperSignals:
 
         return support, resistance
 
+    def _calculate_ema(self, candles: List[Dict], period: int) -> float:
+        """Рассчитывает EMA."""
+        if len(candles) < period:
+            return 0
+        
+        closes = [float(c["close"]) for c in candles]
+        multiplier = 2 / (period + 1)
+        ema = closes[0]
+        
+        for close in closes[1:]:
+            ema = (close - ema) * multiplier + ema
+        
+        return ema
+
+    def _calculate_stoch_rsi(self, candles: List[Dict], period: int = 14) -> Dict:
+        """Рассчитывает Stochastic RSI."""
+        if len(candles) < period * 2:
+            return {"k": 50, "d": 50}
+        
+        # Сначала считаем RSI
+        closes = [float(c["close"]) for c in candles]
+        rsi_values = []
+        
+        for i in range(period, len(closes)):
+            window = closes[i-period:i]
+            gains = []
+            losses = []
+            for j in range(1, len(window)):
+                change = window[j] - window[j-1]
+                if change > 0:
+                    gains.append(change)
+                    losses.append(0)
+                else:
+                    gains.append(0)
+                    losses.append(abs(change))
+            
+            avg_gain = sum(gains) / period if gains else 0
+            avg_loss = sum(losses) / period if losses else 0
+            
+            if avg_loss == 0:
+                rsi = 100
+            else:
+                rs = avg_gain / avg_loss
+                rsi = 100 - (100 / (1 + rs))
+            rsi_values.append(rsi)
+        
+        if len(rsi_values) < period:
+            return {"k": 50, "d": 50}
+        
+        # Stochastic на RSI
+        recent_rsi = rsi_values[-period:]
+        min_rsi = min(recent_rsi)
+        max_rsi = max(recent_rsi)
+        
+        if max_rsi == min_rsi:
+            k = 50
+        else:
+            k = ((rsi_values[-1] - min_rsi) / (max_rsi - min_rsi)) * 100
+        
+        # %D = SMA of %K (3 periods)
+        if len(rsi_values) >= 3:
+            d = sum([
+                ((rsi_values[-1] - min_rsi) / (max_rsi - min_rsi) if max_rsi != min_rsi else 0.5) * 100,
+                ((rsi_values[-2] - min_rsi) / (max_rsi - min_rsi) if max_rsi != min_rsi else 0.5) * 100,
+                ((rsi_values[-3] - min_rsi) / (max_rsi - min_rsi) if max_rsi != min_rsi else 0.5) * 100,
+            ]) / 3
+        else:
+            d = k
+        
+        return {"k": round(k, 1), "d": round(d, 1)}
+
     def calculate_probability(self, analysis: Dict) -> int:
         """
         Рассчитывает вероятность успешного сигнала.
@@ -1101,6 +1188,32 @@ class SuperSignals:
             # BB у нижней границы
             if bb_position < 0.2:
                 score += 1
+            
+            # RSI 4h (НОВОЕ)
+            rsi_4h = analysis.get("rsi_4h")
+            if rsi_4h is not None:
+                if rsi_4h < 30:
+                    score += 2  # 4h тоже перепродан = сильный сигнал
+                elif rsi_4h < 40:
+                    score += 1
+                logger.debug(f"  {analysis['symbol']}: RSI_4h={rsi_4h:.1f}")
+            
+            # EMA тренд (НОВОЕ)
+            ema_trend = analysis.get("ema_trend")
+            price_vs_ema = analysis.get("price_vs_ema")
+            if ema_trend == "bullish":
+                score += 1  # EMA20 > EMA50 = бычий тренд
+            if price_vs_ema == "above":
+                score += 1  # Цена над EMA20
+            
+            # Stochastic RSI (НОВОЕ)
+            stoch_rsi = analysis.get("stoch_rsi", {})
+            stoch_k = stoch_rsi.get("k", 50)
+            if stoch_k < 20:
+                score += 2  # Сильно перепродан
+            elif stoch_k < 30:
+                score += 1
+            logger.debug(f"  {analysis['symbol']}: StochRSI K={stoch_k:.1f}")
                 
             logger.debug(f"  {analysis['symbol']}: LONG RSI={rsi:.1f}(+{rsi_points}), MACD(+{macd_points}), BB={bb_position:.2f}")
 
@@ -1138,6 +1251,32 @@ class SuperSignals:
             # BB у верхней границы
             if bb_position > 0.8:
                 score += 1
+            
+            # RSI 4h (НОВОЕ)
+            rsi_4h = analysis.get("rsi_4h")
+            if rsi_4h is not None:
+                if rsi_4h > 70:
+                    score += 2  # 4h тоже перекуплен = сильный сигнал
+                elif rsi_4h > 60:
+                    score += 1
+                logger.debug(f"  {analysis['symbol']}: RSI_4h={rsi_4h:.1f}")
+            
+            # EMA тренд (НОВОЕ)
+            ema_trend = analysis.get("ema_trend")
+            price_vs_ema = analysis.get("price_vs_ema")
+            if ema_trend == "bearish":
+                score += 1  # EMA20 < EMA50 = медвежий тренд
+            if price_vs_ema == "below":
+                score += 1  # Цена под EMA20
+            
+            # Stochastic RSI (НОВОЕ)
+            stoch_rsi = analysis.get("stoch_rsi", {})
+            stoch_k = stoch_rsi.get("k", 50)
+            if stoch_k > 80:
+                score += 2  # Сильно перекуплен
+            elif stoch_k > 70:
+                score += 1
+            logger.debug(f"  {analysis['symbol']}: StochRSI K={stoch_k:.1f}")
                 
             logger.debug(f"  {analysis['symbol']}: SHORT RSI={rsi:.1f}(+{rsi_points}), MACD(+{macd_points}), BB={bb_position:.2f}")
 
@@ -1350,6 +1489,45 @@ class SuperSignals:
             else:
                 vol_status = f"🟡 x{vol_ratio:.1f}"
 
+            # RSI 4h (НОВОЕ)
+            rsi_4h = signal.get("rsi_4h")
+            rsi_4h_line = ""
+            if rsi_4h:
+                if rsi_4h < 30:
+                    rsi_4h_emoji = "🟢"
+                    rsi_4h_text = "перепродан"
+                elif rsi_4h > 70:
+                    rsi_4h_emoji = "🔴"
+                    rsi_4h_text = "перекуплен"
+                else:
+                    rsi_4h_emoji = "🟡"
+                    rsi_4h_text = "нейтрально"
+                rsi_4h_line = f"• RSI\\(4h\\): {rsi_4h:.0f} {rsi_4h_emoji} {rsi_4h_text}\n"
+
+            # EMA (НОВОЕ)
+            ema_trend = signal.get("ema_trend")
+            ema_line = ""
+            if ema_trend:
+                ema_emoji = "🟢" if ema_trend == "bullish" else "🔴"
+                ema_text = "бычий" if ema_trend == "bullish" else "медвежий"
+                ema_line = f"• EMA 20/50: {ema_emoji} {ema_text}\n"
+
+            # Stochastic RSI (НОВОЕ)
+            stoch_rsi = signal.get("stoch_rsi", {})
+            stoch_k = stoch_rsi.get("k")
+            stoch_line = ""
+            if stoch_k:
+                if stoch_k < 20:
+                    stoch_emoji = "🟢"
+                    stoch_text = "перепродан"
+                elif stoch_k > 80:
+                    stoch_emoji = "🔴"
+                    stoch_text = "перекуплен"
+                else:
+                    stoch_emoji = "🟡"
+                    stoch_text = "нейтрально"
+                stoch_line = f"• StochRSI: {stoch_k:.0f} {stoch_emoji} {stoch_text}\n"
+
             # Exchanges
             exchanges = signal.get("exchanges", [])
             exchanges_str = " • ".join([f"{ex} ✅" for ex in exchanges[:4]]) if exchanges else "Нет данных"
@@ -1381,10 +1559,10 @@ class SuperSignals:
 🎯 Вероятность: {prob}% {prob_emoji}
 
 🔮 Почему сейчас:
-• RSI\\(14\\): {rsi:.0f} {rsi_status}
-• MACD: {macd_status}
+• RSI\\(1h\\): {rsi:.0f} {rsi_status}
+{rsi_4h_line}• MACD: {macd_status}
 • Funding: {funding_status}
-• Объём: {vol_status}
+{ema_line}{stoch_line}• Объём: {vol_status}
 
 ⏰ Ожидание: 1\\-4 часа
 
