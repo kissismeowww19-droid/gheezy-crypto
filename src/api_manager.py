@@ -141,6 +141,10 @@ class MultiAPIManager:
             }
         }
         
+        # Cache for historical prices (avoid duplicate requests)
+        self._historical_cache: Dict[str, Dict] = {}
+        self._cache_ttl = 300  # 5 minutes
+        
         # Маппинг монет (34 монеты)
         self.coin_mapping = {
             # Основные монеты (17)
@@ -544,14 +548,157 @@ class MultiAPIManager:
         
         return stats_report
     
-    async def get_historical_prices(
+    def _get_cache_key(self, symbol: str, start_time: int, end_time: int) -> str:
+        """Generate cache key for historical prices."""
+        # Round to 5-minute intervals for better cache hits
+        start_rounded = (start_time // 300) * 300
+        end_rounded = (end_time // 300) * 300
+        return f"{symbol}_{start_rounded}_{end_rounded}"
+    
+    async def get_historical_prices_binance(
+        self, 
+        symbol: str, 
+        start_time: int, 
+        end_time: int
+    ) -> Optional[Dict]:
+        """
+        Get historical prices from Binance Klines API.
+        
+        Endpoint: GET /api/v3/klines
+        Params: symbol=BTCUSDT, interval=5m, startTime=..., endTime=...
+        
+        Returns:
+            Dict with 'min_price', 'max_price', 'prices' list
+        """
+        try:
+            url = "https://api.binance.com/api/v3/klines"
+            params = {
+                "symbol": f"{symbol}USDT",
+                "interval": "5m",
+                "startTime": start_time * 1000,  # Binance uses milliseconds
+                "endTime": end_time * 1000,
+                "limit": 1000
+            }
+            async with aiohttp.ClientSession() as session:
+                timeout = aiohttp.ClientTimeout(total=15)
+                async with session.get(url, params=params, timeout=timeout) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if not data:
+                            return None
+                        # Klines format: [open_time, open, high, low, close, volume, ...]
+                        prices = [float(candle[4]) for candle in data]  # close prices
+                        highs = [float(candle[2]) for candle in data]
+                        lows = [float(candle[3]) for candle in data]
+                        return {
+                            "success": True,
+                            "min_price": min(lows),
+                            "max_price": max(highs),
+                            "prices": prices,
+                            "source": "binance",
+                            "data_points": len(data)
+                        }
+        except Exception as e:
+            logger.warning(f"Binance historical prices error: {e}")
+        return None
+
+    async def get_historical_prices_okx(
+        self, 
+        symbol: str, 
+        start_time: int, 
+        end_time: int
+    ) -> Optional[Dict]:
+        """
+        Get historical prices from OKX API.
+        
+        Endpoint: GET /api/v5/market/history-candles
+        """
+        try:
+            url = "https://www.okx.com/api/v5/market/history-candles"
+            params = {
+                "instId": f"{symbol}-USDT",
+                "bar": "5m",
+                "before": str(start_time * 1000),
+                "after": str(end_time * 1000),
+                "limit": "300"
+            }
+            async with aiohttp.ClientSession() as session:
+                timeout = aiohttp.ClientTimeout(total=15)
+                async with session.get(url, params=params, timeout=timeout) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if data.get("data"):
+                            candles = data["data"]
+                            if not candles:
+                                return None
+                            prices = [float(c[4]) for c in candles]  # close
+                            highs = [float(c[2]) for c in candles]
+                            lows = [float(c[3]) for c in candles]
+                            return {
+                                "success": True,
+                                "min_price": min(lows),
+                                "max_price": max(highs),
+                                "prices": prices,
+                                "source": "okx",
+                                "data_points": len(candles)
+                            }
+        except Exception as e:
+            logger.warning(f"OKX historical prices error: {e}")
+        return None
+
+    async def get_historical_prices_bybit(
+        self, 
+        symbol: str, 
+        start_time: int, 
+        end_time: int
+    ) -> Optional[Dict]:
+        """
+        Get historical prices from Bybit API.
+        
+        Endpoint: GET /v5/market/kline
+        """
+        try:
+            url = "https://api.bybit.com/v5/market/kline"
+            params = {
+                "category": "spot",
+                "symbol": f"{symbol}USDT",
+                "interval": "5",  # 5 minutes
+                "start": start_time * 1000,
+                "end": end_time * 1000,
+                "limit": 200
+            }
+            async with aiohttp.ClientSession() as session:
+                timeout = aiohttp.ClientTimeout(total=15)
+                async with session.get(url, params=params, timeout=timeout) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if data.get("result", {}).get("list"):
+                            candles = data["result"]["list"]
+                            if not candles:
+                                return None
+                            prices = [float(c[4]) for c in candles]  # close
+                            highs = [float(c[2]) for c in candles]
+                            lows = [float(c[3]) for c in candles]
+                            return {
+                                "success": True,
+                                "min_price": min(lows),
+                                "max_price": max(highs),
+                                "prices": prices,
+                                "source": "bybit",
+                                "data_points": len(candles)
+                            }
+        except Exception as e:
+            logger.warning(f"Bybit historical prices error: {e}")
+        return None
+
+    async def get_historical_prices_coingecko(
         self,
         symbol: str,
         from_timestamp: int,
         to_timestamp: int
     ) -> Optional[Dict]:
         """
-        Получить исторические цены за период (для проверки сигналов).
+        Get historical prices from CoinGecko API.
         
         Args:
             symbol: Символ монеты (BTC, ETH, и т.д.)
@@ -602,6 +749,7 @@ class MultiAPIManager:
                             "min_price": min_price,
                             "max_price": max_price,
                             "prices": price_values,
+                            "source": "coingecko",
                             "data_points": len(prices)
                         }
                     elif response.status == 429:
@@ -617,6 +765,93 @@ class MultiAPIManager:
             logger.error(f"Ошибка получения исторических данных: {e}")
         
         return None
+
+    async def get_historical_prices_multi(
+        self,
+        symbol: str,
+        start_time: int,
+        end_time: int
+    ) -> Optional[Dict]:
+        """
+        Get historical prices with fallback chain.
+        
+        Order: Binance → OKX → Bybit → CoinGecko
+        
+        Args:
+            symbol: Coin symbol (BTC, ETH, etc.)
+            start_time: Unix timestamp (seconds)
+            end_time: Unix timestamp (seconds)
+            
+        Returns:
+            Dict with min_price, max_price, prices, source
+        """
+        # 1. Try Binance (primary - no rate limits)
+        result = await self.get_historical_prices_binance(symbol, start_time, end_time)
+        if result:
+            logger.info(f"Historical prices {symbol} from Binance: min=${result['min_price']:.2f}, max=${result['max_price']:.2f}")
+            return result
+        
+        # 2. Try OKX (fallback 1)
+        result = await self.get_historical_prices_okx(symbol, start_time, end_time)
+        if result:
+            logger.info(f"Historical prices {symbol} from OKX: min=${result['min_price']:.2f}, max=${result['max_price']:.2f}")
+            return result
+        
+        # 3. Try Bybit (fallback 2)
+        result = await self.get_historical_prices_bybit(symbol, start_time, end_time)
+        if result:
+            logger.info(f"Historical prices {symbol} from Bybit: min=${result['min_price']:.2f}, max=${result['max_price']:.2f}")
+            return result
+        
+        # 4. Try CoinGecko (fallback 3 - with delay to avoid rate limit)
+        await asyncio.sleep(1.5)  # Delay before CoinGecko request
+        result = await self.get_historical_prices_coingecko(symbol, start_time, end_time)
+        if result:
+            logger.info(f"Historical prices {symbol} from CoinGecko: min=${result['min_price']:.2f}, max=${result['max_price']:.2f}")
+            return result
+        
+        logger.warning(f"All APIs failed for historical prices {symbol}")
+        return None
+
+    async def get_historical_prices_cached(
+        self,
+        symbol: str,
+        start_time: int,
+        end_time: int
+    ) -> Optional[Dict]:
+        """Get historical prices with caching."""
+        cache_key = self._get_cache_key(symbol, start_time, end_time)
+        
+        # Check cache
+        if cache_key in self._historical_cache:
+            cached = self._historical_cache[cache_key]
+            if time.time() - cached['timestamp'] < self._cache_ttl:
+                logger.debug(f"Using cached historical prices for {symbol}")
+                return cached['data']
+        
+        # Fetch from APIs
+        result = await self.get_historical_prices_multi(symbol, start_time, end_time)
+        
+        # Store in cache
+        if result:
+            self._historical_cache[cache_key] = {
+                'data': result,
+                'timestamp': time.time()
+            }
+        
+        return result
+
+    async def get_historical_prices(
+        self,
+        symbol: str,
+        from_timestamp: int,
+        to_timestamp: int
+    ) -> Optional[Dict]:
+        """
+        Get historical prices with multi-API fallback and caching.
+        This is the main entry point for historical price data.
+        """
+        return await self.get_historical_prices_cached(symbol, from_timestamp, to_timestamp)
 
 
 api_manager = MultiAPIManager()
