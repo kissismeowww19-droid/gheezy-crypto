@@ -461,7 +461,7 @@ class CompactMessageFormatter:
             })
         
         # 7. RSI значение
-        rsi = enhancer_data.get("rsi", {})
+        rsi = enhancer_data.get("rsi") or {}
         if rsi.get("value") is not None:
             rsi_value = rsi["value"]
             reasons.append({
