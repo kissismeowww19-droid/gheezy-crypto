@@ -37,6 +37,11 @@ class SuperSignals:
     MIN_CHANGE_24H = 15   # Минимальное движение %
     MIN_VOLUME = 500000   # Минимальный объём $
     MAX_MCAP = 1000000000 # Максимальная капа $1B
+    
+    # Уровни и риск-менеджмент
+    ATR_MULTIPLIER = 1.5  # Множитель ATR для расчёта стоп-лосса
+    MAX_STOP_LOSS_PERCENT = 0.10  # Максимальный стоп-лосс (10%)
+    DEFAULT_ATR_PERCENT = 0.03  # Fallback ATR (3% от цены)
 
     # Исключенные символы
     EXCLUDED_SYMBOLS = {
@@ -83,6 +88,28 @@ class SuperSignals:
             await exchange.close()
         if self.session and not self.session.closed:
             await self.session.close()
+
+    async def fetch_binance_funding(self, symbol: str) -> Optional[float]:
+        """Получает funding rate с Binance Futures."""
+        await self._ensure_session()
+        
+        url = "https://fapi.binance.com/fapi/v1/premiumIndex"
+        params = {"symbol": f"{symbol}USDT"}
+        
+        try:
+            async with self.session.get(
+                url,
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=5)
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    funding = float(data.get("lastFundingRate", 0)) * 100
+                    return funding
+        except Exception as e:
+            logger.debug(f"Failed to fetch funding rate for {symbol}: {e}")
+        
+        return None
 
     def _is_valid_symbol(self, symbol: str) -> bool:
         """Проверяет валидность символа."""
@@ -733,12 +760,6 @@ class SuperSignals:
             volume_24h = coin.get("total_volume", 0) or 0
             market_cap = coin.get("market_cap", 0) or 0
 
-            # Определение направления
-            if price_change_24h > 0:
-                direction = "long"
-            else:
-                direction = "short"
-
             # === Загрузка свечей с fallback ===
             candles_1h, exchange_1h = await self.fetch_klines_with_fallback(symbol, "1h", 100)
             candles_4h, exchange_4h = await self.fetch_klines_with_fallback(symbol, "4h", 50)
@@ -754,14 +775,41 @@ class SuperSignals:
             
             exchange_name = exchange_1h or exchange_4h
             
-            # Funding rate - опционально, не блокируем если не получили
-            # Большинство монет не торгуются на фьючерсах, поэтому пропускаем
-            funding_rate = None
-            # TODO: В будущем можно добавить быстрый способ получения funding
-            # Пока пропускаем чтобы не замедлять анализ
+            # Funding rate - пробуем получить с Binance Futures
+            funding_rate = await self.fetch_binance_funding(symbol)
 
-            # === Расчёт индикаторов ===
+            # === Расчёт индикаторов СНАЧАЛА (нужен RSI для определения направления) ===
             analysis = self._calculate_indicators(candles_1h, candles_4h, current_price)
+            
+            # === Определение направления на основе RSI и движения ===
+            # Логика: ищем РАЗВОРОТ, а не продолжение тренда
+            rsi = analysis["rsi"]
+            
+            # Приоритет 1: Сильное движение + подтверждение RSI (более мягкие пороги 40/60)
+            # После падения + перепродан = ЛОНГ (ожидаем отскок)
+            if price_change_24h < -15 and rsi < 40:
+                direction = "long"
+            # После роста + перекуплен = ШОРТ (ожидаем откат)
+            elif price_change_24h > 15 and rsi > 60:
+                direction = "short"
+            
+            # Приоритет 2: Экстремальный RSI (стандартные пороги 30/70)
+            elif rsi < 30:
+                direction = "long"  # Сильно перепродан
+            elif rsi > 70:
+                direction = "short"  # Сильно перекуплен
+            
+            # Приоритет 3: Нейтральный RSI - смотрим на экстремальное движение
+            else:
+                if price_change_24h > 30:
+                    direction = "short"  # Сильный рост - ждём откат
+                elif price_change_24h < -30:
+                    direction = "long"  # Сильное падение - ждём отскок
+                else:
+                    direction = "long" if price_change_24h < 0 else "short"
+            
+            logger.debug(f"{symbol}: direction={direction.upper()} (RSI={rsi:.1f}, change_24h={price_change_24h:+.1f}%)")
+            
             analysis["symbol"] = symbol
             analysis["name"] = coin.get("name", symbol)
             analysis["direction"] = direction
@@ -1128,55 +1176,67 @@ class SuperSignals:
     def calculate_real_levels(self, analysis: Dict) -> Dict:
         """
         Рассчитывает реальные уровни входа, стопа и TP
-        на основе поддержки/сопротивления.
+        на основе ATR и текущей волатильности.
         """
         current_price = analysis["current_price"]
-        support = analysis["support"]
-        resistance = analysis["resistance"]
+        atr = analysis.get("atr", current_price * self.DEFAULT_ATR_PERCENT)
         direction = analysis["direction"]
-
+        
         if direction == "long":
-            # Вход: текущая цена или чуть выше поддержки
-            entry_low = max(support * 1.01, current_price * 0.98)
-            entry_high = current_price * 1.01
-
-            # Стоп: под поддержкой
-            stop_loss = support - (support * 0.02)
-
-            # TP1: до сопротивления
-            tp1 = resistance * 0.98
-
-            # TP2: пробой сопротивления
-            tp2 = resistance * 1.15
-
-        else:  # short
-            # Вход: текущая цена или чуть ниже сопротивления
+            # Вход: текущая цена с небольшим диапазоном
             entry_low = current_price * 0.99
-            entry_high = min(resistance * 0.99, current_price * 1.02)
-
-            # Стоп: над сопротивлением
-            stop_loss = resistance + (resistance * 0.02)
-
-            # TP1: до поддержки
-            tp1 = support * 1.02
-
-            # TP2: пробой поддержки
-            tp2 = support * 0.85
-
-        # Расчёт R:R
+            entry_high = current_price * 1.01
+            
+            # Стоп: под текущей ценой на ATR_MULTIPLIER * ATR (обычно 3-8%)
+            stop_distance = min(atr * self.ATR_MULTIPLIER, current_price * self.MAX_STOP_LOSS_PERCENT)
+            stop_loss = current_price - stop_distance
+            
+            # TP1: Risk:Reward 1:2
+            tp1 = current_price + (stop_distance * 2)
+            
+            # TP2: Risk:Reward 1:3
+            tp2 = current_price + (stop_distance * 3)
+            
+        else:  # short
+            # Вход
+            entry_low = current_price * 0.99
+            entry_high = current_price * 1.01
+            
+            # Стоп: над текущей ценой на ATR_MULTIPLIER * ATR
+            stop_distance = min(atr * self.ATR_MULTIPLIER, current_price * self.MAX_STOP_LOSS_PERCENT)
+            stop_loss = current_price + stop_distance
+            
+            # TP1: Risk:Reward 1:2
+            tp1 = current_price - (stop_distance * 2)
+            
+            # TP2: Risk:Reward 1:3
+            tp2 = current_price - (stop_distance * 3)
+        
+        # Расчёт процентов
+        stop_percent = ((stop_loss - current_price) / current_price) * 100
+        tp1_percent = ((tp1 - current_price) / current_price) * 100
+        tp2_percent = ((tp2 - current_price) / current_price) * 100
+        
+        # R:R ratio - должен быть всегда 2.0 при правильном расчёте
         risk = abs(current_price - stop_loss)
         reward = abs(tp1 - current_price)
-        rr_ratio = round(reward / risk, 1) if risk > 0 else 0
-
+        # Risk не может быть 0 при правильных данных, но защитимся на всякий случай
+        if risk > 0:
+            rr_ratio = round(reward / risk, 1)
+        else:
+            # Это не должно произойти, но если ATR = 0, устанавливаем базовое значение
+            logger.warning(f"Risk is 0 for {analysis.get('symbol', 'unknown')}, using fallback R:R")
+            rr_ratio = 2.0
+        
         return {
             "entry_low": entry_low,
             "entry_high": entry_high,
             "stop_loss": stop_loss,
-            "stop_percent": round(((stop_loss - current_price) / current_price) * 100, 1),
+            "stop_percent": round(stop_percent, 1),
             "tp1": tp1,
-            "tp1_percent": round(((tp1 - current_price) / current_price) * 100, 1),
+            "tp1_percent": round(tp1_percent, 1),
             "tp2": tp2,
-            "tp2_percent": round(((tp2 - current_price) / current_price) * 100, 1),
+            "tp2_percent": round(tp2_percent, 1),
             "rr_ratio": rr_ratio,
         }
 
