@@ -213,6 +213,7 @@ test_compact_formatter.py
 
 # ML training data (auto-generated)
 data/ml/training_data.csv
+!data/ml/.gitkeep
 
 # ML models (trained locally)
 models/
