@@ -402,7 +402,6 @@ def get_main_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="🐋 Киты", callback_data="menu_whale"),
             ],
             [
-                InlineKeyboardButton(text="💎 Новые гемы", callback_data="gems"),
                 InlineKeyboardButton(text="📊 Рынок", callback_data="menu_market"),
             ],
             [
@@ -561,6 +560,11 @@ def get_signals_menu_keyboard() -> InlineKeyboardMarkup:
                 ),
             ],
             [
+                InlineKeyboardButton(
+                    text="💎 Новые гемы", callback_data="gems"
+                ),
+            ],
+            [
                 InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu"),
             ],
         ]
@@ -597,7 +601,7 @@ def get_gems_network_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="🟡 BSC", callback_data="gems_bsc"),
             ],
             [
-                InlineKeyboardButton(text="🔙 Назад", callback_data="menu_back"),
+                InlineKeyboardButton(text="🔙 Назад", callback_data="menu_signals"),
             ],
         ]
     )
@@ -663,9 +667,8 @@ def get_welcome_text(name: str) -> str:
     text = text + "Давай вместе учиться и зарабатывать 🤩\n\n"
     text = text + "📊 *Мои возможности:*\n\n"
     text = text + "• 💰 Цены — самые популярные криптовалюты\n"
-    text = text + "• 🎯 Сигналы — торговые сигналы\n"
+    text = text + "• 🎯 Сигналы — торговые сигналы + новые гемы\n"
     text = text + "• 🐋 Киты — движения китов\n"
-    text = text + "• 💎 Новые гемы — поиск свежих токенов на DEX\n"
     text = text + "• 📊 Рынок — капитализация и статистика\n"
     text = text + "• ⚙️ Настройки — настройки бота\n"
     text = text + "• 💼 Портфель — твой портфель\n\n"
@@ -2264,12 +2267,12 @@ async def callback_main_menu(callback: CallbackQuery):
 async def gems_menu(callback: CallbackQuery):
     """Показывает меню выбора сети для сканирования гемов."""
     await callback.message.edit_text(
-        "💎 <b>Новые гемы</b>\n\n"
+        "💎 *Новые гемы*\n\n"
         "Поиск свежих токенов на DEX\n"
-        "Возраст < 7 дней, капа < $2M\n\n"
+        "Возраст до 7 дней, капа до $2M\n\n"
         "Выберите сеть:",
         reply_markup=get_gems_network_keyboard(),
-        parse_mode="HTML",
+        parse_mode=ParseMode.MARKDOWN,
     )
     await callback.answer()
 
